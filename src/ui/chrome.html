@@ -13,6 +13,25 @@ function esc(s) {
 }
 function el(id) { return document.getElementById(id); }
 
+/**
+ * Absolute URL for an in-app link.
+ *
+ * Apps Script serves the page inside a sandboxed iframe hosted on
+ * googleusercontent.com. A relative href navigates THAT frame relative to its
+ * own origin, which lands nowhere and shows a blank screen. Every internal link
+ * must therefore be absolute and target _top.
+ */
+function appUrl(query) {
+  var base = (typeof WEBAPP_URL === 'string' && WEBAPP_URL) ? WEBAPP_URL : '';
+  if (!query || query === '?') return base;
+  return base + (query.charAt(0) === '?' ? query : '?' + query);
+}
+
+function appLink(query, text, cls) {
+  return '<a href="' + esc(appUrl(query)) + '" target="_top"' +
+         (cls ? ' class="' + cls + '"' : '') + '>' + esc(text) + '</a>';
+}
+
 function initials(name) {
   return String(name || '?').trim().split(/\s+/).slice(0, 2)
     .map(function (w) { return w.charAt(0); }).join('').toUpperCase() || '?';
@@ -25,8 +44,8 @@ function paintChrome(opts) {
   var user = opts.user || null;
 
   var nav = tabs.map(function (t) {
-    return '<a href="' + esc(t.href) + '"' + (t.on ? ' class="on"' : '') + '>' +
-           esc(t.label) + '</a>';
+    return '<a href="' + esc(appUrl(t.href)) + '" target="_top"' +
+           (t.on ? ' class="on"' : '') + '>' + esc(t.label) + '</a>';
   }).join('');
 
   var chip = user

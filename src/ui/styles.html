@@ -270,10 +270,13 @@
     border-bottom:1px solid var(--border);
   }
   .rows>li:last-child{border-bottom:0}
-  .rows .body{flex:1;min-width:0}
-  .rows .n{font-weight:600;font-size:14px}
-  .rows .d{color:var(--muted);font-size:12.5px;margin-top:1px}
-  .rows .why{color:var(--text-2);font-size:12.5px;margin-top:3px;font-style:italic}
+  .rows .body{flex:1;min-width:0;display:block}
+  /* These are spans, so they need to be told to stack. Left inline they render
+     as "Dwarka Boys Hostel ADwarka Campus" with no break between them. */
+  .rows .n,.rows .d,.rows .why{display:block}
+  .rows .n{font-weight:600;font-size:14px;line-height:1.35}
+  .rows .d{color:var(--muted);font-size:12.5px;margin-top:2px;line-height:1.4}
+  .rows .why{color:var(--text-2);font-size:12.5px;margin-top:4px;font-style:italic;line-height:1.4}
   .idx{
     flex:none;width:26px;height:26px;border-radius:50%;background:var(--navy-700);
     color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;

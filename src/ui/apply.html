@@ -2,6 +2,12 @@
      page rather than a Google Form - Forms cannot express an ordered list. -->
 <?!= include('ui/styles'); ?>
 <?!= include('ui/chrome'); ?>
+<script>
+  // The app is served inside a sandboxed iframe on a different origin, so a
+  // relative link would navigate that frame to the wrong place. Every link is
+  // built from this absolute URL and targets _top.
+  var WEBAPP_URL = '<?= webAppUrl() ?>';
+</script>
 
 <div id="chrome"></div>
 <div class="wrap narrow" id="root"></div>

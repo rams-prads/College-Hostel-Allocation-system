@@ -1,6 +1,12 @@
 <!-- Student portal. The explanation panel is the centrepiece. -->
 <?!= include('ui/styles'); ?>
 <?!= include('ui/chrome'); ?>
+<script>
+  // The app is served inside a sandboxed iframe on a different origin, so a
+  // relative link would navigate that frame to the wrong place. Every link is
+  // built from this absolute URL and targets _top.
+  var WEBAPP_URL = '<?= webAppUrl() ?>';
+</script>
 
 <div id="chrome"></div>
 <div class="wrap narrow" id="root"></div>
@@ -247,7 +253,8 @@
       '<h3 style="margin:0 0 5px">You have not applied yet</h3>' +
       '<p class="small" style="max-width:420px;display:inline-block;margin:0 0 16px">' +
       'Submit an application to be considered in this year’s hostel allocation.</p><br>' +
-      '<a class="btn" href="?page=apply">Start my application</a></div>');
+      '<a class="btn" href="' + appUrl('?page=apply') + '" target="_top">' +
+      'Start my application</a></div>');
   }
 
   function footNote(v) {
@@ -257,7 +264,7 @@
       (v.application.submittedAt ? ' &middot; submitted ' + esc(v.application.submittedAt) : '') +
       '</span>' +
       '<span>' + (canEdit
-        ? '<a href="?page=apply">Edit my application</a> &middot; ' : '') +
+        ? appLink('?page=apply', 'Edit my application') + ' &middot; ' : '') +
         'Queries: ' + esc(v.supportEmail) + '</span></div>';
   }
 
