@@ -24,7 +24,8 @@ function onOpen() {
       .addItem('Verify Phase 0 (foundation)', 'showPhase0Report')
       .addItem('Verify Phase 1 (demo data)', 'showPhase1Report')
       .addItem('Describe cohort', 'showCohortReport')
-      .addItem('Show demo cast', 'showDemoCast'))
+      .addItem('Show demo cast', 'showDemoCast')
+      .addItem('QR diagnostics', 'showQrDiagnostics'))
     .addToUi();
 }
 
@@ -38,7 +39,17 @@ function doGet(e) {
 
   // The QR verification page is deliberately public - a warden at the gate
   // must be able to scan a letter without logging in.
-  if (page === 'verify') return render_('ui/verify', 'Verify Allotment', { params: e.parameter });
+  //
+  // ?v=<allocId>~<sig> is the compact form the QR carries. The older
+  // ?page=verify&id=&sig= form still works, so letters printed before the
+  // change keep verifying.
+  var params = (e && e.parameter) || {};
+  if (params.v) {
+    var parsed = Letters.parseToken(params.v);
+    if (parsed) { params.id = parsed.allocId; params.sig = parsed.sig; }
+    page = 'verify';
+  }
+  if (page === 'verify') return render_('ui/verify', 'Verify Allotment', { params: params });
 
   if (!session.email) return render_('ui/index', 'Hostel Portal', { session: session, needsLogin: true });
 

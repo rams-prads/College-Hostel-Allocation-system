@@ -14,7 +14,11 @@
 
 var Letters = (function () {
 
-  var SIG_LENGTH = 16;
+  // Ten hex characters is 40 bits. That is far beyond guessing for a code
+  // printed on paper, and every character removed makes the QR modules bigger
+  // and therefore easier for a phone camera to resolve.
+  var SIG_LENGTH = 10;
+  var MIN_SIG_LENGTH = 10;
 
   /**
    * The HMAC key, created once and kept in Script Properties.
@@ -33,30 +37,53 @@ var Letters = (function () {
 
   /** Short hex HMAC over the allotment id. */
   function signature(allocId) {
-    var raw = Utilities.computeHmacSha256Signature(String(allocId), secret_());
-    return raw.map(function (b) {
-      return ('0' + (b & 0xFF).toString(16)).slice(-2);
-    }).join('').substring(0, SIG_LENGTH);
+    return fullSignature_(allocId).substring(0, SIG_LENGTH);
   }
 
+  /**
+   * Accepts any signature at least MIN_SIG_LENGTH long and compares that many
+   * characters, so letters issued before the length changed still verify.
+   * The floor is enforced - a one-character signature is not a signature.
+   */
   function verifies(allocId, sig) {
     if (!allocId || !sig) return false;
-    var expected = signature(allocId);
-    // Length-safe comparison. Timing is not a real concern here, but comparing
-    // the whole string rather than short-circuiting costs nothing.
-    if (expected.length !== String(sig).length) return false;
+    var given = String(sig);
+    if (given.length < MIN_SIG_LENGTH) return false;
+
+    var full = fullSignature_(allocId);
+    if (given.length > full.length) return false;
+    var expected = full.substring(0, given.length);
+
     var diff = 0;
     for (var i = 0; i < expected.length; i++) {
-      diff |= expected.charCodeAt(i) ^ String(sig).charCodeAt(i);
+      diff |= expected.charCodeAt(i) ^ given.charCodeAt(i);
     }
     return diff === 0;
   }
 
+  function fullSignature_(allocId) {
+    var raw = Utilities.computeHmacSha256Signature(String(allocId), secret_());
+    return raw.map(function (b) {
+      return ('0' + (b & 0xFF).toString(16)).slice(-2);
+    }).join('');
+  }
+
+  /**
+   * The compact form that goes in the QR. Every character saved makes the
+   * symbol one step less dense: the long form needed QR version 8 (49 modules),
+   * this needs version 6 (41), which is a noticeably easier scan.
+   */
   function verifyUrl(allocId) {
     var base = '';
     try { base = ScriptApp.getService().getUrl() || ''; } catch (e) { base = ''; }
-    return base + '?page=verify&id=' + encodeURIComponent(allocId) +
-           '&sig=' + signature(allocId);
+    return base + '?v=' + encodeURIComponent(allocId + '~' + signature(allocId));
+  }
+
+  /** Split the compact token back into its parts. */
+  function parseToken(token) {
+    var parts = String(token || '').split('~');
+    if (parts.length !== 2) return null;
+    return { allocId: parts[0], sig: parts[1] };
   }
 
   // ------------------------------------------------------------- gather data
@@ -90,8 +117,12 @@ var Letters = (function () {
     // A real PNG, not a grid of coloured cells. The cell-grid version rendered
     // correctly in a browser and then vanished from the PDF entirely, because
     // Google's HTML-to-PDF converter drops background colours on empty cells.
-    var qr = QrCode.encode(verifyUrl(allocId), { ec: 'M' });
-    var qrImg = '<img src="' + QrCode.toPngDataUri(qr, 4, 4) + '" width="132" height="132" ' +
+    // Error-correction level L rather than M: the payload is short and the code
+    // is printed cleanly, so the extra redundancy buys nothing and costs an
+    // extra version step, which makes every module smaller.
+    var url = verifyUrl(allocId);
+    var qr = QrCode.encode(url, { ec: 'L' });
+    var qrImg = '<img src="' + QrCode.toPngDataUri(qr, 6, 4) + '" width="186" height="186" ' +
                 'alt="Verification QR code" style="display:block;margin:0 auto">';
     var issued = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMMM yyyy');
 
@@ -181,9 +212,12 @@ var Letters = (function () {
       '</ol>' +
 
       '<table class="foot"><tr>' +
-        '<td style="width:36%" class="qrbox">' + qrImg +
-          '<div style="margin-top:4px">Scan to verify this letter</div>' +
-          '<div style="font-size:7pt">' + esc_(d.allocId) + '</div></td>' +
+        '<td style="width:42%" class="qrbox">' + qrImg +
+          '<div style="margin-top:4px;font-weight:bold">Scan to verify this letter</div>' +
+          // A typable fallback. If a camera will not focus, or the letter is a
+          // poor photocopy, the verification is still reachable by hand.
+          '<div style="font-size:6.5pt;word-break:break-all;margin-top:2px;color:#777">' +
+          esc_(url) + '</div></td>' +
         '<td class="sign">' +
           '<div class="sigline">Warden, ' + esc_(d.hostel.name) + '</div>' +
           '<div style="margin-top:20px" class="sigline">Dean of Student Welfare</div>' +
@@ -304,6 +338,7 @@ var Letters = (function () {
     signature: signature,
     verifies: verifies,
     verifyUrl: verifyUrl,
+    parseToken: parseToken,
     buildHtml: buildHtml,
     toPdf: toPdf,
     generate: generate,
@@ -312,3 +347,57 @@ var Letters = (function () {
     letterData: letterData
   };
 })();
+
+/**
+ * Diagnostic: everything about one letter's QR in a single popup.
+ *
+ * When a scan fails there are three quite different causes - the camera cannot
+ * resolve the modules, the URL is wrong, or the verification itself rejects the
+ * letter. This separates them, so the next thing you try is the right thing.
+ */
+function showQrDiagnostics() {
+  var ui = SpreadsheetApp.getUi();
+  var allocs = Db.readAll('Allocations').filter(function (a) { return a.status === 'ACTIVE'; });
+  if (!allocs.length) {
+    ui.alert('No allotments', 'Run the allocation first.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var allocId = allocs[0].allocId;
+  var url = Letters.verifyUrl(allocId);
+  var qr = QrCode.encode(url, { ec: 'L' });
+  var modules = qr.size + 8;                       // including the quiet zone
+  var displayPx = 186;
+  var check = Letters.verifyAllotment(allocId, Letters.signature(allocId));
+
+  var lines = [
+    'Sample allotment: ' + allocId,
+    '',
+    'VERIFICATION URL  (' + url.length + ' characters)',
+    url,
+    '',
+    'Paste that into a browser. If the page loads and says "Genuine allotment',
+    'letter", the system is fine and only the camera is struggling.',
+    '',
+    'QR SYMBOL',
+    '  Version ' + qr.version + ' (' + qr.size + ' x ' + qr.size + ' modules)',
+    '  Error correction: ' + qr.ec,
+    '  Printed at ' + displayPx + ' px wide',
+    '  About ' + (displayPx / modules).toFixed(1) + ' pixels per module',
+    '',
+    'Below roughly 3 pixels per module a phone struggles to read a QR off a',
+    'screen. Printing the letter, or opening the PDF at full size rather than',
+    'in a small preview pane, usually fixes it.',
+    '',
+    'SERVER-SIDE CHECK',
+    '  ' + (check.valid
+            ? 'Valid - ' + check.studentName + ', ' + check.hostel + ' room ' + check.roomNo
+            : 'FAILED - ' + check.reason),
+    '',
+    'Web app deployed at:',
+    (function () { try { return ScriptApp.getService().getUrl() || '(not deployed)'; }
+                   catch (e) { return '(not deployed)'; } })()
+  ];
+
+  ui.alert('QR diagnostics', lines.join('\n'), ui.ButtonSet.OK);
+}

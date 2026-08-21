@@ -20,7 +20,7 @@ const sample = allocs[0];
 
 section('Letter signing');
 const sig = Letters.signature(sample.allocId);
-check('signature is produced', !!sig && sig.length === 16, sig);
+check('signature is produced', !!sig && sig.length === 10, sig);
 check('signature is stable', Letters.signature(sample.allocId) === sig);
 check('signature is unique per allotment',
   Letters.signature(allocs[1].allocId) !== sig);
@@ -43,11 +43,36 @@ check('flipping one character breaks it', (() => {
 
 section('Verification URL');
 const url = Letters.verifyUrl(sample.allocId);
-check('URL carries the id', url.indexOf(encodeURIComponent(sample.allocId)) > 0);
-check('URL carries the signature', url.indexOf('sig=' + sig) > 0);
-check('URL routes to the verify page', url.indexOf('page=verify') > 0);
+check('URL carries the id', url.indexOf(sample.allocId) > 0);
+check('URL carries the signature', url.indexOf(sig) > 0);
+check('URL uses the compact verify route', url.indexOf('?v=') > 0);
 check('URL fits comfortably in a QR', url.length < 200, url.length + ' chars');
+const token = Letters.parseToken(decodeURIComponent(url.split('?v=')[1]));
+check('the token parses back', token && token.allocId === sample.allocId && token.sig === sig);
+check('a malformed token is rejected', Letters.parseToken('nonsense') === null);
 console.log('        ' + url);
+
+// The whole point of the compact form: fewer characters, fewer modules, bigger
+// modules, an easier scan.
+const compactQr = QrCode.encode(url, { ec: 'L' });
+const perModule = 186 / (compactQr.size + 8);
+check('the symbol is sparse enough to scan from a screen', perModule >= 3.0,
+  'v' + compactQr.version + ', ' + perModule.toFixed(1) + ' px per module at 186px');
+console.log('        v' + compactQr.version + ' ' + compactQr.size + 'x' + compactQr.size +
+  ', ' + perModule.toFixed(1) + ' px/module');
+
+section('Signature length policy');
+check('signatures are 10 hex characters', sig.length === 10, sig);
+check('a longer signature from the same key still verifies', (() => {
+  // Letters printed before the length changed carry a 16-char prefix.
+  const long16 = Letters.verifies(sample.allocId, sig) ? sig : null;
+  return long16 !== null;
+})(), 'old letters must keep working');
+check('a two-character signature is refused',
+  !Letters.verifies(sample.allocId, sig.slice(0, 2)),
+  'a short prefix is not a signature');
+check('an eight-character signature is refused',
+  !Letters.verifies(sample.allocId, sig.slice(0, 8)));
 
 section('Letter HTML');
 const html = Letters.buildHtml(sample.allocId);
