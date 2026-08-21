@@ -48,6 +48,21 @@ Full instructions in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
+## Running the tests
+
+The engine runs offline in Node — no Apps Script push needed, so the allocator can be
+iterated in seconds:
+
+```bash
+node tests/phase1.test.js     # 57 checks: data integrity, quotas, determinism
+node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
+```
+
+`tests/stubs.js` shims `SpreadsheetApp`, `Utilities`, `PropertiesService` and friends, and
+swaps `Db` for an in-memory store. The engine source is loaded unmodified.
+
+---
+
 ## Repository layout
 
 ```
@@ -71,8 +86,8 @@ docs/                diagrams and supporting material
 | Phase | Scope | State |
 |---|---|---|
 | 0 | Foundation — schema, Db layer, setup, ledger, auth, router | ✅ done |
-| 1 | Synthetic data, hostel inventory, policy, pincode geo | ⏳ next |
-| 2 | Allocation engine, roommate matching, waitlist, metrics | ⏳ |
+| 1 | Synthetic data, hostel inventory, policy, offline pincode geo | ✅ done |
+| 2 | Allocation engine, roommate matching, waitlist, metrics | ⏳ next |
 | 3 | Student portal | ⏳ |
 | 4 | Admin dashboard, letters, email | ⏳ |
 | 5 | Simulator, swaps, grievance auto-triage | ⏳ |

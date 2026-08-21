@@ -249,7 +249,9 @@ SIH 2026/
 Deterministic, seeded, and explainable by construction. Lives in `Allocator.gs`.
 
 ```
-A. PARTITION      hard constraints: gender × campus eligibility × accessibility need
+A. PARTITION      hard constraint: GENDER (+ accessibility need).
+                  Dwarka and EDC are ONE pool - campus is a preference, not a
+                  partition, so a student may be allotted to either campus.
                   → students who cannot legally share a hostel never enter the same pool
 
 B. SCORE          composite = w_merit    · norm(cgpa / merit rank)
@@ -538,7 +540,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 - [ ] **Phase 2** — Is there a minimum distance-from-home threshold for eligibility? A minimum CGPA?
 - [ ] **Phase 3** — Which documents are demanded at verification?
 - [ ] **Phase 4** — Letter format: letterhead, signatory, mandatory clauses?
-- [ ] **General** — Are Dwarka and EDC allocated jointly or as independent pools?
+- [x] **General** — Dwarka and EDC are a SINGLE allocation pool. Confirmed 21 Aug 2026. Students compete in one merit pool and may be allotted to either campus; campus choice is expressed through ranked hostel preferences, not a hard partition. Gender remains the only hard partition.
 
 ---
 
@@ -546,4 +548,6 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 | Date | Change |
 |---|---|
+| 2026-08-21 | Phase 1 complete. Synthetic cohort (900 students, 756 beds, 6 hostels), offline pincode geo table, seeded generator. Fixed a real bug in largest-remainder apportionment that over-reserved quota seats. 57 offline checks passing. |
+| 2026-08-21 | Dwarka and EDC confirmed as a SINGLE allocation pool. Gender is the only hard partition. |
 | 2026-08-21 | Project initiated. Stack, auth, intake, data strategy and four novelty features locked. Phase plan written. This document created. |

@@ -10,12 +10,15 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Hostel System')
     .addItem('1. Create database', 'createDatabase')
-    .addItem('2. Seed demo data', 'seedAll')
+    .addItem('2. Seed demo data', 'seedDemoDataFromMenu')
     .addSeparator()
     .addItem('Run allocation', 'runAllocationFromMenu')
     .addItem('Verify ledger integrity', 'showLedgerStatus')
     .addSeparator()
-    .addItem('Verify Phase 0 setup', 'showPhase0Report')
+    .addSubMenu(SpreadsheetApp.getUi().createMenu('Diagnostics')
+      .addItem('Verify Phase 0 (foundation)', 'showPhase0Report')
+      .addItem('Verify Phase 1 (demo data)', 'showPhase1Report')
+      .addItem('Describe cohort', 'showCohortReport'))
     .addToUi();
 }
 
@@ -73,6 +76,27 @@ function webAppUrl() {
 
 function showPhase0Report() {
   SpreadsheetApp.getUi().alert('Phase 0 verification', verifyPhase0(), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function showPhase1Report() {
+  SpreadsheetApp.getUi().alert('Phase 1 verification', verifyPhase1(), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function showCohortReport() {
+  var r = describeCohort();
+  var lines = [
+    'Students: ' + r.students + '    Beds: ' + r.beds,
+    'By gender: ' + JSON.stringify(r.byGender),
+    'Beds by gender: ' + JSON.stringify(r.bedsByGender),
+    'By programme: ' + JSON.stringify(r.byProgramme),
+    'By category: ' + JSON.stringify(r.byCategory),
+    'PwD: ' + r.pwd + '  (needing accessible rooms: ' + r.needsAccessible + ')',
+    'Failing eligibility: ' + r.ineligible,
+    '',
+    'Top home states:',
+    r.topStates.map(function (s) { return '  ' + s[0] + ': ' + s[1]; }).join('\n')
+  ].join('\n');
+  SpreadsheetApp.getUi().alert('Cohort profile', lines, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function showLedgerStatus() {
