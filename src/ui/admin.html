@@ -64,8 +64,255 @@
       m ? metricsCard(d, m) : noRunCard(),
       occupancyCard(d),
       m ? quotaCard(d.latestRun.metrics) : '',
+      '<div id="simCard"></div>',
+      '<div id="grievCard"></div>',
+      '<div id="swapCard"></div>',
       operationsCard(d)
     ].join('');
+
+    loadSimulator();
+    loadGrievances();
+    loadSwaps();
+  }
+
+  /* ================================================= what-if simulator */
+
+  var KNOBS = [], PENDING = {};
+
+  function loadSimulator() {
+    google.script.run.withSuccessHandler(function (k) {
+      KNOBS = k; paintSimulator();
+    }).withFailureHandler(function () {}).apiAdminSimulatorKnobs();
+  }
+
+  function paintSimulator() {
+    var rows = KNOBS.map(function (k, i) {
+      var pending = PENDING[k.category + '|' + k.key];
+      var val = pending !== undefined ? pending : k.value;
+      var changed = pending !== undefined && Number(pending) !== Number(k.value);
+      return '<tr><td><div class="n" style="font-weight:560">' + esc(k.label) + '</div>' +
+        '<div class="muted small">' + esc(k.help) + '</div></td>' +
+        '<td style="width:150px"><input type="number" step="' + esc(k.step) + '" min="' +
+          esc(k.min) + '" max="' + esc(k.max) + '" value="' + esc(val) +
+          '" oninput="setKnob(' + i + ', this.value)" ' +
+          'style="' + (changed ? 'border-color:var(--accent);font-weight:600' : '') + '"></td>' +
+        '<td class="num muted small">' + (changed ? 'was ' + esc(k.value) : '') + '</td></tr>';
+    }).join('');
+
+    var pendingCount = Object.keys(PENDING).filter(function (key) {
+      var k = KNOBS.filter(function (x) { return x.category + '|' + x.key === key; })[0];
+      return k && Number(PENDING[key]) !== Number(k.value);
+    }).length;
+
+    el('simCard').innerHTML = '<div class="card"><h2>What-if simulator</h2>' +
+      '<p class="small muted" style="margin:-4px 0 12px">Change a rule and see the effect ' +
+      '<strong>before</strong> committing. Nothing is written until you press Commit \u2014 the ' +
+      'modified policy exists only in memory while the simulation runs.</p>' +
+      '<div id="simMsg"></div>' +
+      '<div class="scroll-x"><table class="grid"><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="btn-row" style="margin-top:12px">' +
+        '<button class="btn" ' + (pendingCount ? '' : 'disabled') +
+          ' onclick="runSim()">Simulate ' + (pendingCount ? '(' + pendingCount + ' change' +
+          (pendingCount === 1 ? '' : 's') + ')' : '') + '</button>' +
+        '<button class="btn quiet" onclick="resetKnobs()">Reset</button>' +
+      '</div><div id="simResult"></div></div>';
+  }
+
+  function setKnob(i, value) {
+    PENDING[KNOBS[i].category + '|' + KNOBS[i].key] = value;
+    var btn = el('simCard').querySelector('.btn');
+    if (btn) btn.disabled = false;
+  }
+
+  function resetKnobs() { PENDING = {}; el('simResult').innerHTML = ''; paintSimulator(); }
+
+  function pendingChanges() {
+    return KNOBS.filter(function (k) {
+      var v = PENDING[k.category + '|' + k.key];
+      return v !== undefined && Number(v) !== Number(k.value);
+    }).map(function (k) {
+      return { category: k.category, key: k.key,
+               value: Number(PENDING[k.category + '|' + k.key]) };
+    });
+  }
+
+  function runSim() {
+    var changes = pendingChanges();
+    if (!changes.length) return;
+    el('simResult').innerHTML =
+      '<div class="banner info" style="margin-top:12px"><span class="spin"></span> ' +
+      'Running two full allocations to isolate the effect\u2026</div>';
+
+    google.script.run
+      .withSuccessHandler(paintSimResult)
+      .withFailureHandler(function (e) {
+        el('simResult').innerHTML = '<div class="banner err" style="margin-top:12px">' +
+          esc(e.message) + '</div>';
+      })
+      .apiAdminSimulate(changes, null);
+  }
+
+  function delta(n, invert) {
+    if (n === 0 || n === undefined) return '<span class="muted">no change</span>';
+    var good = invert ? n < 0 : n > 0;
+    var col = good ? 'var(--ok)' : 'var(--bad)';
+    return '<span style="color:' + col + ';font-weight:620">' +
+      (n > 0 ? '+' : '') + n + '</span>';
+  }
+
+  function paintSimResult(r) {
+    var changeList = r.changes.map(function (c) {
+      return '<li>' + esc(c.key) + ': <strong>' + esc(c.from) + ' \u2192 ' + esc(c.to) +
+        '</strong></li>';
+    }).join('');
+
+    var moves = r.sample.map(function (m) {
+      var badge = { LOST: 'bad', GAINED: 'ok', MOVED: 'info' }[m.change];
+      var word = { LOST: 'loses their seat', GAINED: 'gains a seat', MOVED: 'moves room' }[m.change];
+      return '<tr><td>' + esc(m.name) + '<div class="muted small">' + esc(m.category) +
+        '</div></td>' +
+        '<td><span class="pill ' + badge + '">' + esc(word) + '</span></td>' +
+        '<td class="muted small">' + (m.from ? esc(m.from.hostelName) + ' ' + esc(m.from.roomNo) : '\u2014') +
+        ' \u2192 ' + (m.to ? esc(m.to.hostelName) + ' ' + esc(m.to.roomNo) : '\u2014') + '</td></tr>';
+    }).join('');
+
+    el('simResult').innerHTML =
+      '<div class="divider"></div>' +
+      '<div class="grp-title" style="margin-bottom:7px">Simulated changes</div>' +
+      '<ul class="small" style="margin:0 0 12px;padding-left:20px">' + changeList + '</ul>' +
+      '<div class="scroll-x"><table class="grid"><thead><tr><th>Measure</th>' +
+      '<th class="num">Before</th><th class="num">After</th><th class="num">Change</th></tr></thead><tbody>' +
+        simRow('Allotted', r.before.allocated, r.after.allocated, r.deltas.allocated, false) +
+        simRow('Waitlisted', r.before.waitlisted, r.after.waitlisted, r.deltas.waitlisted, true) +
+        simRow('First preference met %', r.before.pref1Pct, r.after.pref1Pct, r.deltas.pref1Pct, false) +
+        simRow('Room utilisation %', r.before.utilisationPct, r.after.utilisationPct, r.deltas.utilisationPct, false) +
+        simRow('Roommate compatibility %', r.before.meanCompatPct, r.after.meanCompatPct, r.deltas.meanCompatPct, false) +
+      '</tbody></table></div>' +
+
+      '<div class="tiles" style="margin-top:13px">' +
+        '<div class="tile"><div class="n" style="color:var(--bad)">' + esc(r.movement.lost) +
+          '</div><div class="l">lose their seat</div></div>' +
+        '<div class="tile"><div class="n" style="color:var(--ok)">' + esc(r.movement.gained) +
+          '</div><div class="l">gain a seat</div></div>' +
+        '<div class="tile"><div class="n">' + esc(r.movement.moved) +
+          '</div><div class="l">change room</div></div>' +
+        '<div class="tile"><div class="n">' + esc(r.movement.unchanged) +
+          '</div><div class="l">unaffected</div></div>' +
+      '</div>' +
+
+      (moves ? '<div class="grp-title" style="margin:15px 0 7px">Who is affected</div>' +
+        '<div class="scroll-x"><table class="grid"><tbody>' + moves + '</tbody></table></div>' +
+        '<p class="small muted" style="margin:8px 0 0">Showing a sample. ' +
+        esc(r.movement.totalAffected) + ' students are affected in total.</p>' : '') +
+
+      '<div class="divider"></div>' +
+      '<div class="btn-row">' +
+        '<button class="btn" onclick="commitSim()">Commit this policy</button>' +
+        '<button class="btn quiet" onclick="resetKnobs()">Discard</button>' +
+        '<span class="small muted">Policy hash ' + esc(r.policyHashBefore) + ' \u2192 ' +
+        esc(r.policyHashAfter) + '</span>' +
+      '</div>';
+  }
+
+  function simRow(label, before, after, d, invert) {
+    return '<tr><td>' + esc(label) + '</td><td class="num">' + esc(before) +
+      '</td><td class="num">' + esc(after) + '</td><td class="num">' +
+      delta(d, invert) + '</td></tr>';
+  }
+
+  function commitSim() {
+    var changes = pendingChanges();
+    if (!confirm('Write these policy changes and run a real allocation? ' +
+                 'This replaces the current committed result.')) return;
+    busy('Committing policy and reallocating\u2026');
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done('good', 'Policy committed and reallocated: ' + r.metrics.allocated +
+          ' allotted, ' + r.metrics.waitlisted + ' waitlisted. Policy hash ' + r.policyHash + '.');
+        PENDING = {}; load();
+      })
+      .withFailureHandler(function (e) { done('err', e.message); })
+      .apiAdminCommitSimulation(changes, null);
+  }
+
+  /* ==================================================== grievance inbox */
+
+  function loadGrievances() {
+    google.script.run.withSuccessHandler(paintGrievances)
+      .withFailureHandler(function () {}).apiAdminGrievanceInbox(null, 40);
+  }
+
+  function paintGrievances(d) {
+    var st = d.stats;
+    if (!st.total) {
+      el('grievCard').innerHTML = '<div class="card"><h2>Grievances</h2>' +
+        '<p class="muted small" style="margin:0">No grievances have been raised.</p></div>';
+      return;
+    }
+
+    var rows = d.tickets.map(function (t) {
+      var cls = { AUTO_ANSWERED: 'ok', RESOLVED: 'ok', ESCALATED: 'warn',
+                  OPEN: 'info' }[t.status] || 'info';
+      return '<tr><td><div style="font-weight:560">' + esc(t.name) + '</div>' +
+        '<div class="muted small">' + esc(t.category) + ' \u00b7 ' + esc(t.ticketId) + '</div></td>' +
+        '<td class="small">' + esc(t.text.slice(0, 90)) +
+          (t.text.length > 90 ? '\u2026' : '') +
+          (t.anomalies && t.anomalies.length
+            ? '<div style="color:var(--bad);margin-top:4px">\u26a0 ' +
+              esc(t.anomalies.join(' ')) + '</div>' : '') + '</td>' +
+        '<td><span class="pill ' + cls + '">' + esc(t.status.replace(/_/g, ' ').toLowerCase()) +
+          '</span></td></tr>';
+    }).join('');
+
+    el('grievCard').innerHTML = '<div class="card"><h2>Grievances</h2>' +
+      '<div class="tiles" style="margin-bottom:13px">' +
+        '<div class="tile"><div class="n">' + esc(st.total) + '</div><div class="l">total</div></div>' +
+        '<div class="tile"><div class="n" style="color:var(--ok)">' + esc(st.autoResolvedPct) +
+          '%</div><div class="l">answered automatically</div></div>' +
+        '<div class="tile"><div class="n" style="color:var(--warn)">' +
+          esc(st.byStatus.ESCALATED || 0) + '</div><div class="l">need a person</div></div>' +
+      '</div>' +
+      '<div class="scroll-x"><table class="grid"><thead><tr><th>Student</th>' +
+      '<th>Complaint</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<p class="small muted" style="margin:10px 0 0">Allocation disputes are re-checked against ' +
+      'the recorded run before any reply is sent. A ticket only reaches this queue as ' +
+      '<em>escalated</em> when that check finds something wrong \u2014 which is exactly the case ' +
+      'worth a warden\u2019s time.</p></div>';
+  }
+
+  /* ======================================================== swap board */
+
+  function loadSwaps() {
+    google.script.run.withSuccessHandler(paintSwaps)
+      .withFailureHandler(function () {}).apiAdminSwapBoard();
+  }
+
+  function paintSwaps(d) {
+    if (!d.total) {
+      el('swapCard').innerHTML = '<div class="card"><h2>Room swaps</h2>' +
+        '<p class="muted small" style="margin:0">No swap requests yet.</p></div>';
+      return;
+    }
+    var rows = d.open.map(function (t) {
+      return '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.hostelName) + ' ' + esc(t.roomNo) +
+        '</td><td class="muted small">' + esc(t.reason || '\u2014') + '</td></tr>';
+    }).join('');
+
+    el('swapCard').innerHTML = '<div class="card"><h2>Room swaps</h2>' +
+      '<div class="tiles" style="margin-bottom:13px">' +
+        '<div class="tile"><div class="n" style="color:var(--ok)">' + esc(d.counts.APPROVED || 0) +
+          '</div><div class="l">approved automatically</div></div>' +
+        '<div class="tile"><div class="n">' + esc(d.counts.OPEN || 0) +
+          '</div><div class="l">on the board</div></div>' +
+        '<div class="tile"><div class="n">' + esc(d.counts.REJECTED || 0) +
+          '</div><div class="l">refused by policy</div></div>' +
+      '</div>' +
+      (rows ? '<div class="scroll-x"><table class="grid"><thead><tr><th>Student</th>' +
+        '<th>Current room</th><th>Reason</th></tr></thead><tbody>' + rows +
+        '</tbody></table></div>' : '') +
+      '<p class="small muted" style="margin:10px 0 0">Swaps both students agree to are validated ' +
+      'against gender, accessibility and quota rules and applied without an administrator. ' +
+      'Nothing in this list is waiting on you.</p></div>';
   }
 
   /* The tamper-evidence badge. Novelty feature 1, second half. */

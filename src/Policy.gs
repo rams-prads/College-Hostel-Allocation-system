@@ -12,6 +12,7 @@
 var Policy = (function () {
 
   var _cache = null;
+  var _override = null;      // in-memory only; never written to the sheet
 
   /** All active policy rows, grouped by category: {category: {key: value}}. */
   function load(fresh) {
@@ -22,11 +23,41 @@ var Policy = (function () {
       if (!out[r.category]) out[r.category] = {};
       out[r.category][r.key] = Number(r.value);
     });
+
+    // Simulation overlay. This is what makes a what-if run genuinely safe:
+    // the modified values exist only in memory, so a simulation cannot leave
+    // a trace in the sheet even if it throws halfway through.
+    if (_override) {
+      Object.keys(_override).forEach(function (cat) {
+        if (!out[cat]) out[cat] = {};
+        Object.keys(_override[cat]).forEach(function (k) {
+          out[cat][k] = Number(_override[cat][k]);
+        });
+      });
+    }
+
     _cache = out;
     return out;
   }
 
   function invalidate() { _cache = null; }
+
+  /**
+   * Apply a simulation overlay.
+   * @param {Array<{category, key, value}>} changes
+   */
+  function setOverride(changes) {
+    _override = {};
+    (changes || []).forEach(function (c) {
+      if (!_override[c.category]) _override[c.category] = {};
+      _override[c.category][c.key] = Number(c.value);
+    });
+    invalidate();
+    return _override;
+  }
+
+  function clearOverride() { _override = null; invalidate(); }
+  function hasOverride() { return !!_override; }
 
   /** One value, with a fallback if the rule is missing or inactive. */
   function value(category, key, fallback) {
@@ -74,10 +105,16 @@ var Policy = (function () {
    * sheet does not change the hash - only actual rule changes do.
    */
   function snapshotHash() {
-    var rows = Db.readAll('Policy')
-      .filter(function (r) { return r.active; })
-      .map(function (r) { return [r.category, r.key, Number(r.value)].join(':'); })
-      .sort();
+    // Built from load(), NOT from the sheet, so a simulation overlay changes the
+    // hash. A run must never report a policy hash that is not the policy that
+    // actually produced it - that is the whole basis of reproducibility.
+    var p = load();
+    var rows = [];
+    Object.keys(p).sort().forEach(function (cat) {
+      Object.keys(p[cat]).sort().forEach(function (k) {
+        rows.push([cat, k, Number(p[cat][k])].join(':'));
+      });
+    });
     return Ledger.sha256(rows.join('|')).substring(0, 16);
   }
 
@@ -97,6 +134,9 @@ var Policy = (function () {
   return {
     load: load,
     invalidate: invalidate,
+    setOverride: setOverride,
+    clearOverride: clearOverride,
+    hasOverride: hasOverride,
     value: value,
     verticalReservations: verticalReservations,
     weights: weights,

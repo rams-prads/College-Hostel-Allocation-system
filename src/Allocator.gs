@@ -233,7 +233,9 @@ var Allocator = (function () {
    * Horizontal reservation (PwD) cuts across all verticals.
    */
   function stageD_quota(ctx) {
-    var totalBeds = ctx.beds.filter(function (b) { return b.status === 'VACANT'; }).length;
+    var totalBeds = ctx.beds.filter(function (b) {
+      return b.status !== 'BLOCKED' && b.status !== 'RESERVED';
+    }).length;
     var buffer = Policy.value('capacity', 'VACANCY_BUFFER_PCT', 0);
 
     // The buffer holds back REAL BEDS, per hostel, rather than shaving a number
@@ -284,7 +286,8 @@ var Allocator = (function () {
   function stageE_serialDictatorship(ctx) {
     var pools = ctx.pools;          // built in stage D, with the buffer already held back
     ctx.accessibleDemand = ctx.pool.filter(function (c) { return c.needsAccessible; }).length;
-    var exhaustedAt = {};       // "hostel|roomType" -> merit position when it emptied
+    ctx.exhaustedAt = {};       // "hostel|roomType" -> merit position of whoever took the last bed
+    var exhaustedAt = ctx.exhaustedAt;
 
     ctx.pool.forEach(function (c) {
       var bucket = claimSeat_(ctx, c);
@@ -311,7 +314,8 @@ var Allocator = (function () {
    * legal bed remains. Shared by the main pass and the conversion pass so the
    * two can never diverge.
    */
-  function placeCandidate_(ctx, c, pools, exhaustedAt, bucket) {
+  function placeCandidate_(ctx, c, pools, exhaustedAt, bucket, pass) {
+    pass = pass || 1;
     var taken = null;
 
     for (var i = 0; i < c.prefs.length; i++) {
@@ -321,14 +325,19 @@ var Allocator = (function () {
 
       if (bed) { taken = { bed: bed, rank: p.rank }; break; }
 
+      // Quote the fill position only when it precedes this student. In the
+      // dereservation pass a waitlisted student is reconsidered after students
+      // ranked below them have already been seated, so naming a later position
+      // would read as an impossibility rather than an explanation.
+      var filledAt = ctx.exhaustedAt[key] || null;
+      var quotable = filledAt && filledAt <= c.meritPosition;
       trace_(ctx, c.appId, reason('PREF_UNAVAILABLE', false,
         'Preference ' + p.rank + ' (' + hostelName_(ctx, p.hostelId) + ', ' +
         roomTypeLabel_(p.roomType) + ') was already full' +
-        (exhaustedAt[key] ? ', filled at merit position ' + exhaustedAt[key] : '') + '.',
+        (quotable ? ', filled at merit position ' + filledAt
+                  : (pass === 2 ? ' when your application was reconsidered' : '')) + '.',
         { rank: p.rank, hostelId: p.hostelId, roomType: p.roomType,
-          filledAtPosition: exhaustedAt[key] || null }));
-
-      if (!exhaustedAt[key] && poolEmptyFor_(pools, key, c)) exhaustedAt[key] = c.meritPosition;
+          filledAtPosition: filledAt, pass: pass }));
     }
 
     // Fallback: house them anywhere legal rather than waitlist a student we
@@ -399,7 +408,7 @@ var Allocator = (function () {
       if (!src) break;                       // no seats left in any pool
 
       var label = src.own ? src.bucket : 'CONVERTED';
-      if (placeCandidate_(ctx, c, pools, exhaustedAt, label)) {
+      if (placeCandidate_(ctx, c, pools, exhaustedAt, label, 2)) {
         converted++;
         if (!src.own) {
           trace_(ctx, c.appId, reason('SEAT_CONVERTED', true,
@@ -473,7 +482,13 @@ var Allocator = (function () {
   function buildBedPools_(ctx, bufferPct) {
     var byHostel = {};
     ctx.beds.forEach(function (b) {
-      if (b.status !== 'VACANT') return;
+      // OCCUPIED counts as available. A full run REALLOCATES everyone, so
+      // occupancy is the OUTPUT of the previous run, not a constraint on this
+      // one. Treating it as a constraint meant the second run of the day
+      // allocated only the leftover buffer - and made every simulation baseline
+      // wrong, since the simulator runs after a committed allocation.
+      // BLOCKED and RESERVED beds are genuinely out of the pool.
+      if (b.status === 'BLOCKED' || b.status === 'RESERVED') return;
       var room = ctx.roomById[b.roomId];
       if (!room || room.status !== 'ACTIVE') return;
       (byHostel[room.hostelId] = byHostel[room.hostelId] || []).push({ bed: b, room: room });
@@ -532,14 +547,22 @@ var Allocator = (function () {
     var pool = pools[key];
     if (!pool) return null;
 
+    var bed = null;
     if (candidate.needsAccessible) {
-      return pool.accessible.length ? pool.accessible.shift() : null;
+      bed = pool.accessible.length ? pool.accessible.shift() : null;
+    } else if (pool.normal.length) {
+      bed = pool.normal.shift();
+    } else if (pool.accessible.length && totalAccessibleVacant_(pools) > accessibleDemand) {
+      bed = pool.accessible.shift();
     }
-    if (pool.normal.length) return pool.normal.shift();
-    if (pool.accessible.length && totalAccessibleVacant_(pools) > accessibleDemand) {
-      return pool.accessible.shift();
+
+    // Record exhaustion at the moment the LAST bed leaves, not when a later
+    // student notices it is empty. "Filled at merit position N" has to name the
+    // student who actually took the last bed, or it is not an explanation.
+    if (bed && !pool.normal.length && !pool.accessible.length && !ctx.exhaustedAt[key]) {
+      ctx.exhaustedAt[key] = candidate.meritPosition;
     }
-    return null;
+    return bed;
   }
 
   function poolEmptyFor_(pools, key, candidate) {
@@ -789,10 +812,16 @@ var Allocator = (function () {
   function commit(result) {
     var now = new Date();
 
-    // Beds
+    // Beds. Clear every previous occupancy FIRST: a committed run supersedes
+    // the last one entirely, so a bed occupied by the old run but unused by this
+    // one must be released. Without the reset, students who lost their seat in
+    // the new run would leave a phantom occupant behind.
     var beds = Db.readAll('Beds');
     var bedIdx = {};
-    beds.forEach(function (b) { bedIdx[b.bedId] = b; });
+    beds.forEach(function (b) {
+      if (b.status === 'OCCUPIED') { b.status = 'VACANT'; b.occupantAppId = ''; }
+      bedIdx[b.bedId] = b;
+    });
     result.allocations.forEach(function (a) {
       var b = bedIdx[a.bedId];
       if (b) { b.status = 'OCCUPIED'; b.occupantAppId = a.appId; }

@@ -227,3 +227,78 @@ function apiAdminWaitlist(limit) {
 function apiVerifyAllotment(allocId, sig) {
   return Letters.verifyAllotment(allocId, sig);
 }
+
+// ============================================================ simulator
+
+/** The policy knobs the simulator offers. */
+function apiAdminSimulatorKnobs() {
+  Auth.requireAdmin();
+  return Simulator.knobs();
+}
+
+/** Run a what-if. Writes nothing. */
+function apiAdminSimulate(changes, seed) {
+  Auth.requireAdmin();
+  return Simulator.simulate({ changes: changes, seed: seed });
+}
+
+/** Accept a simulation: write the policy, then run and commit for real. */
+function apiAdminCommitSimulation(changes, seed) {
+  var s = Auth.requireAdmin();
+  if (!Auth.canCommit(s)) {
+    throw new Error('Your role (' + s.role + ') may simulate but not commit policy changes.');
+  }
+  return Simulator.commit(changes, s.email, seed);
+}
+
+function apiAdminDiscardSimulation() {
+  Auth.requireAdmin();
+  return Simulator.discard();
+}
+
+// ============================================================ grievances
+
+function apiAdminGrievanceInbox(filter, limit) {
+  Auth.requireAdmin();
+  return { tickets: Grievance.inbox(filter, limit), stats: Grievance.stats() };
+}
+
+function apiAdminResolveGrievance(ticketId, resolution) {
+  var s = Auth.requireAdmin();
+  return Grievance.resolve(ticketId, resolution, s.email);
+}
+
+function apiAdminEscalateGrievance(ticketId, note) {
+  var s = Auth.requireAdmin();
+  return Grievance.escalate(ticketId, note, s.email);
+}
+
+// ============================================================ swaps
+
+function apiAdminSwapBoard() {
+  Auth.requireAdmin();
+  var all = Db.readAll('Transfers').filter(function (t) { return t.type === 'SWAP'; });
+  var byStatus = {};
+  all.forEach(function (t) { byStatus[t.status] = (byStatus[t.status] || 0) + 1; });
+  return { open: Swap.board(50), counts: byStatus, total: all.length };
+}
+
+/**
+ * Deliberately corrupt one ledger row so the tamper detection can be shown
+ * live. Guarded behind an explicit Config flag - this must never be reachable
+ * on a real deployment.
+ */
+function apiAdminTamperDemo() {
+  var s = Auth.requireAdmin();
+  if (String(Db.cfg('ALLOW_TAMPER_DEMO', 'FALSE')).toUpperCase() !== 'TRUE') {
+    throw new Error('The tamper demonstration is disabled. Set ALLOW_TAMPER_DEMO to TRUE in Config to enable it.');
+  }
+  var rows = Db.readAll('AuditLog');
+  if (rows.length < 3) throw new Error('Not enough ledger entries to demonstrate tampering.');
+  var target = rows[Math.floor(rows.length / 2)];
+  var sheet = Db.sheet('AuditLog');
+  sheet.getRange(target._row, schemaColIndex('AuditLog', 'payloadJson'))
+       .setValue(JSON.stringify({ tamperedForDemonstration: true }));
+  Db.invalidate('AuditLog');
+  return { tamperedRow: target.seq, verification: Ledger.verify() };
+}

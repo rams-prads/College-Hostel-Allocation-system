@@ -419,3 +419,77 @@ function fmtDate_(d) {
     return Utilities.formatDate(new Date(d), 'Asia/Kolkata', 'd MMM yyyy');
   } catch (e) { return ''; }
 }
+
+// ============================================================ swaps
+
+/** The swap marketplace as this student sees it. */
+function apiGetSwapView() {
+  var s = Auth.session();
+  if (!s.application) throw new Error('You need an application before you can use swaps.');
+  var appId = s.application.appId;
+
+  var mine = Db.readAll('Transfers').filter(function (t) {
+    return t.type === 'SWAP' && t.appId === appId &&
+           ['OPEN', 'MATCHED', 'CONSENTED'].indexOf(t.status) >= 0;
+  })[0] || null;
+
+  var place = Swap.placement(appId);
+  return {
+    allotted: !!place,
+    current: place ? {
+      hostelName: place.hostel.name, campus: place.hostel.campus,
+      roomNo: place.room.roomNo, roomType: place.room.roomType,
+      isAccessible: place.room.isAccessible
+    } : null,
+    myRequest: mine ? { reqId: mine.reqId, status: mine.status, reason: mine.reason } : null,
+    matches: mine ? Swap.findMatches(appId) : [],
+    boardSize: Swap.board(100).length
+  };
+}
+
+function apiPostSwap(payload) {
+  var s = Auth.session();
+  if (!s.application) throw new Error('You have no application.');
+  return Swap.post(s.application.appId, payload || {});
+}
+
+function apiAcceptSwap(reqId) {
+  var s = Auth.session();
+  if (!s.application) throw new Error('You have no application.');
+  return Swap.accept(reqId, s.application.appId);
+}
+
+function apiCancelSwap(reqId) {
+  var s = Auth.session();
+  if (!s.application) throw new Error('You have no application.');
+  return Swap.cancel(reqId, s.application.appId);
+}
+
+// ============================================================ grievances
+
+function apiRaiseGrievance(text) {
+  var s = Auth.session();
+  if (!s.application) throw new Error('You need an application before raising a grievance.');
+  return Grievance.raise(s.application.appId, text, s.email);
+}
+
+/** This student's tickets, with the automatic reply attached. */
+function apiGetGrievances() {
+  var s = Auth.session();
+  if (!s.application) return [];
+  return Db.where('Grievances', { appId: s.application.appId }).map(function (g) {
+    var t = typeof g.autoTriage === 'string'
+      ? (function () { try { return JSON.parse(g.autoTriage); } catch (e) { return null; } })()
+      : g.autoTriage;
+    return {
+      ticketId: g.ticketId, category: g.category, status: g.status,
+      text: g.text,
+      headline: t ? t.headline : '',
+      body: t ? t.body : '',
+      findings: t ? t.findings : [],
+      ledgerRef: t ? t.ledgerRef : null,
+      createdAt: fmtDate_(g.createdAt),
+      slaDueAt: fmtDate_(g.slaDueAt)
+    };
+  });
+}

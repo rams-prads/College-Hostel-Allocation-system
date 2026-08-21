@@ -63,9 +63,151 @@
       if (v.allocation && v.allocation.roommates.length) html.push(roommateCard(v));
       html.push(preferencesCard(v));
       html.push(documentsCard(v));
+      html.push('<div id="swapCard"></div>');
+      html.push('<div id="grievCard"></div>');
       html.push(actionsCard(v));
     }
     el('root').innerHTML = html.join('');
+    if (v.application) { loadSwaps(); loadGrievances(); }
+  }
+
+  /* ---------------------------------------------------- swap marketplace */
+
+  function loadSwaps() {
+    if (!VIEW.allocation) return;
+    google.script.run.withSuccessHandler(paintSwaps)
+      .withFailureHandler(function () {}).apiGetSwapView();
+  }
+
+  function paintSwaps(s) {
+    if (!s.allotted) { el('swapCard').innerHTML = ''; return; }
+    var body;
+
+    if (!s.myRequest) {
+      body = '<p class="muted small" style="margin:-4px 0 12px">Post your room on the swap board ' +
+        'and you will be shown students who want to move the other way. A swap both students ' +
+        'agree to is applied immediately if it passes the hostel rules \u2014 there is no ' +
+        'approval queue to wait in.</p>' +
+        '<label class="field"><span class="lab">Why do you want to move? (optional)</span>' +
+        '<input type="text" id="swapReason" placeholder="e.g. closer to my department"></label>' +
+        '<div class="btn-row"><button class="btn" onclick="postSwap()">Post my room</button>' +
+        '<span class="small muted">' + esc(s.boardSize) + ' room' +
+        (s.boardSize === 1 ? '' : 's') + ' on the board</span></div>';
+    } else {
+      var matches = s.matches.length
+        ? s.matches.map(function (m) {
+            return '<div class="mate">' +
+              '<div class="av">' + esc(initials(m.name)) + '</div>' +
+              '<div class="info"><div class="n">' + esc(m.hostelName) + ' \u00b7 Room ' +
+                esc(m.roomNo) + '</div><div class="d">' + esc(m.name) + ' \u00b7 ' +
+                esc(m.programme) + (m.reason ? ' \u00b7 "' + esc(m.reason) + '"' : '') +
+              '</div></div>' +
+              (m.compatibility != null
+                ? '<span class="pill ' + (m.compatibility >= 70 ? 'ok' : 'warn') + '">' +
+                  esc(m.compatibility) + '% fit</span> ' : '') +
+              '<button class="btn" style="padding:6px 12px;font-size:13px" ' +
+                'onclick="acceptSwap(&quot;' + esc(m.reqId) + '&quot;)">Swap</button></div>';
+          }).join('')
+        : '<p class="muted small">No matching rooms yet. Options appear here as other students ' +
+          'post theirs.</p>';
+
+      body = '<div class="banner info" style="margin-bottom:12px">Your room is on the swap board. ' +
+        'Only swaps that already pass the hostel rules are listed, so anything shown here will ' +
+        'go through.</div>' + matches +
+        '<div class="btn-row" style="margin-top:12px">' +
+        '<button class="btn quiet" onclick="cancelSwap(&quot;' + esc(s.myRequest.reqId) +
+        '&quot;)">Take my room off the board</button></div>';
+    }
+
+    el('swapCard').innerHTML = '<div class="card"><h2>Room swap</h2>' +
+      '<div id="swapMsg"></div>' + body + '</div>';
+  }
+
+  function postSwap() {
+    var reason = (el('swapReason') || {}).value || '';
+    google.script.run
+      .withSuccessHandler(function () { loadSwaps(); })
+      .withFailureHandler(function (e) { swapErr(e.message); })
+      .apiPostSwap({ reason: reason });
+  }
+
+  function acceptSwap(reqId) {
+    if (!confirm('Swap rooms with this student? Both allotment letters will be reissued.')) return;
+    el('swapMsg').innerHTML =
+      '<div class="banner info"><span class="spin"></span> Checking and applying\u2026</div>';
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (r.ok) window.top.location.reload(); else swapErr(r.message);
+      })
+      .withFailureHandler(function (e) { swapErr(e.message); })
+      .apiAcceptSwap(reqId);
+  }
+
+  function cancelSwap(reqId) {
+    google.script.run.withSuccessHandler(function () { loadSwaps(); })
+      .withFailureHandler(function (e) { swapErr(e.message); })
+      .apiCancelSwap(reqId);
+  }
+
+  function swapErr(msg) {
+    el('swapMsg').innerHTML = '<div class="banner err">' + esc(msg) + '</div>';
+  }
+
+  /* ---------------------------------------------------------- grievances */
+
+  function loadGrievances() {
+    google.script.run.withSuccessHandler(paintGrievances)
+      .withFailureHandler(function () {}).apiGetGrievances();
+  }
+
+  function paintGrievances(list) {
+    var tickets = (list || []).map(function (g) {
+      var cls = { AUTO_ANSWERED: 'ok', RESOLVED: 'ok', ESCALATED: 'warn',
+                  OPEN: 'info', CLOSED: 'ok' }[g.status] || 'info';
+      var label = { AUTO_ANSWERED: 'Answered', RESOLVED: 'Resolved',
+                    ESCALATED: 'With the hostel office', OPEN: 'Open',
+                    CLOSED: 'Closed' }[g.status] || g.status;
+      return '<div class="doc" style="display:block">' +
+        '<div style="display:flex;gap:10px;align-items:flex-start">' +
+          '<div class="body"><div class="n">' + esc(g.headline || g.category) + '</div>' +
+          '<div class="h">You wrote: \u201c' + esc(g.text) + '\u201d</div></div>' +
+          '<span class="pill ' + cls + '">' + esc(label) + '</span></div>' +
+        (g.body ? '<div class="why" style="margin-top:10px"><p style="margin:0;font-size:14px">' +
+          esc(g.body) + '</p></div>' : '') +
+        (g.findings && g.findings.length
+          ? '<ul class="why" style="margin-top:9px;list-style:none;padding-left:14px">' +
+            g.findings.map(function (f) {
+              return '<li class="' + (f.ok ? 'yes' : 'no') + '"><span class="mark">' +
+                (f.ok ? '\u2713' : '\u2717') + '</span><span>' + esc(f.text) + '</span></li>';
+            }).join('') + '</ul>' : '') +
+        (g.ledgerRef ? '<p class="small muted" style="margin:8px 0 0">Verified against audit log ' +
+          'entry #' + esc(g.ledgerRef.seq) + ' (hash ' + esc(g.ledgerRef.hash) +
+          '\u2026)</p>' : '') + '</div>';
+    }).join('');
+
+    el('grievCard').innerHTML = '<div class="card"><h2>Grievances</h2>' +
+      '<div id="grievMsg"></div>' +
+      (tickets || '<p class="muted small">You have not raised any grievance.</p>') +
+      '<div class="divider"></div>' +
+      '<label class="field"><span class="lab">Raise a grievance</span>' +
+      '<textarea id="grievText" rows="3" ' +
+      'placeholder="Describe the problem in a sentence or two."></textarea>' +
+      '<span class="help">Questions about your allocation are re-checked against the recorded ' +
+      'run automatically and usually answered within seconds.</span></label>' +
+      '<div class="btn-row"><button class="btn" onclick="raiseGrievance()">Submit</button></div>' +
+      '</div>';
+  }
+
+  function raiseGrievance() {
+    var text = (el('grievText') || {}).value || '';
+    el('grievMsg').innerHTML =
+      '<div class="banner info"><span class="spin"></span> Checking your case\u2026</div>';
+    google.script.run
+      .withSuccessHandler(function () { loadGrievances(); })
+      .withFailureHandler(function (e) {
+        el('grievMsg').innerHTML = '<div class="banner err">' + esc(e.message) + '</div>';
+      })
+      .apiRaiseGrievance(text);
   }
 
   /* ---------------------------------------------------------------- pieces */
@@ -115,8 +257,8 @@
       '</dl></div>' +
       '<div class="divider"></div>' +
       '<div class="btn-row">' +
-        '<button class="btn" disabled title="Available in the next build">Download allotment letter</button>' +
-        '<span class="small muted">Letter generation arrives in Phase 4.</span>' +
+        '<span class="small muted">Your allotment letter carries a QR code that confirms it is ' +
+        'genuine. The hostel office issues letters once allocation is final.</span>' +
       '</div></div>';
   }
 
@@ -240,8 +382,6 @@
     var canEdit = ['DRAFT', 'SUBMITTED', 'VERIFIED'].indexOf(v.application.status) >= 0;
     return '<div class="card"><h2>Actions</h2><div class="btn-row">' +
       (canEdit ? '<a class="btn ghost" href="?page=apply">Edit application</a>' : '') +
-      '<button class="btn quiet" disabled title="Available in the next build">Request room swap</button>' +
-      '<button class="btn quiet" disabled title="Available in the next build">Raise a grievance</button>' +
       '</div><p class="small muted" style="margin:11px 0 0">Application ID ' +
       esc(v.application.appId) + '</p></div>';
   }

@@ -548,6 +548,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 | Date | Change |
 |---|---|
+| 2026-08-21 | Phase 5 complete. What-if simulator with a who-moved diff, mutual swap marketplace with auto-approval, and grievance auto-triage that AUDITS the recorded run rather than replaying the stored explanation. Fixed a serious allocator bug: a second run treated already-OCCUPIED beds as unavailable, so re-running allocated only the buffer and every simulation baseline was wrong. 99 new checks; 469 total. |
 | 2026-08-21 | Phase 4 complete. Allotment letters as PDFs with a signed verification QR, a complete offline QR encoder (ISO 18004, versions 1-10, L and M), public verification page, quota-aware Gmail notifications, and the admin dashboard with the ledger integrity badge. 136 new checks. |
 | 2026-08-21 | Phase 3 complete. Student portal: apply form with drag-to-rank preferences, dashboard with the "why did I get this room?" panel, per-applicant document rules, roommate display. Added a Documents tab (19 total). 65 offline checks passing. |
 | 2026-08-21 | Phase 2 complete. Allocation engine (stages A-H), eligibility with reasons, roommate matching, waitlist ETA, fairness metrics. Two significant fixes: unfilled reserved seats are now dereserved and reissued (utilisation 82 -> 98%), and the vacancy buffer holds real beds per hostel instead of a global seat cap that made one gender absorb the whole reserve. 93 offline checks passing. |
