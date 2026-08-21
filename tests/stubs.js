@@ -119,7 +119,7 @@ global.Db = {
 };
 
 // ----------------------------------------------------------- load engine code
-['Util', 'Ledger', 'Geo', 'SeedData'].forEach(loadSrc);
+['Util', 'Ledger', 'Geo', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator'].forEach(loadSrc);
 
 // Setup.gs seeds Config/Policy; we call only its seed functions, not the
 // sheet-building parts, which need a real SpreadsheetApp.

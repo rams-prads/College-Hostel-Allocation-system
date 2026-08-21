@@ -548,6 +548,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 | Date | Change |
 |---|---|
+| 2026-08-21 | Phase 2 complete. Allocation engine (stages A-H), eligibility with reasons, roommate matching, waitlist ETA, fairness metrics. Two significant fixes: unfilled reserved seats are now dereserved and reissued (utilisation 82 -> 98%), and the vacancy buffer holds real beds per hostel instead of a global seat cap that made one gender absorb the whole reserve. 93 offline checks passing. |
 | 2026-08-21 | Phase 1 complete. Synthetic cohort (900 students, 756 beds, 6 hostels), offline pincode geo table, seeded generator. Fixed a real bug in largest-remainder apportionment that over-reserved quota seats. 57 offline checks passing. |
 | 2026-08-21 | Dwarka and EDC confirmed as a SINGLE allocation pool. Gender is the only hard partition. |
 | 2026-08-21 | Project initiated. Stack, auth, intake, data strategy and four novelty features locked. Phase plan written. This document created. |
