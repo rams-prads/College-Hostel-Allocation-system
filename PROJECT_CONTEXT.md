@@ -548,6 +548,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 | Date | Change |
 |---|---|
+| 2026-08-22 | Deployed to Google for the first time. Database creation, seeding and allocation all confirmed working against a real spreadsheet. Phase 6 started: demo cast, admin view-as, DEPLOYMENT.md, DEMO_SCRIPT.md. 45 new checks; 514 total. |
 | 2026-08-21 | Phase 5 complete. What-if simulator with a who-moved diff, mutual swap marketplace with auto-approval, and grievance auto-triage that AUDITS the recorded run rather than replaying the stored explanation. Fixed a serious allocator bug: a second run treated already-OCCUPIED beds as unavailable, so re-running allocated only the buffer and every simulation baseline was wrong. 99 new checks; 469 total. |
 | 2026-08-21 | Phase 4 complete. Allotment letters as PDFs with a signed verification QR, a complete offline QR encoder (ISO 18004, versions 1-10, L and M), public verification page, quota-aware Gmail notifications, and the admin dashboard with the ledger integrity badge. 136 new checks. |
 | 2026-08-21 | Phase 3 complete. Student portal: apply form with drag-to-rank preferences, dashboard with the "why did I get this room?" panel, per-applicant document rules, roommate display. Added a Documents tab (19 total). 65 offline checks passing. |

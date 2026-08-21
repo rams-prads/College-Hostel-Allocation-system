@@ -60,6 +60,7 @@ node tests/phase3.test.js     # 65 checks: document rules and portal API
 node tests/phase4.test.js     # 91 checks: letters, QR anti-forgery, email, admin
 node tests/qr.test.js         # 45 checks: QR encoder vs the ISO 18004 spec
 node tests/phase5.test.js     # 99 checks: simulator, swaps, grievance audit
+node tests/phase6.test.js     # 45 checks: demo scenario and access guards
 node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
 ```
 
@@ -96,4 +97,4 @@ docs/                diagrams and supporting material
 | 3 | Student portal | ✅ done |
 | 4 | Admin dashboard, letters, QR verification, email | ✅ done |
 | 5 | Simulator, swaps, grievance auto-triage | ✅ done |
-| 6 | Demo hardening and deliverables | ⏳ next |
+| 6 | Demo hardening and deliverables | 🚧 in progress |

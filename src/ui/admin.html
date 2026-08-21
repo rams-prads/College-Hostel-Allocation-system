@@ -64,6 +64,7 @@
       m ? metricsCard(d, m) : noRunCard(),
       occupancyCard(d),
       m ? quotaCard(d.latestRun.metrics) : '',
+      lookupCard(),
       '<div id="simCard"></div>',
       '<div id="grievCard"></div>',
       '<div id="swapCard"></div>',
@@ -73,6 +74,99 @@
     loadSimulator();
     loadGrievances();
     loadSwaps();
+  }
+
+  /* ============================================== student lookup / view-as */
+
+  function lookupCard() {
+    return '<div class="card"><h2>Look up a student</h2>' +
+      '<p class="small muted" style="margin:-4px 0 11px">Open any applicant\u2019s portal exactly ' +
+      'as they see it, including the explanation of their own outcome. Useful at a counter, and ' +
+      'the fastest way to answer "why did I not get a room".</p>' +
+      '<label class="field" style="margin-bottom:9px">' +
+      '<input type="text" id="lookupQ" placeholder="Name, enrolment number or application ID" ' +
+      'oninput="doLookup(this.value)"></label>' +
+      '<div id="lookupResults"></div>' +
+      '<div id="studentView"></div></div>';
+  }
+
+  var lookupTimer = null;
+  function doLookup(q) {
+    clearTimeout(lookupTimer);
+    if (!q || q.length < 2) { el('lookupResults').innerHTML = ''; return; }
+    lookupTimer = setTimeout(function () {
+      google.script.run.withSuccessHandler(function (rows) {
+        if (!rows.length) {
+          el('lookupResults').innerHTML = '<p class="muted small">No match.</p>';
+          return;
+        }
+        el('lookupResults').innerHTML = '<div class="scroll-x"><table class="grid"><tbody>' +
+          rows.map(function (r) {
+            return '<tr><td><strong>' + esc(r.name) + '</strong>' +
+              '<div class="muted small">' + esc(r.enrollmentNo) + ' \u00b7 ' +
+              esc(r.programme) + ' \u00b7 ' + esc(r.category) + '</div></td>' +
+              '<td><span class="pill info">' + esc(r.status.toLowerCase()) + '</span></td>' +
+              '<td><button class="btn ghost" style="padding:5px 11px;font-size:13px" ' +
+              'onclick="viewStudent(&quot;' + esc(r.appId) + '&quot;)">Open portal</button></td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }).withFailureHandler(function () {}).apiAdminFindStudent(q);
+    }, 250);
+  }
+
+  function viewStudent(appId) {
+    el('studentView').innerHTML =
+      '<div class="banner info" style="margin-top:12px"><span class="spin"></span> Loading\u2026</div>';
+    google.script.run
+      .withSuccessHandler(paintStudentView)
+      .withFailureHandler(function (e) {
+        el('studentView').innerHTML = '<div class="banner err" style="margin-top:12px">' +
+          esc(e.message) + '</div>';
+      })
+      .apiGetStudentView(appId);
+  }
+
+  function paintStudentView(v) {
+    if (!v.student) { el('studentView').innerHTML = ''; return; }
+
+    var outcome;
+    if (v.allocation) {
+      outcome = '<div class="ledger ledger-ok"><div class="t">Room ' + esc(v.allocation.roomNo) +
+        ' \u00b7 ' + esc(v.allocation.hostelName) + '</div><div>' +
+        (v.allocation.prefRankMet >= 1 ? 'Preference ' + esc(v.allocation.prefRankMet) + ' granted'
+                                       : 'Assigned outside stated preferences') +
+        (v.allocation.isAccessible ? ' \u00b7 accessible room' : '') + '</div></div>';
+    } else if (v.waitlist) {
+      outcome = '<div class="ledger" style="background:var(--warn-soft);border:1px solid var(--warn);' +
+        'color:var(--warn)"><div class="t">Waiting list position ' + esc(v.waitlist.position) +
+        '</div><div>' + esc(v.waitlist.etaPercent) + '% estimated chance of allotment</div></div>';
+    } else {
+      outcome = '<div class="ledger" style="background:var(--bad-soft);border:1px solid var(--bad);' +
+        'color:var(--bad)"><div class="t">' + esc(v.application ? v.application.status : 'No application') +
+        '</div></div>';
+    }
+
+    var why = '';
+    if (v.explanation) {
+      why = '<div class="grp-title" style="margin:14px 0 7px">What this student is shown</div>' +
+        '<div class="why"><h3 style="margin:0 0 9px">' + esc(v.explanation.headline) + '</h3>' +
+        v.explanation.groups.map(function (g) {
+          return '<div class="grp"><div class="grp-title">' + esc(g.title) + '</div><ul>' +
+            g.items.map(function (i) {
+              return '<li class="' + (i.ok ? 'yes' : 'no') + '"><span class="mark">' +
+                (i.ok ? '\u2713' : '\u2717') + '</span><span>' + esc(i.text) + '</span></li>';
+            }).join('') + '</ul></div>';
+        }).join('') + '</div>';
+    }
+
+    el('studentView').innerHTML = '<div class="divider"></div>' +
+      '<h3 style="margin:0 0 3px">' + esc(v.student.name) + '</h3>' +
+      '<p class="muted small" style="margin:0 0 11px">' + esc(v.student.enrollmentNo) + ' \u00b7 ' +
+      esc(v.student.programme) + ' ' + esc(v.student.branch) + ', year ' + esc(v.student.year) +
+      ' \u00b7 ' + esc(v.student.category) + (v.student.isPwD ? ' PwD' : '') +
+      ' \u00b7 ' + esc(v.student.homeState) + '</p>' +
+      outcome + why +
+      '<div class="btn-row" style="margin-top:12px">' +
+      '<button class="btn quiet" onclick="el(&quot;studentView&quot;).innerHTML=&quot;&quot;">Close</button></div>';
   }
 
   /* ================================================= what-if simulator */

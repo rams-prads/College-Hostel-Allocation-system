@@ -13,12 +13,14 @@ function onOpen() {
     .addItem('2. Seed demo data', 'seedDemoDataFromMenu')
     .addSeparator()
     .addItem('Run allocation', 'runAllocationFromMenu')
+    .addItem('Prepare demo scenario', 'prepareDemoFromMenu')
     .addItem('Verify ledger integrity', 'showLedgerStatus')
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('Diagnostics')
       .addItem('Verify Phase 0 (foundation)', 'showPhase0Report')
       .addItem('Verify Phase 1 (demo data)', 'showPhase1Report')
-      .addItem('Describe cohort', 'showCohortReport'))
+      .addItem('Describe cohort', 'showCohortReport')
+      .addItem('Show demo cast', 'showDemoCast'))
     .addToUi();
 }
 
@@ -97,6 +99,11 @@ function showCohortReport() {
     r.topStates.map(function (s) { return '  ' + s[0] + ': ' + s[1]; }).join('\n')
   ].join('\n');
   SpreadsheetApp.getUi().alert('Cohort profile', lines, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function showDemoCast() {
+  SpreadsheetApp.getUi().alert('Demo cast', DemoScenario.brief(),
+    SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 function showLedgerStatus() {

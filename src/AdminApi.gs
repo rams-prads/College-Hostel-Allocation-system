@@ -302,3 +302,39 @@ function apiAdminTamperDemo() {
   Db.invalidate('AuditLog');
   return { tamperedRow: target.seq, verification: Ledger.verify() };
 }
+
+// ============================================================ demo support
+
+/** The demo cast, with talking points. Admin only. */
+function apiAdminDemoCast() {
+  Auth.requireAdmin();
+  return DemoScenario.prepare({});
+}
+
+/**
+ * Look up applicants by name or enrolment number, so a demo operator can jump
+ * straight to a student without knowing their application id.
+ */
+function apiAdminFindStudent(query) {
+  Auth.requireAdmin();
+  var q = String(query || '').toLowerCase().trim();
+  if (q.length < 2) return [];
+
+  var apps = Db.readAll('Applications');
+  var students = Db.indexBy('Students', 'studentId');
+
+  return apps.filter(function (a) {
+    var s = students[a.studentId];
+    if (!s) return false;
+    return String(s.name).toLowerCase().indexOf(q) >= 0 ||
+           String(s.enrollmentNo).toLowerCase().indexOf(q) >= 0 ||
+           String(a.appId).toLowerCase().indexOf(q) >= 0;
+  }).slice(0, 12).map(function (a) {
+    var s = students[a.studentId];
+    return {
+      appId: a.appId, name: s.name, enrollmentNo: s.enrollmentNo,
+      programme: s.programme, category: s.category + (s.isPwD ? ' PwD' : ''),
+      status: a.status
+    };
+  });
+}

@@ -15,15 +15,32 @@
 /**
  * Everything needed to render the student dashboard in one round trip.
  */
-function apiGetStudentView() {
+function apiGetStudentView(asAppId) {
   var s = Auth.session();
   if (!s.email) return { signedIn: false };
+
+  // An admin may inspect any applicant's portal exactly as that student sees
+  // it. A warden already has this information; what they have never had is the
+  // student's own view of it, which is what a grievance is usually about.
+  // Students may only ever see themselves - the guard is on the server.
+  if (asAppId) {
+    if (!s.isAdmin) throw new Error('Access denied: you may only view your own application.');
+    var target = Db.byId('Applications', asAppId);
+    if (!target) throw new Error('No such application.');
+    s = {
+      email: s.email, name: s.name, isAdmin: true, role: s.role, campus: s.campus,
+      student: Db.byId('Students', target.studentId),
+      application: target,
+      viewingAs: true
+    };
+  }
 
   var view = {
     signedIn: true,
     email: s.email,
     name: s.name,
     isAdmin: s.isAdmin,
+    viewingAs: !!s.viewingAs,
     applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
     institution: Db.cfg('INSTITUTION_SHORT', 'GGSIPU'),
     supportEmail: Db.cfg('SUPPORT_EMAIL', ''),
@@ -167,7 +184,8 @@ function buildExplanation_(reasonCodes, alloc) {
     { title: 'How your seat was awarded', prefixes: ['SEAT_', 'WAITLIST_'],    items: [] },
     { title: 'Your room preferences',  prefixes: ['PREF_', 'FALLBACK_', 'PARETO_'], items: [] },
     { title: 'Accessibility',          prefixes: ['ACCESSIBLE_'],              items: [] },
-    { title: 'Roommate matching',      prefixes: ['ROOMMATE_'],                items: [] }
+    { title: 'Roommate matching',      prefixes: ['ROOMMATE_'],                items: [] },
+    { title: 'Changes since allotment', prefixes: ['SWAP_', 'TRANSFER_'],      items: [] }
   ];
 
   trace.forEach(function (r) {
