@@ -1,6 +1,7 @@
 <!-- Public letter verification. Deliberately requires no sign-in: a warden at
      the hostel gate must be able to scan a letter and get an answer. -->
 <?!= include('ui/styles'); ?>
+<?!= include('ui/chrome'); ?>
 <style>
   .verdict { border-radius: 11px; padding: 24px; text-align: center; margin-bottom: 15px; }
   .verdict.good { background: var(--ok-soft);  border: 2px solid var(--ok); }
@@ -22,11 +23,8 @@
 <div class="wrap" id="root"><div class="empty">Checking this letter&hellip;</div></div>
 
 <script>
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
-    });
-  }
+  paintChrome({ unit: 'Allotment Verification' });
+  el('root').innerHTML = loadingState('Checking this letter');
 
   var P = <?!= JSON.stringify(params || {}) ?>;
 
@@ -37,7 +35,7 @@
     google.script.run
       .withSuccessHandler(show)
       .withFailureHandler(function (e) {
-        document.getElementById('root').innerHTML =
+        el('root').innerHTML =
           '<div class="banner err">' + esc(e.message) + '</div>';
       })
       .apiVerifyAllotment(P.id, P.sig);
@@ -45,7 +43,7 @@
 
   /** Camera-free entry. A warden at a gate cannot be stopped by a bad photocopy. */
   function showManualEntry(intro, error) {
-    document.getElementById('root').innerHTML =
+    el('root').innerHTML =
       (error ? '<div class="banner err">' + esc(error) + '</div>' : '') +
       '<div class="card"><h2>Verify a letter</h2>' +
       '<p class="small muted" style="margin:-4px 0 12px">' + esc(intro) + '</p>' +
@@ -64,7 +62,7 @@
 
   function checkCode() {
     var v = (document.getElementById('codeInput') || {}).value || '';
-    document.getElementById('root').innerHTML =
+    el('root').innerHTML =
       '<div class="empty"><span class="spin"></span> Checking&hellip;</div>';
     google.script.run
       .withSuccessHandler(show)
@@ -74,7 +72,7 @@
 
   function show(r) {
     if (!r.valid) {
-      document.getElementById('root').innerHTML =
+      el('root').innerHTML =
         '<div class="verdict bad"><div class="icon">&#10007;</div>' +
         '<div class="t">Not verified</div>' +
         '<div class="s">' + esc(r.reason) + '</div></div>' +
@@ -86,7 +84,7 @@
       return;
     }
 
-    document.getElementById('root').innerHTML =
+    el('root').innerHTML =
       '<div class="verdict good"><div class="icon">&#10003;</div>' +
       '<div class="t">Genuine allotment letter</div>' +
       '<div class="s">Verified ' + esc(r.checkedAt) + '</div></div>' +

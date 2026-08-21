@@ -1,16 +1,16 @@
 <?!= include('ui/styles'); ?>
-<header class="top">
-  <div class="inner">
-    <div>
-      <h1>GGSIPU Hostel Portal</h1>
-      <div class="sub">Hostel allocation for session 2026&ndash;27</div>
-    </div>
-  </div>
-</header>
-<div class="wrap">
-  <div class="card center" style="padding:44px 20px">
-    <h3>Please sign in</h3>
-    <p class="muted">This portal identifies you by your Google account. Open this page while
-    signed in to continue to your hostel application.</p>
-  </div>
-</div>
+<?!= include('ui/chrome'); ?>
+
+<div id="chrome"></div>
+<div class="wrap narrow" id="root"></div>
+
+<script>
+  paintChrome({ unit: 'Hostel Allocation Portal' });
+  el('root').innerHTML = card('',
+    '<div class="empty"><div class="big">&#127891;</div>' +
+    '<h3 style="margin:0 0 6px">Sign in to continue</h3>' +
+    '<p class="small" style="max-width:430px;display:inline-block;margin:0">' +
+    'This portal identifies you by your Google account, so there is no separate password ' +
+    'to remember. Open this page while signed in to your Google account to see your ' +
+    'hostel application.</p></div>');
+</script>

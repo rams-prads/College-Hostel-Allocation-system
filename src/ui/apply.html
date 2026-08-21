@@ -1,18 +1,10 @@
 <!-- Application form. Drag-to-rank preferences are the reason this is a custom
      page rather than a Google Form - Forms cannot express an ordered list. -->
 <?!= include('ui/styles'); ?>
+<?!= include('ui/chrome'); ?>
 
-<header class="top">
-  <div class="inner">
-    <div>
-      <h1>Hostel Application</h1>
-      <div class="sub">Academic session 2026&ndash;27</div>
-    </div>
-    <div class="who"><a href="?" style="color:inherit">Back to my application</a></div>
-  </div>
-</header>
-
-<div class="wrap" id="root"><div class="empty">Loading&hellip;</div></div>
+<div id="chrome"></div>
+<div class="wrap narrow" id="root"></div>
 
 <script>
   var FORM = null;
@@ -21,28 +13,34 @@
   var campusPref = 'ANY';
   var needsAccessible = false;
 
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
-    });
-  }
-  function el(id) { return document.getElementById(id); }
+  el('root').innerHTML = loadingState('Loading the application form');
 
   google.script.run.withSuccessHandler(boot).withFailureHandler(function (e) {
-    el('root').innerHTML = '<div class="banner err">' + esc(e.message) + '</div>';
+    el('root').innerHTML = banner('err', e.message);
   }).apiGetApplyForm();
 
   function boot(f) {
     FORM = f;
+    paintChrome({
+      unit: 'Hostel Application',
+      user: f.student ? { name: f.student.name } : null,
+      tabs: [
+        { label: 'My Application', href: '?' },
+        { label: 'Application Form', href: '?page=apply', on: true }
+      ]
+    });
+
     if (!f.signedIn) {
-      el('root').innerHTML = '<div class="card center"><h3>Please sign in</h3></div>'; return;
+      el('root').innerHTML = card('', emptyState('&#128274;', 'Please sign in',
+        'Open this page while signed in to your Google account.')); return;
     }
     if (f.unregistered) {
-      el('root').innerHTML = '<div class="card"><h3>No student record found</h3>' +
-        '<p class="muted">Your account is not linked to a student record.</p></div>'; return;
+      el('root').innerHTML = card('', emptyState('&#128100;', 'No student record found',
+        'Your account is not linked to a student record.')); return;
     }
     if (!f.applicationsOpen) {
-      el('root').innerHTML = '<div class="card"><h3>Applications are closed</h3></div>'; return;
+      el('root').innerHTML = card('', emptyState('&#128197;', 'Applications are closed',
+        'The hostel application window is not currently open.')); return;
     }
 
     if (f.draft) {
@@ -62,67 +60,62 @@
     var s = f.student;
     return '<div id="msg"></div>' +
 
-      '<div class="card"><h2>Your details</h2>' +
-        '<dl class="kv">' +
+      card('Your details',
+        '<dl class="kv" style="gap:7px 20px;font-size:13.5px">' +
           '<dt>Name</dt><dd>' + esc(s.name) + '</dd>' +
-          '<dt>Enrolment no.</dt><dd>' + esc(s.enrollmentNo) + '</dd>' +
+          '<dt>Enrolment number</dt><dd>' + esc(s.enrollmentNo) + '</dd>' +
           '<dt>Programme</dt><dd>' + esc(s.programme) + ' ' + esc(s.branch) +
             ', year ' + esc(s.year) + '</dd>' +
-          '<dt>Category</dt><dd>' + esc(s.category) + (s.isPwD ? ' &middot; PwD' : '') + '</dd>' +
-          '<dt>Home PIN</dt><dd>' + esc(s.homePincode) + ' (' + esc(s.homeState) + ')</dd>' +
+          '<dt>Category</dt><dd>' + esc(label('category', s.category, s.category)) +
+            (s.isPwD ? ' &middot; Person with Disability' : '') + '</dd>' +
+          '<dt>Home PIN code</dt><dd>' + esc(s.homePincode) + ' (' + esc(s.homeState) + ')</dd>' +
         '</dl>' +
-        '<p class="small muted" style="margin:11px 0 0">These come from the university registry. ' +
-        'Contact the hostel office if anything is wrong &mdash; they affect your eligibility and score.</p>' +
-      '</div>' +
+        '<p class="small muted" style="margin:13px 0 0">These come from the university registry. ' +
+        'Contact the hostel office if anything is wrong &mdash; they affect both your eligibility ' +
+        'and your position in the merit order.</p>') +
 
-      '<div class="card"><h2>Campus preference</h2>' +
+      card('Campus preference',
         '<div class="seg" id="campus"></div>' +
-        '<p class="small muted" style="margin:9px 0 0">Dwarka and East Delhi are allocated from a ' +
-        'single merit pool, so this only biases your room preferences &mdash; it does not restrict ' +
-        'where you can be allotted.</p>' +
-      '</div>' +
+        '<p class="small muted" style="margin:11px 0 0">Dwarka and East Delhi are allocated from ' +
+        'a single merit list, so this only orders your room choices &mdash; it does not restrict ' +
+        'where you can be placed.</p>') +
 
-      '<div class="card"><h2>Room preferences</h2>' +
-        '<p class="small muted" style="margin:-4px 0 12px">Pick up to ' + esc(f.maxPreferences) +
-        ' choices, then drag to put them in order. Rank 1 is your first choice.</p>' +
+      card('Room preferences',
+        '<p class="small muted" style="margin:0 0 14px">Choose up to ' + esc(f.maxPreferences) +
+        ' options, then put them in order. Your first choice goes at the top.</p>' +
         '<div id="chosenWrap"></div>' +
         '<div class="divider"></div>' +
-        '<div class="grp-title" style="margin-bottom:7px">Available options</div>' +
-        '<div id="options"></div>' +
-      '</div>' +
+        '<div class="grp-title">Available options</div>' +
+        '<div id="options"></div>') +
 
-      '<div class="card"><h2>Accessibility</h2>' +
-        '<label class="field" style="display:flex;gap:9px;align-items:flex-start;margin:0">' +
+      card('Accessibility',
+        '<label style="display:flex;gap:11px;align-items:flex-start;cursor:pointer">' +
           '<input type="checkbox" id="acc" ' + (needsAccessible ? 'checked' : '') +
             ' style="width:auto;margin-top:3px" onchange="needsAccessible=this.checked">' +
-          '<span><span class="lab" style="margin:0">I need an accessible room</span>' +
+          '<span><span style="font-weight:600;font-size:14px">I need an accessible room</span>' +
           '<span class="help">Ground floor, step-free access and an adapted washroom. ' +
-          'Requires a disability certificate at verification.</span></span>' +
-        '</label>' +
-      '</div>' +
+          'A disability certificate is required at verification.</span></span></label>') +
 
-      '<div class="card"><h2>Roommate questionnaire</h2>' +
-        '<p class="small muted" style="margin:-4px 0 13px">Used only to pair you with compatible ' +
-        'roommates inside the room type you are allotted. It never affects which room you get.</p>' +
-        '<div id="life"></div>' +
-      '</div>' +
+      card('Roommate questionnaire',
+        '<p class="small muted" style="margin:0 0 16px">Used only to pair you with compatible ' +
+        'roommates within the room type you are allotted. It never affects which room you get.</p>' +
+        '<div id="life"></div>') +
 
-      '<div class="card"><h2>Documents you will need</h2>' +
-        f.documents.map(function (d) {
-          return '<div class="doc"><div class="body">' +
-            '<div class="n">' + esc(d.label) + '</div>' +
-            '<div class="h">' + esc(d.hint) + '</div>' +
-            '<div class="w">' + esc(d.why) + '</div></div></div>';
-        }).join('') +
-        '<p class="small muted" style="margin:11px 0 0">Upload happens after you submit. ' +
-        'This list is built from your own registry record, so you are never asked for a ' +
-        'certificate that does not apply to you.</p>' +
-      '</div>' +
+      card('Documents you will need',
+        '<ul class="rows" style="margin:-18px -18px 0">' + f.documents.map(function (d) {
+          return '<li><span class="body"><span class="n">' + esc(d.label) + '</span>' +
+            '<span class="d">' + esc(d.hint) + '</span>' +
+            '<span class="why">' + esc(d.why) + '</span></span></li>';
+        }).join('') + '</ul>' +
+        '<p class="small muted" style="margin:16px 0 0">Upload happens after you submit. This list ' +
+        'is built from your own registry record, so you are never asked for a certificate that ' +
+        'does not apply to you.</p>') +
 
-      '<div class="card"><div class="btn-row">' +
+      card('', '<div class="btn-row">' +
         '<button class="btn" id="submitBtn" onclick="save(true)">Submit application</button>' +
-        '<button class="btn quiet" onclick="save(false)">Save draft</button>' +
-      '</div></div>';
+        '<button class="btn ghost" onclick="save(false)">Save as draft</button>' +
+        '<span class="small muted">You can edit this until results are published.</span>' +
+      '</div>');
   }
 
   /* ------------------------------------------------------------- campus */
@@ -145,14 +138,14 @@
     }
     var full = chosen.length >= FORM.maxPreferences;
     el('options').innerHTML = avail.length
-      ? avail.map(function (o) {
-          return '<div class="doc"><div class="body">' +
-            '<div class="n">' + esc(o.hostelName) + ' &middot; ' + esc(o.roomTypeLabel) + '</div>' +
-            '<div class="h">' + esc(o.campus) + ' &middot; ' + esc(o.rooms) + ' rooms</div></div>' +
-            '<button class="btn ghost" ' + (full ? 'disabled' : '') +
-            ' onclick="addPref(\'' + o.key + '\')">Add</button></div>';
-        }).join('')
-      : '<p class="muted small">All available options are in your list.</p>';
+      ? '<ul class="rows" style="margin:0 -18px -18px">' + avail.map(function (o) {
+          return '<li><span class="body"><span class="n">' + esc(o.hostelName) + '</span>' +
+            '<span class="d">' + esc(label('campus', o.campus)) + ' &middot; ' +
+            esc(o.roomTypeLabel) + ' &middot; ' + esc(o.rooms) + ' rooms</span></span>' +
+            '<button class="btn ghost sm" ' + (full ? 'disabled' : '') +
+            ' onclick="addPref(\'' + o.key + '\')">Add</button></li>';
+        }).join('') + '</ul>'
+      : '<p class="muted small" style="margin:0">All available options are in your list.</p>';
   }
 
   function addPref(key) {
@@ -175,7 +168,8 @@
   function paintChosen() {
     if (!chosen.length) {
       el('chosenWrap').innerHTML =
-        '<p class="muted small">No preferences chosen yet. Add options from the list below.</p>';
+        '<p class="muted small" style="margin:0">Nothing chosen yet. Add options from the list ' +
+        'below, then drag them into the order you want.</p>';
       return;
     }
     var byKey = {};
@@ -185,23 +179,21 @@
       var o = byKey[key];
       if (!o) return '';
       return '<li draggable="true" data-i="' + i + '">' +
-        '<span class="rank">' + (i + 1) + '</span>' +
-        '<span class="grip" aria-hidden="true">⠿</span>' +
-        '<span class="meta"><span class="n">' + esc(o.hostelName) + ' &middot; ' +
-          esc(o.roomTypeLabel) + '</span>' +
-        '<span class="d">' + esc(o.campus) + '</span></span>' +
-        '<button class="btn quiet" style="padding:4px 9px;font-size:12px" ' +
-          'onclick="movePref(' + i + ',' + (i - 1) + ')" ' + (i === 0 ? 'disabled' : '') +
-          ' aria-label="Move up">↑</button>' +
-        '<button class="btn quiet" style="padding:4px 9px;font-size:12px" ' +
-          'onclick="movePref(' + i + ',' + (i + 1) + ')" ' +
-          (i === chosen.length - 1 ? 'disabled' : '') + ' aria-label="Move down">↓</button>' +
-        '<button class="btn quiet" style="padding:4px 9px;font-size:12px" ' +
-          'onclick="removePref(\'' + key + '\')" aria-label="Remove">✕</button>' +
+        '<span class="idx amber">' + (i + 1) + '</span>' +
+        '<span class="body"><span class="n">' + esc(o.hostelName) + '</span>' +
+        '<span class="d">' + esc(label('campus', o.campus)) + ' &middot; ' +
+          esc(o.roomTypeLabel) + '</span></span>' +
+        '<button class="btn ghost sm" onclick="movePref(' + i + ',' + (i - 1) + ')" ' +
+          (i === 0 ? 'disabled' : '') + ' aria-label="Move up">&uarr;</button>' +
+        '<button class="btn ghost sm" onclick="movePref(' + i + ',' + (i + 1) + ')" ' +
+          (i === chosen.length - 1 ? 'disabled' : '') + ' aria-label="Move down">&darr;</button>' +
+        '<button class="btn ghost sm" onclick="removePref(\'' + key + '\')" ' +
+          'aria-label="Remove">&times;</button>' +
         '</li>';
     }).join('');
 
-    el('chosenWrap').innerHTML = '<ul class="pref-list" id="chosenList">' + items + '</ul>';
+    el('chosenWrap').innerHTML = '<ul class="rows" id="chosenList" ' +
+      'style="border:1px solid var(--border);border-radius:var(--r)">' + items + '</ul>';
     wireDrag();
   }
 
@@ -293,11 +285,11 @@
       .withSuccessHandler(function (res) {
         if (submit) { window.top.location.href = window.top.location.pathname; return; }
         btn.disabled = false; btn.textContent = 'Submit application';
-        banner('good', 'Draft saved. You can come back and finish later.');
+        say('good', 'Draft saved. You can come back and finish it later.');
       })
       .withFailureHandler(function (e) {
         btn.disabled = false; btn.textContent = 'Submit application';
-        banner('err', e.message);
+        say('err', e.message);
       })
       .apiSaveApplication({
         campusPref: campusPref,
@@ -308,8 +300,8 @@
       });
   }
 
-  function banner(kind, text) {
-    el('msg').innerHTML = '<div class="banner ' + kind + '">' + esc(text) + '</div>';
+  function say(kind, text) {
+    el('msg').innerHTML = banner(kind, text);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 </script>

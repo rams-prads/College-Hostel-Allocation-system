@@ -1,93 +1,207 @@
 <?!= include('ui/styles'); ?>
-<style>
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 11px; }
-  .tile { background: var(--surface-2); border-radius: 9px; padding: 13px 15px; }
-  .tile .n { font-size: 25px; font-weight: 680; letter-spacing: -.02em; line-height: 1.1;
-             font-variant-numeric: tabular-nums; }
-  .tile .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  table.grid { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  table.grid th { text-align: left; font-size: 11.5px; text-transform: uppercase;
-                  letter-spacing: .05em; color: var(--muted); font-weight: 620;
-                  padding: 0 10px 7px 0; border-bottom: 1px solid var(--border); }
-  table.grid td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border);
-                  vertical-align: middle; }
-  table.grid tr:last-child td { border-bottom: 0; }
-  .meter { height: 7px; background: var(--surface-2); border-radius: 4px;
-           overflow: hidden; min-width: 80px; }
-  .meter i { display: block; height: 100%; background: var(--accent); }
-  .meter i.hot { background: var(--bad); }
-  .num { font-variant-numeric: tabular-nums; text-align: right; }
-  .ledger-ok  { background: var(--ok-soft);  border: 1px solid var(--ok);  color: var(--ok); }
-  .ledger-bad { background: var(--bad-soft); border: 1px solid var(--bad); color: var(--bad); }
-  .ledger { padding: 13px 15px; border-radius: 9px; font-size: 13.5px; }
-  .ledger .t { font-weight: 640; font-size: 14.5px; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-</style>
+<?!= include('ui/chrome'); ?>
 
-<header class="top">
-  <div class="inner">
-    <div><h1>Administrator Dashboard</h1><div class="sub">GGSIPU Hostel Allocation</div></div>
-    <div class="who" id="who"><a href="?" style="color:inherit">Student view</a></div>
-  </div>
-</header>
-
-<div class="wrap" id="root"><div class="empty">Loading dashboard&hellip;</div></div>
+<div id="chrome"></div>
+<div class="wrap" id="root"></div>
 
 <script>
-  var D = null;
-
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
-    });
-  }
-  function el(id) { return document.getElementById(id); }
+  var D = null, KNOBS = [], PENDING = {};
+  el('root').innerHTML = loadingState('Loading dashboard');
 
   function load() {
     google.script.run.withSuccessHandler(render).withFailureHandler(function (e) {
-      el('root').innerHTML = '<div class="banner err">' + esc(e.message) + '</div>';
+      el('root').innerHTML = banner('err', e.message);
     }).apiAdminOverview();
   }
   load();
 
   function render(d) {
     D = d;
-    el('who').innerHTML = esc(d.admin.name || d.admin.email) + ' &middot; ' + esc(d.admin.role) +
-      ' &middot; <a href="?" style="color:inherit">Student view</a>';
+    paintChrome({
+      unit: 'Hostel Administration',
+      user: { name: d.admin.name || d.admin.email, role: d.admin.role.replace(/_/g, ' ') },
+      tabs: [
+        { label: 'Overview', href: '?page=admin', on: true },
+        { label: 'Student View', href: '?' }
+      ]
+    });
 
     var m = d.latestRun && d.latestRun.metrics ? d.latestRun.metrics.summary : null;
 
     el('root').innerHTML = [
       '<div id="msg"></div>',
+      summaryBand(d),
       ledgerCard(d),
-      countsCard(d),
+      m ? sect('Allocation outcome', d.latestRun.finishedAt ? 'last run ' + d.latestRun.finishedAt : '') : '',
       m ? metricsCard(d, m) : noRunCard(),
-      occupancyCard(d),
       m ? quotaCard(d.latestRun.metrics) : '',
+      sect('Occupancy and vacancies'),
+      occupancyCard(d),
+      sect('Students'),
       lookupCard(),
+      sect('Policy'),
       '<div id="simCard"></div>',
+      sect('Requests'),
       '<div id="grievCard"></div>',
       '<div id="swapCard"></div>',
+      sect('Operations'),
       operationsCard(d)
     ].join('');
 
-    loadSimulator();
-    loadGrievances();
-    loadSwaps();
+    loadSimulator(); loadGrievances(); loadSwaps();
   }
 
-  /* ============================================== student lookup / view-as */
+  function sect(title, note) {
+    return '<div class="sect"><h2>' + esc(title) + '</h2>' +
+           (note ? '<span class="note">' + esc(note) + '</span>' : '') + '</div>';
+  }
 
+  /* ------------------------------------------------------ summary band */
+  function summaryBand(d) {
+    var c = d.counts, cap = d.capacity;
+    return '<div class="tiles" style="margin-bottom:14px">' +
+      tile(c.applications, 'Applications', '') +
+      tile(c.allotted, 'Rooms allotted', 'good') +
+      tile(c.waitlisted, 'On waiting list', c.waitlisted ? 'hi' : '') +
+      tile(c.rejected, 'Not eligible', '') +
+      tile(cap.vacant, 'Beds vacant', '') +
+      tile(d.docQueue, 'Documents to check', d.docQueue ? 'hi' : '') +
+    '</div>';
+  }
+  function tile(n, l, kind) {
+    return '<div class="tile ' + (kind || '') + '"><div class="n">' + esc(n) +
+           '</div><div class="l">' + esc(l) + '</div></div>';
+  }
+
+  /* ----------------------------------------------------------- ledger */
+  function ledgerCard(d) {
+    var ok = d.ledger.intact;
+    return card('Audit ledger',
+      '<div class="status ' + (ok ? 'good' : 'bad') + '">' +
+        '<div class="sic">' + (ok ? '&#10003;' : '&#10007;') + '</div>' +
+        '<div><div class="t">' + (ok ? 'Records intact' : 'Tampering detected') + '</div>' +
+        '<div class="s">' + esc(d.ledger.reason) + '</div></div></div>' +
+      '<div class="btn-row" style="margin-top:13px">' +
+        '<button class="btn ghost sm" onclick="showLedger()">View recent activity</button>' +
+      '</div><div id="ledgerDetail"></div>');
+  }
+
+  function showLedger() {
+    el('ledgerDetail').innerHTML = loadingState('Reading the ledger');
+    google.script.run.withSuccessHandler(function (r) {
+      var rows = r.recent.map(function (e) {
+        return '<tr><td>' + esc(e.ts) + '</td>' +
+          '<td>' + esc(String(e.action).replace(/_/g, ' ').toLowerCase()) + '</td>' +
+          '<td class="muted small">' + esc(e.actor) + '</td>' +
+          '<td class="mono">' + esc(e.hash) + '&hellip;</td></tr>';
+      }).join('');
+      el('ledgerDetail').innerHTML =
+        '<div class="divider"></div><div class="scroll-x"><table class="grid">' +
+        '<thead><tr><th>When</th><th>Activity</th><th>By</th><th>Fingerprint</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table></div>' +
+        '<p class="small muted" style="margin:11px 0 0">Each entry&rsquo;s fingerprint covers the ' +
+        'one before it. Altering any past record breaks every fingerprint that follows, which is ' +
+        'what makes the history verifiable rather than merely stored.</p>';
+    }).apiAdminVerifyLedger();
+  }
+
+  /* ---------------------------------------------------------- metrics */
+  function noRunCard() {
+    return card('', '<div class="empty"><div class="big">&#9881;</div>' +
+      '<h3 style="margin:0 0 5px">No allocation has been run yet</h3>' +
+      '<p class="small" style="max-width:430px;display:inline-block;margin:0 0 16px">' +
+      'Running the allocation produces room allotments, a waiting list and fairness measures.</p><br>' +
+      '<div class="btn-row" style="justify-content:center">' +
+      '<button class="btn" onclick="runAllocation()">Run allocation</button>' +
+      '<button class="btn ghost" onclick="preview()">Preview without saving</button></div></div>');
+  }
+
+  function metricsCard(d, m) {
+    var body =
+      '<div class="tiles">' +
+        tile(m.pref1Pct + '%', 'Got their first choice', '') +
+        tile(m.meanPrefRank, 'Average choice granted', '') +
+        tile(m.utilisationPct + '%', 'Beds in use', m.utilisationPct >= 95 ? 'good' : 'hi') +
+        tile(m.meanCompatPct + '%', 'Roommate compatibility', '') +
+        tile(m.accessibilityHonouredPct + '%', 'Accessibility honoured',
+             m.accessibilityHonouredPct === 100 ? 'good' : 'bad') +
+      '</div>' +
+      '<div class="status good" style="margin-top:14px">' +
+        '<div class="sic">&#10003;</div><div>' +
+        '<div class="t">No student can be better off without another being worse off</div>' +
+        '<div class="s">After allocating, the engine searched for any two students who would ' +
+        'both prefer each other&rsquo;s room, and found ' + esc(m.paretoSwaps) + '.</div></div></div>' +
+      techDetails('Run details for audit', [
+        ['Run identifier', d.latestRun.runId, 'mono'],
+        ['Random seed', d.latestRun.seed, 'mono'],
+        ['Policy fingerprint', d.latestRun.policyHash, 'mono'],
+        ['Completed', d.latestRun.finishedAt],
+        ['Fairness spread (Gini)', String(m.giniSatisfaction)]
+      ]) +
+      '<p class="small muted" style="margin:11px 0 0">The seed and policy fingerprint together ' +
+      'make this run repeatable: running it again with both unchanged produces an identical ' +
+      'allocation, months later.</p>';
+
+    return card('Fairness and efficiency', body);
+  }
+
+  function quotaCard(metrics) {
+    var rows = metrics.quotaTable.map(function (q) {
+      if (q.category === 'CONVERTED') {
+        return '<tr><td><strong>Converted places</strong>' +
+          '<div class="muted small">reserved places no category could fill, reissued in merit order</div></td>' +
+          '<td class="num muted">&mdash;</td><td class="num"><strong>' + esc(q.filled) +
+          '</strong></td><td class="num muted">&mdash;</td></tr>';
+      }
+      var name = q.category === 'PwD (horizontal)' ? 'PwD (across all categories)'
+                                                   : label('category', q.category, q.category);
+      return '<tr><td>' + esc(name) + '</td>' +
+        '<td class="num">' + esc(q.reservedSeats) + '</td>' +
+        '<td class="num">' + esc(q.filled) + '</td>' +
+        '<td class="num">' + (q.unfilled > 0
+          ? '<span class="muted">' + esc(q.unfilled) + ' reissued</span>'
+          : '<span class="pill ok plain">full</span>') + '</td></tr>';
+    }).join('');
+
+    return card('Reservation compliance',
+      '<div class="scroll-x"><table class="grid"><thead><tr><th>Category</th>' +
+      '<th class="num">Places reserved</th><th class="num">Filled</th>' +
+      '<th class="num">Unfilled</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div style="padding:14px 18px"><p class="small muted" style="margin:0">' +
+      'Places a category could not fill are reissued to the waiting list in strict merit order ' +
+      'rather than left empty.</p></div>', { tight: true });
+  }
+
+  /* -------------------------------------------------------- occupancy */
+  function occupancyCard(d) {
+    var rows = d.occupancy.map(function (h) {
+      var cls = h.pct >= 99 ? 'full' : (h.pct >= 90 ? 'hot' : '');
+      return '<tr><td><strong>' + esc(h.name) + '</strong>' +
+        '<div class="muted small">' + esc(label('campus', h.campus)) + ' &middot; ' +
+        esc(label('gender', h.gender)) + '</div></td>' +
+        '<td style="width:32%"><span class="meter"><i class="' + cls +
+          '" style="width:' + h.pct + '%"></i></span></td>' +
+        '<td class="num"><strong>' + esc(h.pct) + '%</strong></td>' +
+        '<td class="num muted">' + esc(h.occupied) + ' / ' + esc(h.total) + '</td>' +
+        '<td class="num">' + (h.vacant ? esc(h.vacant) : '<span class="muted">none</span>') +
+        '</td></tr>';
+    }).join('');
+    return card('', '<div class="scroll-x"><table class="grid"><thead><tr>' +
+      '<th>Hostel</th><th>Occupancy</th><th class="num">%</th>' +
+      '<th class="num">Beds used</th><th class="num">Vacant</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>', { tight: true });
+  }
+
+  /* ----------------------------------------------------- student lookup */
   function lookupCard() {
-    return '<div class="card"><h2>Look up a student</h2>' +
-      '<p class="small muted" style="margin:-4px 0 11px">Open any applicant\u2019s portal exactly ' +
-      'as they see it, including the explanation of their own outcome. Useful at a counter, and ' +
-      'the fastest way to answer "why did I not get a room".</p>' +
-      '<label class="field" style="margin-bottom:9px">' +
-      '<input type="text" id="lookupQ" placeholder="Name, enrolment number or application ID" ' +
-      'oninput="doLookup(this.value)"></label>' +
-      '<div id="lookupResults"></div>' +
-      '<div id="studentView"></div></div>';
+    return card('Look up a student',
+      '<p class="small muted" style="margin:0 0 13px">Open any applicant&rsquo;s portal exactly as ' +
+      'they see it, including the explanation of their own outcome. The fastest way to answer ' +
+      '&ldquo;why did I not get a room&rdquo;.</p>' +
+      '<label class="field" style="margin-bottom:10px">' +
+      '<input type="text" id="lookupQ" placeholder="Search by name, enrolment number or reference" ' +
+      'oninput="doLookup(this.value)" autocomplete="off"></label>' +
+      '<div id="lookupResults"></div><div id="studentView"></div>');
   }
 
   var lookupTimer = null;
@@ -97,129 +211,138 @@
     lookupTimer = setTimeout(function () {
       google.script.run.withSuccessHandler(function (rows) {
         if (!rows.length) {
-          el('lookupResults').innerHTML = '<p class="muted small">No match.</p>';
-          return;
+          el('lookupResults').innerHTML = '<p class="muted small">No match.</p>'; return;
         }
         el('lookupResults').innerHTML = '<div class="scroll-x"><table class="grid"><tbody>' +
           rows.map(function (r) {
             return '<tr><td><strong>' + esc(r.name) + '</strong>' +
-              '<div class="muted small">' + esc(r.enrollmentNo) + ' \u00b7 ' +
-              esc(r.programme) + ' \u00b7 ' + esc(r.category) + '</div></td>' +
-              '<td><span class="pill info">' + esc(r.status.toLowerCase()) + '</span></td>' +
-              '<td><button class="btn ghost" style="padding:5px 11px;font-size:13px" ' +
-              'onclick="viewStudent(&quot;' + esc(r.appId) + '&quot;)">Open portal</button></td></tr>';
+              '<div class="muted small">' + esc(r.enrollmentNo) + ' &middot; ' +
+              esc(r.programme) + ' &middot; ' + esc(label('category', r.category, r.category)) +
+              '</div></td>' +
+              '<td>' + pill('info', label('status', r.status)) + '</td>' +
+              '<td class="num"><button class="btn ghost sm" onclick="viewStudent(&quot;' +
+              esc(r.appId) + '&quot;)">Open portal</button></td></tr>';
           }).join('') + '</tbody></table></div>';
       }).withFailureHandler(function () {}).apiAdminFindStudent(q);
     }, 250);
   }
 
   function viewStudent(appId) {
-    el('studentView').innerHTML =
-      '<div class="banner info" style="margin-top:12px"><span class="spin"></span> Loading\u2026</div>';
-    google.script.run
-      .withSuccessHandler(paintStudentView)
+    el('studentView').innerHTML = loadingState('Opening');
+    google.script.run.withSuccessHandler(paintStudentView)
       .withFailureHandler(function (e) {
-        el('studentView').innerHTML = '<div class="banner err" style="margin-top:12px">' +
-          esc(e.message) + '</div>';
-      })
-      .apiGetStudentView(appId);
+        el('studentView').innerHTML = banner('err', e.message);
+      }).apiGetStudentView(appId);
   }
 
   function paintStudentView(v) {
     if (!v.student) { el('studentView').innerHTML = ''; return; }
-
     var outcome;
     if (v.allocation) {
-      outcome = '<div class="ledger ledger-ok"><div class="t">Room ' + esc(v.allocation.roomNo) +
-        ' \u00b7 ' + esc(v.allocation.hostelName) + '</div><div>' +
+      outcome = '<div class="status good"><div class="sic">&#10003;</div><div>' +
+        '<div class="t">Room ' + esc(v.allocation.roomNo) + ' &middot; ' +
+        esc(v.allocation.hostelName) + '</div><div class="s">' +
         (v.allocation.prefRankMet >= 1 ? 'Preference ' + esc(v.allocation.prefRankMet) + ' granted'
-                                       : 'Assigned outside stated preferences') +
-        (v.allocation.isAccessible ? ' \u00b7 accessible room' : '') + '</div></div>';
+                                       : 'Assigned beyond stated preferences') +
+        (v.allocation.isAccessible ? ' &middot; accessible room' : '') + '</div></div></div>';
     } else if (v.waitlist) {
-      outcome = '<div class="ledger" style="background:var(--warn-soft);border:1px solid var(--warn);' +
-        'color:var(--warn)"><div class="t">Waiting list position ' + esc(v.waitlist.position) +
-        '</div><div>' + esc(v.waitlist.etaPercent) + '% estimated chance of allotment</div></div>';
-    } else {
-      outcome = '<div class="ledger" style="background:var(--bad-soft);border:1px solid var(--bad);' +
-        'color:var(--bad)"><div class="t">' + esc(v.application ? v.application.status : 'No application') +
+      outcome = '<div class="status" style="background:var(--warn-soft);' +
+        'border-color:var(--warn-line);color:var(--warn)">' +
+        '<div class="sic" style="background:var(--warn);color:#fff">!</div><div>' +
+        '<div class="t">Waiting list position ' + esc(v.waitlist.position) + '</div>' +
+        '<div class="s">' + esc(v.waitlist.etaPercent) + '% estimated chance of allotment</div>' +
         '</div></div>';
+    } else {
+      outcome = '<div class="status bad"><div class="sic">&#10007;</div><div><div class="t">' +
+        esc(label('status', v.application ? v.application.status : 'NONE')) +
+        '</div></div></div>';
     }
 
     var why = '';
     if (v.explanation) {
-      why = '<div class="grp-title" style="margin:14px 0 7px">What this student is shown</div>' +
-        '<div class="why"><h3 style="margin:0 0 9px">' + esc(v.explanation.headline) + '</h3>' +
+      why = '<div class="grp-title" style="margin:16px 0 8px">What this student is shown</div>' +
         v.explanation.groups.map(function (g) {
-          return '<div class="grp"><div class="grp-title">' + esc(g.title) + '</div><ul>' +
-            g.items.map(function (i) {
-              return '<li class="' + (i.ok ? 'yes' : 'no') + '"><span class="mark">' +
-                (i.ok ? '\u2713' : '\u2717') + '</span><span>' + esc(i.text) + '</span></li>';
+          return '<div class="grp"><div class="grp-title">' + esc(g.title) + '</div>' +
+            '<ul class="reasons">' + g.items.map(function (i) {
+              return '<li class="' + (i.ok ? 'yes' : 'no') + '"><span class="mk">' +
+                (i.ok ? '&#10003;' : '&#10007;') + '</span><span>' + esc(i.text) + '</span></li>';
             }).join('') + '</ul></div>';
-        }).join('') + '</div>';
+        }).join('');
     }
 
     el('studentView').innerHTML = '<div class="divider"></div>' +
       '<h3 style="margin:0 0 3px">' + esc(v.student.name) + '</h3>' +
-      '<p class="muted small" style="margin:0 0 11px">' + esc(v.student.enrollmentNo) + ' \u00b7 ' +
-      esc(v.student.programme) + ' ' + esc(v.student.branch) + ', year ' + esc(v.student.year) +
-      ' \u00b7 ' + esc(v.student.category) + (v.student.isPwD ? ' PwD' : '') +
-      ' \u00b7 ' + esc(v.student.homeState) + '</p>' +
+      '<p class="muted small" style="margin:0 0 13px">' + esc(v.student.enrollmentNo) +
+      ' &middot; ' + esc(v.student.programme) + ' ' + esc(v.student.branch) +
+      ', year ' + esc(v.student.year) + ' &middot; ' +
+      esc(label('category', v.student.category, v.student.category)) +
+      (v.student.isPwD ? ' (PwD)' : '') + ' &middot; ' + esc(v.student.homeState) + '</p>' +
       outcome + why +
-      '<div class="btn-row" style="margin-top:12px">' +
-      '<button class="btn quiet" onclick="el(&quot;studentView&quot;).innerHTML=&quot;&quot;">Close</button></div>';
+      '<div class="btn-row" style="margin-top:14px"><button class="btn ghost sm" ' +
+      'onclick="closeStudentView()">Close</button></div>';
   }
 
-  /* ================================================= what-if simulator */
+  function closeStudentView() { el('studentView').innerHTML = ''; }
 
-  var KNOBS = [], PENDING = {};
-
+  /* ==================================================== what-if simulator */
   function loadSimulator() {
-    google.script.run.withSuccessHandler(function (k) {
-      KNOBS = k; paintSimulator();
-    }).withFailureHandler(function () {}).apiAdminSimulatorKnobs();
+    el('simCard').innerHTML = card('What-if simulator', loadingState('Loading policy settings'));
+    google.script.run.withSuccessHandler(function (k) { KNOBS = k; paintSimulator(); })
+      .withFailureHandler(function () { el('simCard').innerHTML = ''; }).apiAdminSimulatorKnobs();
   }
 
   function paintSimulator() {
-    var rows = KNOBS.map(function (k, i) {
-      var pending = PENDING[k.category + '|' + k.key];
-      var val = pending !== undefined ? pending : k.value;
-      var changed = pending !== undefined && Number(pending) !== Number(k.value);
-      return '<tr><td><div class="n" style="font-weight:560">' + esc(k.label) + '</div>' +
-        '<div class="muted small">' + esc(k.help) + '</div></td>' +
-        '<td style="width:150px"><input type="number" step="' + esc(k.step) + '" min="' +
-          esc(k.min) + '" max="' + esc(k.max) + '" value="' + esc(val) +
-          '" oninput="setKnob(' + i + ', this.value)" ' +
-          'style="' + (changed ? 'border-color:var(--accent);font-weight:600' : '') + '"></td>' +
-        '<td class="num muted small">' + (changed ? 'was ' + esc(k.value) : '') + '</td></tr>';
-    }).join('');
+    var groups = { reservation: [], weight: [], eligibility: [], capacity: [] };
+    KNOBS.forEach(function (k, i) { if (groups[k.category]) groups[k.category].push({ k: k, i: i }); });
 
-    var pendingCount = Object.keys(PENDING).filter(function (key) {
-      var k = KNOBS.filter(function (x) { return x.category + '|' + x.key === key; })[0];
-      return k && Number(PENDING[key]) !== Number(k.value);
-    }).length;
+    var titles = {
+      reservation: 'Reserved places', weight: 'What the merit score rewards',
+      eligibility: 'Who may apply', capacity: 'Capacity'
+    };
 
-    el('simCard').innerHTML = '<div class="card"><h2>What-if simulator</h2>' +
-      '<p class="small muted" style="margin:-4px 0 12px">Change a rule and see the effect ' +
-      '<strong>before</strong> committing. Nothing is written until you press Commit \u2014 the ' +
-      'modified policy exists only in memory while the simulation runs.</p>' +
-      '<div id="simMsg"></div>' +
-      '<div class="scroll-x"><table class="grid"><tbody>' + rows + '</tbody></table></div>' +
-      '<div class="btn-row" style="margin-top:12px">' +
-        '<button class="btn" ' + (pendingCount ? '' : 'disabled') +
-          ' onclick="runSim()">Simulate ' + (pendingCount ? '(' + pendingCount + ' change' +
-          (pendingCount === 1 ? '' : 's') + ')' : '') + '</button>' +
-        '<button class="btn quiet" onclick="resetKnobs()">Reset</button>' +
-      '</div><div id="simResult"></div></div>';
+    var sections = Object.keys(groups).filter(function (g) { return groups[g].length; })
+      .map(function (g) {
+        var rows = groups[g].map(function (x) {
+          var key = x.k.category + '|' + x.k.key;
+          var pending = PENDING[key];
+          var val = pending !== undefined ? pending : x.k.value;
+          var changed = pending !== undefined && Number(pending) !== Number(x.k.value);
+          return '<tr><td><strong>' + esc(x.k.label) + '</strong>' +
+            '<div class="muted small">' + esc(x.k.help) + '</div></td>' +
+            '<td style="width:120px"><input type="number" step="' + esc(x.k.step) +
+              '" min="' + esc(x.k.min) + '" max="' + esc(x.k.max) + '" value="' + esc(val) +
+              '" oninput="setKnob(' + x.i + ',this.value)"' +
+              (changed ? ' style="border-color:var(--amber);font-weight:700"' : '') + '></td>' +
+            '<td class="num small muted" style="width:80px">' +
+              (changed ? 'was ' + esc(x.k.value) : '') + '</td></tr>';
+        }).join('');
+        return '<div class="grp-title" style="margin:16px 0 6px">' + esc(titles[g] || g) + '</div>' +
+               '<div class="scroll-x"><table class="grid"><tbody>' + rows + '</tbody></table></div>';
+      }).join('');
+
+    var n = pendingChanges().length;
+    el('simCard').innerHTML = card('What-if simulator',
+      '<p class="small muted" style="margin:0 0 4px">Change a rule and see the effect ' +
+      '<strong>before</strong> committing to it. Nothing is saved until you press Commit &mdash; ' +
+      'while the simulation runs, the changed rule exists only in memory.</p>' +
+      '<div id="simMsg"></div>' + sections +
+      '<div class="btn-row" style="margin-top:16px">' +
+        '<button class="btn" id="simBtn" ' + (n ? '' : 'disabled') + ' onclick="runSim()">Simulate' +
+          (n ? ' ' + n + ' change' + (n === 1 ? '' : 's') : '') + '</button>' +
+        '<button class="btn ghost" onclick="resetKnobs()">Reset</button>' +
+      '</div><div id="simResult"></div>');
   }
 
   function setKnob(i, value) {
     PENDING[KNOBS[i].category + '|' + KNOBS[i].key] = value;
-    var btn = el('simCard').querySelector('.btn');
-    if (btn) btn.disabled = false;
+    var btn = el('simBtn');
+    if (btn) {
+      var n = pendingChanges().length;
+      btn.disabled = !n;
+      btn.textContent = 'Simulate' + (n ? ' ' + n + ' change' + (n === 1 ? '' : 's') : '');
+    }
   }
-
-  function resetKnobs() { PENDING = {}; el('simResult').innerHTML = ''; paintSimulator(); }
-
+  function resetKnobs() { PENDING = {}; paintSimulator(); }
   function pendingChanges() {
     return KNOBS.filter(function (k) {
       var v = PENDING[k.category + '|' + k.key];
@@ -233,378 +356,239 @@
   function runSim() {
     var changes = pendingChanges();
     if (!changes.length) return;
-    el('simResult').innerHTML =
-      '<div class="banner info" style="margin-top:12px"><span class="spin"></span> ' +
-      'Running two full allocations to isolate the effect\u2026</div>';
-
-    google.script.run
-      .withSuccessHandler(paintSimResult)
+    el('simResult').innerHTML = '<div class="divider"></div>' +
+      banner('info', 'Running two complete allocations so the difference is caused by your ' +
+                     'change and nothing else…');
+    google.script.run.withSuccessHandler(paintSimResult)
       .withFailureHandler(function (e) {
-        el('simResult').innerHTML = '<div class="banner err" style="margin-top:12px">' +
-          esc(e.message) + '</div>';
-      })
-      .apiAdminSimulate(changes, null);
+        el('simResult').innerHTML = '<div class="divider"></div>' + banner('err', e.message);
+      }).apiAdminSimulate(changes, null);
   }
 
-  function delta(n, invert) {
-    if (n === 0 || n === undefined) return '<span class="muted">no change</span>';
-    var good = invert ? n < 0 : n > 0;
-    var col = good ? 'var(--ok)' : 'var(--bad)';
-    return '<span style="color:' + col + ';font-weight:620">' +
+  function delta(n, lowerIsBetter) {
+    if (!n) return '<span class="muted">no change</span>';
+    var good = lowerIsBetter ? n < 0 : n > 0;
+    return '<span style="color:' + (good ? 'var(--ok)' : 'var(--bad)') + ';font-weight:700">' +
       (n > 0 ? '+' : '') + n + '</span>';
   }
 
   function paintSimResult(r) {
     var changeList = r.changes.map(function (c) {
-      return '<li>' + esc(c.key) + ': <strong>' + esc(c.from) + ' \u2192 ' + esc(c.to) +
-        '</strong></li>';
+      var k = KNOBS.filter(function (x) {
+        return x.category === c.category && x.key === c.key; })[0];
+      return '<li>' + esc(k ? k.label : c.key) + ': <strong>' + esc(c.from) +
+             ' &rarr; ' + esc(c.to) + '</strong></li>';
     }).join('');
 
     var moves = r.sample.map(function (m) {
-      var badge = { LOST: 'bad', GAINED: 'ok', MOVED: 'info' }[m.change];
-      var word = { LOST: 'loses their seat', GAINED: 'gains a seat', MOVED: 'moves room' }[m.change];
-      return '<tr><td>' + esc(m.name) + '<div class="muted small">' + esc(m.category) +
-        '</div></td>' +
-        '<td><span class="pill ' + badge + '">' + esc(word) + '</span></td>' +
-        '<td class="muted small">' + (m.from ? esc(m.from.hostelName) + ' ' + esc(m.from.roomNo) : '\u2014') +
-        ' \u2192 ' + (m.to ? esc(m.to.hostelName) + ' ' + esc(m.to.roomNo) : '\u2014') + '</td></tr>';
+      var kind = { LOST: 'bad', GAINED: 'ok', MOVED: 'info' }[m.change];
+      var word = { LOST: 'loses their room', GAINED: 'gains a room',
+                   MOVED: 'changes room' }[m.change];
+      return '<tr><td><strong>' + esc(m.name) + '</strong>' +
+        '<div class="muted small">' + esc(label('category', m.category, m.category)) + '</div></td>' +
+        '<td>' + pill(kind, word) + '</td>' +
+        '<td class="muted small">' +
+          (m.from ? esc(m.from.hostelName) + ' ' + esc(m.from.roomNo) : '&mdash;') +
+          ' &rarr; ' + (m.to ? esc(m.to.hostelName) + ' ' + esc(m.to.roomNo) : '&mdash;') +
+        '</td></tr>';
     }).join('');
 
-    el('simResult').innerHTML =
-      '<div class="divider"></div>' +
-      '<div class="grp-title" style="margin-bottom:7px">Simulated changes</div>' +
-      '<ul class="small" style="margin:0 0 12px;padding-left:20px">' + changeList + '</ul>' +
+    el('simResult').innerHTML = '<div class="divider"></div>' +
+      '<div class="grp-title">You are proposing</div>' +
+      '<ul class="small" style="margin:0 0 14px;padding-left:20px">' + changeList + '</ul>' +
       '<div class="scroll-x"><table class="grid"><thead><tr><th>Measure</th>' +
-      '<th class="num">Before</th><th class="num">After</th><th class="num">Change</th></tr></thead><tbody>' +
-        simRow('Allotted', r.before.allocated, r.after.allocated, r.deltas.allocated, false) +
-        simRow('Waitlisted', r.before.waitlisted, r.after.waitlisted, r.deltas.waitlisted, true) +
-        simRow('First preference met %', r.before.pref1Pct, r.after.pref1Pct, r.deltas.pref1Pct, false) +
-        simRow('Room utilisation %', r.before.utilisationPct, r.after.utilisationPct, r.deltas.utilisationPct, false) +
-        simRow('Roommate compatibility %', r.before.meanCompatPct, r.after.meanCompatPct, r.deltas.meanCompatPct, false) +
+      '<th class="num">Now</th><th class="num">After</th><th class="num">Change</th></tr></thead><tbody>' +
+        simRow('Rooms allotted', r.before.allocated, r.after.allocated, r.deltas.allocated, false) +
+        simRow('On waiting list', r.before.waitlisted, r.after.waitlisted, r.deltas.waitlisted, true) +
+        simRow('Got their first choice (%)', r.before.pref1Pct, r.after.pref1Pct, r.deltas.pref1Pct, false) +
+        simRow('Beds in use (%)', r.before.utilisationPct, r.after.utilisationPct, r.deltas.utilisationPct, false) +
+        simRow('Roommate compatibility (%)', r.before.meanCompatPct, r.after.meanCompatPct, r.deltas.meanCompatPct, false) +
       '</tbody></table></div>' +
 
-      '<div class="tiles" style="margin-top:13px">' +
-        '<div class="tile"><div class="n" style="color:var(--bad)">' + esc(r.movement.lost) +
-          '</div><div class="l">lose their seat</div></div>' +
-        '<div class="tile"><div class="n" style="color:var(--ok)">' + esc(r.movement.gained) +
-          '</div><div class="l">gain a seat</div></div>' +
-        '<div class="tile"><div class="n">' + esc(r.movement.moved) +
-          '</div><div class="l">change room</div></div>' +
-        '<div class="tile"><div class="n">' + esc(r.movement.unchanged) +
-          '</div><div class="l">unaffected</div></div>' +
+      '<div class="tiles" style="margin-top:15px">' +
+        tile(r.movement.lost, 'lose their room', r.movement.lost ? 'bad' : '') +
+        tile(r.movement.gained, 'gain a room', r.movement.gained ? 'good' : '') +
+        tile(r.movement.moved, 'change room', '') +
+        tile(r.movement.unchanged, 'unaffected', '') +
       '</div>' +
 
-      (moves ? '<div class="grp-title" style="margin:15px 0 7px">Who is affected</div>' +
+      (moves ? '<div class="grp-title" style="margin:18px 0 8px">Who this affects</div>' +
         '<div class="scroll-x"><table class="grid"><tbody>' + moves + '</tbody></table></div>' +
-        '<p class="small muted" style="margin:8px 0 0">Showing a sample. ' +
-        esc(r.movement.totalAffected) + ' students are affected in total.</p>' : '') +
+        '<p class="small muted" style="margin:9px 0 0">A sample. ' + esc(r.movement.totalAffected) +
+        ' students are affected in total.</p>' : '') +
 
       '<div class="divider"></div>' +
       '<div class="btn-row">' +
-        '<button class="btn" onclick="commitSim()">Commit this policy</button>' +
-        '<button class="btn quiet" onclick="resetKnobs()">Discard</button>' +
-        '<span class="small muted">Policy hash ' + esc(r.policyHashBefore) + ' \u2192 ' +
-        esc(r.policyHashAfter) + '</span>' +
-      '</div>';
+        '<button class="btn" onclick="commitSim()">Commit this policy and reallocate</button>' +
+        '<button class="btn ghost" onclick="resetKnobs()">Discard</button>' +
+      '</div>' +
+      '<p class="small muted" style="margin:10px 0 0">Nothing has been saved. Discarding leaves ' +
+      'the current allocation exactly as it is.</p>';
   }
 
-  function simRow(label, before, after, d, invert) {
-    return '<tr><td>' + esc(label) + '</td><td class="num">' + esc(before) +
-      '</td><td class="num">' + esc(after) + '</td><td class="num">' +
-      delta(d, invert) + '</td></tr>';
+  function simRow(lbl, before, after, d, lowerIsBetter) {
+    return '<tr><td>' + esc(lbl) + '</td><td class="num muted">' + esc(before) +
+      '</td><td class="num"><strong>' + esc(after) + '</strong></td><td class="num">' +
+      delta(d, lowerIsBetter) + '</td></tr>';
   }
 
   function commitSim() {
     var changes = pendingChanges();
-    if (!confirm('Write these policy changes and run a real allocation? ' +
-                 'This replaces the current committed result.')) return;
-    busy('Committing policy and reallocating\u2026');
-    google.script.run
-      .withSuccessHandler(function (r) {
-        done('good', 'Policy committed and reallocated: ' + r.metrics.allocated +
-          ' allotted, ' + r.metrics.waitlisted + ' waitlisted. Policy hash ' + r.policyHash + '.');
-        PENDING = {}; load();
-      })
-      .withFailureHandler(function (e) { done('err', e.message); })
+    if (!confirm('Save these policy changes and run a real allocation? ' +
+                 'This replaces the current result.')) return;
+    busy('Saving policy and reallocating…');
+    google.script.run.withSuccessHandler(function (r) {
+      done('good', 'Policy saved and rooms reallocated: ' + r.metrics.allocated +
+        ' allotted, ' + r.metrics.waitlisted + ' on the waiting list.');
+      PENDING = {}; load();
+    }).withFailureHandler(function (e) { done('err', e.message); })
       .apiAdminCommitSimulation(changes, null);
   }
 
-  /* ==================================================== grievance inbox */
-
+  /* ======================================================== grievances */
   function loadGrievances() {
     google.script.run.withSuccessHandler(paintGrievances)
-      .withFailureHandler(function () {}).apiAdminGrievanceInbox(null, 40);
+      .withFailureHandler(function () { el('grievCard').innerHTML = ''; })
+      .apiAdminGrievanceInbox(null, 40);
   }
 
   function paintGrievances(d) {
     var st = d.stats;
     if (!st.total) {
-      el('grievCard').innerHTML = '<div class="card"><h2>Grievances</h2>' +
-        '<p class="muted small" style="margin:0">No grievances have been raised.</p></div>';
+      el('grievCard').innerHTML = card('Grievances',
+        '<p class="muted small" style="margin:0">No grievances have been raised.</p>');
       return;
     }
-
     var rows = d.tickets.map(function (t) {
-      var cls = { AUTO_ANSWERED: 'ok', RESOLVED: 'ok', ESCALATED: 'warn',
-                  OPEN: 'info' }[t.status] || 'info';
-      return '<tr><td><div style="font-weight:560">' + esc(t.name) + '</div>' +
-        '<div class="muted small">' + esc(t.category) + ' \u00b7 ' + esc(t.ticketId) + '</div></td>' +
-        '<td class="small">' + esc(t.text.slice(0, 90)) +
-          (t.text.length > 90 ? '\u2026' : '') +
+      var kind = { AUTO_ANSWERED: 'ok', RESOLVED: 'ok', ESCALATED: 'warn',
+                   OPEN: 'info' }[t.status] || 'info';
+      return '<tr><td><strong>' + esc(t.name) + '</strong>' +
+        '<div class="muted small">' + esc(String(t.category).toLowerCase()) + '</div></td>' +
+        '<td class="small">' + esc(t.text.slice(0, 95)) + (t.text.length > 95 ? '&hellip;' : '') +
           (t.anomalies && t.anomalies.length
-            ? '<div style="color:var(--bad);margin-top:4px">\u26a0 ' +
+            ? '<div style="color:var(--bad);margin-top:5px;font-weight:550">&#9888; ' +
               esc(t.anomalies.join(' ')) + '</div>' : '') + '</td>' +
-        '<td><span class="pill ' + cls + '">' + esc(t.status.replace(/_/g, ' ').toLowerCase()) +
-          '</span></td></tr>';
+        '<td>' + pill(kind, label('grievance', t.status)) + '</td></tr>';
     }).join('');
 
-    el('grievCard').innerHTML = '<div class="card"><h2>Grievances</h2>' +
-      '<div class="tiles" style="margin-bottom:13px">' +
-        '<div class="tile"><div class="n">' + esc(st.total) + '</div><div class="l">total</div></div>' +
-        '<div class="tile"><div class="n" style="color:var(--ok)">' + esc(st.autoResolvedPct) +
-          '%</div><div class="l">answered automatically</div></div>' +
-        '<div class="tile"><div class="n" style="color:var(--warn)">' +
-          esc(st.byStatus.ESCALATED || 0) + '</div><div class="l">need a person</div></div>' +
+    el('grievCard').innerHTML = card('Grievances',
+      '<div class="tiles" style="margin-bottom:15px">' +
+        tile(st.total, 'raised', '') +
+        tile(st.autoResolvedPct + '%', 'answered automatically', 'good') +
+        tile(st.byStatus.ESCALATED || 0, 'need a person',
+             (st.byStatus.ESCALATED || 0) ? 'hi' : '') +
       '</div>' +
       '<div class="scroll-x"><table class="grid"><thead><tr><th>Student</th>' +
       '<th>Complaint</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      '<p class="small muted" style="margin:10px 0 0">Allocation disputes are re-checked against ' +
-      'the recorded run before any reply is sent. A ticket only reaches this queue as ' +
-      '<em>escalated</em> when that check finds something wrong \u2014 which is exactly the case ' +
-      'worth a warden\u2019s time.</p></div>';
+      '<p class="small muted" style="margin:12px 0 0">Complaints about an allocation are ' +
+      're-checked against the recorded run before any reply goes out. A ticket only reaches this ' +
+      'queue marked <em>with the hostel office</em> when that check finds something wrong &mdash; ' +
+      'which is exactly the case worth your time.</p>');
   }
 
-  /* ======================================================== swap board */
-
+  /* ============================================================= swaps */
   function loadSwaps() {
     google.script.run.withSuccessHandler(paintSwaps)
-      .withFailureHandler(function () {}).apiAdminSwapBoard();
+      .withFailureHandler(function () { el('swapCard').innerHTML = ''; }).apiAdminSwapBoard();
   }
 
   function paintSwaps(d) {
     if (!d.total) {
-      el('swapCard').innerHTML = '<div class="card"><h2>Room swaps</h2>' +
-        '<p class="muted small" style="margin:0">No swap requests yet.</p></div>';
+      el('swapCard').innerHTML = card('Room swaps',
+        '<p class="muted small" style="margin:0">No swap requests yet.</p>');
       return;
     }
     var rows = d.open.map(function (t) {
-      return '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.hostelName) + ' ' + esc(t.roomNo) +
-        '</td><td class="muted small">' + esc(t.reason || '\u2014') + '</td></tr>';
+      return '<tr><td><strong>' + esc(t.name) + '</strong></td>' +
+        '<td>' + esc(t.hostelName) + ' ' + esc(t.roomNo) + '</td>' +
+        '<td class="muted small">' + esc(t.reason || '—') + '</td></tr>';
     }).join('');
 
-    el('swapCard').innerHTML = '<div class="card"><h2>Room swaps</h2>' +
-      '<div class="tiles" style="margin-bottom:13px">' +
-        '<div class="tile"><div class="n" style="color:var(--ok)">' + esc(d.counts.APPROVED || 0) +
-          '</div><div class="l">approved automatically</div></div>' +
-        '<div class="tile"><div class="n">' + esc(d.counts.OPEN || 0) +
-          '</div><div class="l">on the board</div></div>' +
-        '<div class="tile"><div class="n">' + esc(d.counts.REJECTED || 0) +
-          '</div><div class="l">refused by policy</div></div>' +
+    el('swapCard').innerHTML = card('Room swaps',
+      '<div class="tiles" style="margin-bottom:15px">' +
+        tile(d.counts.APPROVED || 0, 'approved automatically', 'good') +
+        tile(d.counts.OPEN || 0, 'listed on the board', '') +
+        tile(d.counts.REJECTED || 0, 'refused by policy', '') +
       '</div>' +
       (rows ? '<div class="scroll-x"><table class="grid"><thead><tr><th>Student</th>' +
-        '<th>Current room</th><th>Reason</th></tr></thead><tbody>' + rows +
+        '<th>Current room</th><th>Reason given</th></tr></thead><tbody>' + rows +
         '</tbody></table></div>' : '') +
-      '<p class="small muted" style="margin:10px 0 0">Swaps both students agree to are validated ' +
-      'against gender, accessibility and quota rules and applied without an administrator. ' +
-      'Nothing in this list is waiting on you.</p></div>';
+      '<p class="small muted" style="margin:12px 0 0">Swaps both students agree to are checked ' +
+      'against gender, accessibility and reservation rules and applied without an administrator. ' +
+      'Nothing in this list is waiting on you.</p>');
   }
 
-  /* The tamper-evidence badge. Novelty feature 1, second half. */
-  function ledgerCard(d) {
-    var ok = d.ledger.intact;
-    return '<div class="card"><h2>Audit ledger</h2>' +
-      '<div class="ledger ' + (ok ? 'ledger-ok' : 'ledger-bad') + '">' +
-        '<div class="t">' + (ok ? '&#10003; Chain intact' : '&#10007; TAMPERING DETECTED') + '</div>' +
-        '<div style="margin-top:3px">' + esc(d.ledger.reason) + '</div>' +
-      '</div>' +
-      '<div class="btn-row" style="margin-top:11px">' +
-        '<button class="btn ghost" onclick="showLedger()">View recent entries</button>' +
-      '</div><div id="ledgerDetail"></div></div>';
-  }
-
-  function showLedger() {
-    el('ledgerDetail').innerHTML = '<p class="muted small">Loading&hellip;</p>';
-    google.script.run.withSuccessHandler(function (r) {
-      var rows = r.recent.map(function (e) {
-        return '<tr><td class="num">' + esc(e.seq) + '</td><td>' + esc(e.ts) + '</td>' +
-          '<td>' + esc(e.action) + '</td><td class="muted small">' + esc(e.actor) + '</td>' +
-          '<td><code>' + esc(e.hash) + '&hellip;</code></td></tr>';
-      }).join('');
-      el('ledgerDetail').innerHTML =
-        '<div class="divider"></div><div class="scroll-x"><table class="grid">' +
-        '<thead><tr><th>Seq</th><th>When</th><th>Action</th><th>Actor</th><th>Hash</th></tr></thead>' +
-        '<tbody>' + rows + '</tbody></table></div>' +
-        '<p class="small muted" style="margin:9px 0 0">Each row\'s hash covers the previous row\'s ' +
-        'hash. Editing any historical entry breaks every hash after it.</p>';
-    }).apiAdminVerifyLedger();
-  }
-
-  function countsCard(d) {
-    var c = d.counts, cap = d.capacity;
-    return '<div class="card"><h2>At a glance</h2><div class="tiles">' +
-      tile(c.applications, 'Applications') +
-      tile(c.allotted, 'Allotted') +
-      tile(c.waitlisted, 'Waitlisted') +
-      tile(c.rejected, 'Not eligible') +
-      tile(cap.vacant, 'Vacant beds') +
-      tile(d.docQueue, 'Docs to verify') +
-      '</div></div>';
-  }
-  function tile(n, l) {
-    return '<div class="tile"><div class="n">' + esc(n) + '</div><div class="l">' + esc(l) + '</div></div>';
-  }
-
-  function noRunCard() {
-    return '<div class="card"><h3>No allocation has been run yet</h3>' +
-      '<p class="muted">Run the allocation to produce allotments, a waiting list and fairness metrics.</p>' +
-      '<div class="btn-row"><button class="btn" onclick="runAllocation()">Run allocation</button>' +
-      '<button class="btn ghost" onclick="preview()">Preview without committing</button></div></div>';
-  }
-
-  function metricsCard(d, m) {
-    return '<div class="card"><h2>Fairness and efficiency</h2>' +
-      '<div class="tiles">' +
-        tile(m.pref1Pct + '%', 'First preference met') +
-        tile(m.meanPrefRank, 'Mean preference granted') +
-        tile(m.utilisationPct + '%', 'Room utilisation') +
-        tile(m.meanCompatPct + '%', 'Roommate compatibility') +
-        tile(m.accessibilityHonouredPct + '%', 'Accessibility honoured') +
-        tile(m.paretoSwaps, 'Pareto swaps found') +
-      '</div>' +
-      '<p class="small muted" style="margin:12px 0 0">' +
-      '<strong>Pareto swaps found: ' + esc(m.paretoSwaps) + '.</strong> After allocating, the engine ' +
-      'searches for any two students who would both rather have each other\'s room. Zero means no ' +
-      'such pair exists, so no student can be made better off without making another worse off.</p>' +
-      '<div class="divider"></div>' +
-      '<dl class="kv">' +
-        '<dt>Run</dt><dd><code>' + esc(d.latestRun.runId) + '</code></dd>' +
-        '<dt>Seed</dt><dd><code>' + esc(d.latestRun.seed) + '</code></dd>' +
-        '<dt>Policy hash</dt><dd><code>' + esc(d.latestRun.policyHash) + '</code></dd>' +
-        '<dt>Completed</dt><dd>' + esc(d.latestRun.finishedAt) + '</dd>' +
-      '</dl>' +
-      '<p class="small muted" style="margin:9px 0 0">The seed and policy hash together make this run ' +
-      'reproducible: re-running with both unchanged produces an identical allocation.</p></div>';
-  }
-
-  function occupancyCard(d) {
-    var rows = d.occupancy.map(function (h) {
-      var hot = h.pct >= 98;
-      return '<tr><td><strong>' + esc(h.name) + '</strong><div class="muted small">' +
-        esc(h.campus) + ' &middot; ' + (h.gender === 'M' ? 'Boys' : h.gender === 'F' ? 'Girls' : 'Co-ed') +
-        '</div></td>' +
-        '<td style="width:34%"><span class="meter"><i class="' + (hot ? 'hot' : '') +
-          '" style="width:' + h.pct + '%"></i></span></td>' +
-        '<td class="num">' + esc(h.pct) + '%</td>' +
-        '<td class="num">' + esc(h.occupied) + ' / ' + esc(h.total) + '</td>' +
-        '<td class="num">' + esc(h.vacant) + '</td></tr>';
-    }).join('');
-    return '<div class="card"><h2>Occupancy and vacancies</h2><div class="scroll-x">' +
-      '<table class="grid"><thead><tr><th>Hostel</th><th>Occupancy</th><th class="num">%</th>' +
-      '<th class="num">Beds</th><th class="num">Vacant</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table></div></div>';
-  }
-
-  function quotaCard(metrics) {
-    var rows = metrics.quotaTable.map(function (q) {
-      if (q.category === 'CONVERTED') {
-        return '<tr><td><strong>Converted</strong><div class="muted small">' +
-          'unfilled reserved seats reissued in merit order</div></td>' +
-          '<td class="num">&mdash;</td><td class="num">' + esc(q.filled) + '</td>' +
-          '<td class="num">&mdash;</td></tr>';
-      }
-      return '<tr><td>' + esc(q.category) + '</td>' +
-        '<td class="num">' + esc(q.reservedSeats) + '</td>' +
-        '<td class="num">' + esc(q.filled) + '</td>' +
-        '<td class="num">' + (q.unfilled > 0
-          ? '<span class="muted">' + esc(q.unfilled) + ' converted</span>' : '&mdash;') + '</td></tr>';
-    }).join('');
-    return '<div class="card"><h2>Quota compliance</h2><div class="scroll-x">' +
-      '<table class="grid"><thead><tr><th>Category</th><th class="num">Reserved</th>' +
-      '<th class="num">Filled</th><th class="num">Unfilled</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table></div>' +
-      '<p class="small muted" style="margin:10px 0 0">Seats a category could not fill are ' +
-      'dereserved and reissued to the waiting list in merit order, rather than left empty.</p></div>';
-  }
-
+  /* ======================================================== operations */
   function operationsCard(d) {
-    return '<div class="card"><h2>Operations</h2>' +
+    return card('Operations',
       '<div class="btn-row">' +
         '<button class="btn" onclick="runAllocation()">Run allocation</button>' +
-        '<button class="btn ghost" onclick="preview()">Preview only</button>' +
-        '<button class="btn ghost" onclick="letters()">Generate letters</button>' +
+        '<button class="btn ghost" onclick="preview()">Preview without saving</button>' +
+        '<button class="btn ghost" onclick="letters()">Generate allotment letters</button>' +
         '<button class="btn ghost" onclick="notifyAll()">Send notifications</button>' +
       '</div>' +
       '<div class="divider"></div>' +
-      '<dl class="kv">' +
-        '<dt>Email sending</dt><dd>' + (d.email.enabled
-          ? '<span class="pill ok">Enabled</span>'
-          : '<span class="pill warn">Disabled (safe for rehearsal)</span>') + '</dd>' +
-        '<dt>Remaining quota today</dt><dd>' + esc(d.email.remainingQuota) + '</dd>' +
-        '<dt>Sent / queued</dt><dd>' + esc(d.email.sent) + ' / ' + esc(d.email.queued) + '</dd>' +
-      '</dl>' +
-      '<p class="small muted" style="margin:9px 0 0">Letters and emails are generated in batches ' +
-      'so each call finishes inside the Apps Script execution limit. Run them repeatedly until ' +
-      'nothing remains.</p></div>';
+      '<div class="cols">' +
+        '<div><div class="grp-title">Email</div>' +
+          '<p class="small" style="margin:0">' + (d.email.enabled
+            ? pill('ok', 'Sending is on') + ' &nbsp;' + esc(d.email.remainingQuota) +
+              ' messages left today'
+            : pill('warn', 'Sending is off') +
+              ' &nbsp;safe for rehearsal &mdash; no student will be emailed') + '</p>' +
+          '<p class="small muted" style="margin:7px 0 0">' + esc(d.email.sent) +
+          ' sent so far, ' + esc(d.email.queued) + ' waiting.</p></div>' +
+        '<div><div class="grp-title">Long tasks</div>' +
+          '<p class="small muted" style="margin:0">Letters and emails are produced in batches so ' +
+          'each run finishes well inside Google&rsquo;s time limit. Press the button again to ' +
+          'continue where it stopped &mdash; nothing is ever sent or generated twice.</p></div>' +
+      '</div>');
   }
 
-  /* ------------------------------------------------------------- actions */
-  function busy(text) {
-    el('msg').innerHTML = '<div class="banner info"><span class="spin"></span> ' + esc(text) + '</div>';
+  function busy(t) {
+    el('msg').innerHTML = '<div class="banner info"><span class="bic"><span class="spin"></span>' +
+      '</span><span>' + esc(t) + '</span></div>';
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
-  function done(kind, text) {
-    el('msg').innerHTML = '<div class="banner ' + kind + '">' + esc(text) + '</div>';
-  }
+  function done(kind, t) { el('msg').innerHTML = banner(kind, t); }
 
   function runAllocation() {
-    if (!confirm('Run the allocation and commit it? This replaces the previous committed result.')) return;
-    busy('Allocating rooms…');
-    google.script.run
-      .withSuccessHandler(function (r) {
-        done('good', 'Allocation complete: ' + r.metrics.summary.allocated + ' allotted, ' +
-          r.metrics.summary.waitlisted + ' waitlisted, ' + r.converted +
-          ' converted seats reissued. Took ' + r.elapsedSec + 's.');
-        load();
-      })
-      .withFailureHandler(function (e) { done('err', e.message); })
-      .apiAdminRunAllocation({});
+    if (!confirm('Run the allocation and save the result? This replaces the previous one.')) return;
+    busy('Allocating rooms for all applicants…');
+    google.script.run.withSuccessHandler(function (r) {
+      done('good', 'Allocation complete: ' + r.metrics.summary.allocated + ' rooms allotted, ' +
+        r.metrics.summary.waitlisted + ' on the waiting list, ' + r.converted +
+        ' reserved places reissued.');
+      load();
+    }).withFailureHandler(function (e) { done('err', e.message); }).apiAdminRunAllocation({});
   }
 
   function preview() {
-    busy('Running a preview — nothing will be written…');
-    google.script.run
-      .withSuccessHandler(function (r) {
-        var m = r.metrics.summary;
-        done('info', 'Preview only, nothing committed: ' + m.allocated + ' would be allotted, ' +
-          m.waitlisted + ' waitlisted, first preference met ' + m.pref1Pct + '%, ' +
-          'utilisation ' + m.utilisationPct + '%.');
-      })
-      .withFailureHandler(function (e) { done('err', e.message); })
-      .apiAdminPreviewAllocation({});
+    busy('Running a preview — nothing will be saved…');
+    google.script.run.withSuccessHandler(function (r) {
+      var m = r.metrics.summary;
+      done('info', 'Preview only, nothing saved: ' + m.allocated + ' would be allotted, ' +
+        m.waitlisted + ' on the waiting list, ' + m.pref1Pct + '% would get their first choice.');
+    }).withFailureHandler(function (e) { done('err', e.message); }).apiAdminPreviewAllocation({});
   }
 
   function letters() {
-    busy('Generating allotment letters…');
-    google.script.run
-      .withSuccessHandler(function (r) {
-        done(r.remaining ? 'info' : 'good',
-          'Generated ' + r.generated + ' of ' + r.total + ' letters.' +
-          (r.remaining ? ' ' + r.remaining + ' remaining — run again to continue.' : ' All done.'));
-      })
-      .withFailureHandler(function (e) { done('err', e.message); })
+    busy('Producing allotment letters…');
+    google.script.run.withSuccessHandler(function (r) {
+      done(r.remaining ? 'info' : 'good',
+        'Produced ' + r.generated + ' of ' + r.total + ' letters.' +
+        (r.remaining ? ' ' + r.remaining + ' to go — press again to continue.' : ' All done.'));
+    }).withFailureHandler(function (e) { done('err', e.message); })
       .apiAdminGenerateLetters(null, 25);
   }
 
   function notifyAll() {
-    busy('Dispatching notifications…');
-    google.script.run
-      .withSuccessHandler(function (r) {
-        done(r.failed ? 'err' : 'good',
-          'Sent ' + r.sent + ', queued ' + r.queued + ', skipped ' + r.skipped +
-          ', failed ' + r.failed + (r.remaining ? ', ' + r.remaining + ' remaining' : '') + '.');
-        load();
-      })
-      .withFailureHandler(function (e) { done('err', e.message); })
-      .apiAdminNotify(null, 50);
+    busy('Sending notifications…');
+    google.script.run.withSuccessHandler(function (r) {
+      done(r.failed ? 'err' : 'good',
+        r.sent + ' sent, ' + r.queued + ' queued, ' + r.skipped + ' skipped' +
+        (r.failed ? ', ' + r.failed + ' failed' : '') +
+        (r.remaining ? ', ' + r.remaining + ' still to go' : '') + '.');
+      load();
+    }).withFailureHandler(function (e) { done('err', e.message); }).apiAdminNotify(null, 50);
   }
 </script>

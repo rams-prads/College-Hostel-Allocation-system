@@ -1,0 +1,127 @@
+<script>
+/**
+ * chrome.html - shared page furniture and helpers.
+ *
+ * Included by every page so the masthead, navigation and formatting helpers
+ * stay identical across the portal. Included BEFORE each page's own script.
+ */
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+  });
+}
+function el(id) { return document.getElementById(id); }
+
+function initials(name) {
+  return String(name || '?').trim().split(/\s+/).slice(0, 2)
+    .map(function (w) { return w.charAt(0); }).join('').toUpperCase() || '?';
+}
+
+/** Renders the masthead and navigation into #chrome. */
+function paintChrome(opts) {
+  opts = opts || {};
+  var tabs = opts.tabs || [];
+  var user = opts.user || null;
+
+  var nav = tabs.map(function (t) {
+    return '<a href="' + esc(t.href) + '"' + (t.on ? ' class="on"' : '') + '>' +
+           esc(t.label) + '</a>';
+  }).join('');
+
+  var chip = user
+    ? '<div class="userchip"><span class="av">' + esc(initials(user.name || user.email)) +
+      '</span><span class="nm">' + esc(user.name || user.email) + '</span>' +
+      (user.role ? '<span class="rl">' + esc(user.role) + '</span>' : '') + '</div>'
+    : '';
+
+  var target = el('chrome');
+  if (!target) return;
+  target.innerHTML =
+    '<header class="masthead"><div class="row">' +
+      '<div class="crest">IPU</div>' +
+      '<div class="who-we-are">' +
+        '<div class="org">Guru Gobind Singh Indraprastha University</div>' +
+        '<div class="unit">' + esc(opts.unit || 'Hostel Allocation Portal') + '</div>' +
+      '</div>' +
+      '<div class="spacer"></div>' + chip +
+    '</div></header>' +
+    (nav ? '<nav class="navbar"><div class="row">' + nav + '</div></nav>' : '');
+}
+
+/** Human labels for the enum values stored in the sheet. */
+var LABEL = {
+  status: {
+    DRAFT:'Draft', SUBMITTED:'Submitted', VERIFIED:'Verified', REJECTED:'Not eligible',
+    ALLOTTED:'Room allotted', WAITLISTED:'On waiting list', WITHDRAWN:'Withdrawn',
+    CANCELLED:'Cancelled'
+  },
+  roomType: { SINGLE:'Single room', DOUBLE:'2-seater room', TRIPLE:'3-seater room' },
+  campus:   { DWARKA:'Dwarka Campus', EDC:'East Delhi Campus', ANY:'No preference' },
+  gender:   { M:'Boys', F:'Girls', CO:'Co-educational' },
+  doc: {
+    VERIFIED:'Verified', UPLOADED:'Under review', REJECTED:'Needs resubmission',
+    WAIVED:'Not required', REQUIRED:'Not uploaded yet', PENDING:'Awaiting upload',
+    SUBMITTED:'Under review'
+  },
+  grievance: {
+    AUTO_ANSWERED:'Answered', RESOLVED:'Resolved', ESCALATED:'With the hostel office',
+    OPEN:'Open', CLOSED:'Closed'
+  },
+  category: {
+    GEN:'General', OBC:'OBC', SC:'Scheduled Caste', ST:'Scheduled Tribe',
+    EWS:'EWS', OPEN:'Open merit', CONVERTED:'Converted seat',
+    PWD_HORIZONTAL:'PwD reservation'
+  }
+};
+
+function label(kind, value, fallback) {
+  var m = LABEL[kind] || {};
+  return m[value] || fallback || value || '';
+}
+
+function pill(kind, text) {
+  return '<span class="pill ' + kind + '">' + esc(text) + '</span>';
+}
+
+/**
+ * A collapsed block for reference numbers, hashes and seeds.
+ * They are evidence rather than decoration, so they stay one click away
+ * instead of making the page look like a console.
+ */
+function techDetails(title, pairs) {
+  var rows = pairs.filter(function (p) { return p[1]; }).map(function (p) {
+    return '<dt>' + esc(p[0]) + '</dt><dd class="' + (p[2] === 'mono' ? 'mono' : '') + '">' +
+           esc(p[1]) + '</dd>';
+  }).join('');
+  if (!rows) return '';
+  return '<details class="tech"><summary>' + esc(title || 'Reference details') + '</summary>' +
+         '<div class="inner"><dl class="kv">' + rows + '</dl></div></details>';
+}
+
+function banner(kind, text, icon) {
+  var ic = icon || { err:'!', good:'✓', info:'i', warn:'!' }[kind] || 'i';
+  return '<div class="banner ' + kind + '"><span class="bic">' + ic + '</span>' +
+         '<span>' + esc(text) + '</span></div>';
+}
+
+function emptyState(icon, title, body) {
+  return '<div class="empty"><div class="big">' + icon + '</div>' +
+         '<h3 style="margin:0 0 4px">' + esc(title) + '</h3>' +
+         (body ? '<p class="small" style="margin:0;max-width:420px;display:inline-block">' +
+           esc(body) + '</p>' : '') + '</div>';
+}
+
+function loadingState(text) {
+  return '<div class="empty"><span class="spin"></span> &nbsp;' + esc(text || 'Loading') + '</div>';
+}
+
+function card(title, bodyHtml, opts) {
+  opts = opts || {};
+  return '<div class="card"' + (opts.id ? ' id="' + opts.id + '"' : '') + '>' +
+    (title ? '<div class="hd"><h2>' + esc(title) + '</h2>' +
+      (opts.sub ? '<span class="sub">' + esc(opts.sub) + '</span>' : '') +
+      '<span class="grow"></span>' + (opts.action || '') + '</div>' : '') +
+    '<div class="bd' + (opts.tight ? ' tight' : '') + '">' + bodyHtml + '</div></div>';
+}
+</script>
