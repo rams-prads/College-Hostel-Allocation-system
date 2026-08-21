@@ -1,0 +1,421 @@
+/**
+ * Api.gs - server functions the browser calls via google.script.run.
+ *
+ * Everything the student portal needs, in as few round trips as possible: one
+ * call to render a page, one call to submit. Apps Script round trips are slow,
+ * so chatty APIs feel broken on a phone over campus wifi.
+ *
+ * EVERY function that touches an application goes through Auth.requireOwner(),
+ * so passing someone else's appId from the browser gets you an error, not their
+ * data.
+ */
+
+// ============================================================ student portal
+
+/**
+ * Everything needed to render the student dashboard in one round trip.
+ */
+function apiGetStudentView() {
+  var s = Auth.session();
+  if (!s.email) return { signedIn: false };
+
+  var view = {
+    signedIn: true,
+    email: s.email,
+    name: s.name,
+    isAdmin: s.isAdmin,
+    applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
+    institution: Db.cfg('INSTITUTION_SHORT', 'GGSIPU'),
+    supportEmail: Db.cfg('SUPPORT_EMAIL', ''),
+    student: null,
+    application: null,
+    documents: [],
+    allocation: null,
+    waitlist: null,
+    explanation: null
+  };
+
+  if (!s.student) {
+    view.unregistered = true;
+    return view;
+  }
+
+  var st = s.student;
+  view.student = {
+    studentId: st.studentId, name: st.name, enrollmentNo: st.enrollmentNo,
+    programme: st.programme, branch: st.branch, year: st.year, cgpa: st.cgpa,
+    category: st.category, isPwD: st.isPwD, gender: st.gender,
+    homePincode: st.homePincode, homeState: st.homeState
+  };
+
+  var app = s.application;
+  if (!app) return view;
+
+  view.application = {
+    appId: app.appId, status: app.status, campusPref: app.campusPref,
+    submittedAt: fmtDate_(app.submittedAt), distanceKm: app.distanceKm,
+    eligible: app.eligible, docStatus: app.docStatus,
+    needsAccessible: app.needsAccessible, meritScore: app.meritScore
+  };
+  view.preferences = Db.where('Preferences', { appId: app.appId })
+    .sort(function (a, b) { return a.rank - b.rank; })
+    .map(function (p) {
+      var h = Db.byId('Hostels', p.hostelId);
+      return { rank: p.rank, hostelId: p.hostelId,
+               hostelName: h ? h.name : p.hostelId,
+               campus: h ? h.campus : '', roomType: p.roomType };
+    });
+  view.documents = Documents.statusFor(app.appId, st);
+
+  var alloc = Db.findOne('Allocations', { appId: app.appId });
+  if (alloc && alloc.status === 'ACTIVE') {
+    var bed = Db.byId('Beds', alloc.bedId);
+    var room = bed ? Db.byId('Rooms', bed.roomId) : null;
+    var hostel = room ? Db.byId('Hostels', room.hostelId) : null;
+    view.allocation = {
+      allocId: alloc.allocId,
+      hostelName: hostel ? hostel.name : '',
+      campus: hostel ? hostel.campus : '',
+      warden: hostel ? hostel.warden : '',
+      block: room ? room.block : '',
+      floor: room ? room.floor : '',
+      roomNo: room ? room.roomNo : '',
+      roomType: room ? room.roomType : '',
+      bedNo: bed ? bed.bedNo : '',
+      isAccessible: room ? room.isAccessible : false,
+      prefRankMet: alloc.prefRankMet,
+      compatScore: alloc.compatScore,
+      allocatedAt: fmtDate_(alloc.allocatedAt),
+      roommates: roommatesFor_(alloc, bed)
+    };
+    view.explanation = buildExplanation_(alloc.reasonCodes, alloc);
+  }
+
+  var wl = Db.findOne('Waitlist', { appId: app.appId });
+  if (wl && !view.allocation) {
+    view.waitlist = {
+      position: wl.position,
+      etaProbability: wl.etaProbability,
+      etaPercent: Math.round(Number(wl.etaProbability) * 100),
+      hostelName: (Db.byId('Hostels', wl.hostelId) || {}).name || ''
+    };
+    view.explanation = buildExplanation_(wl.reasonCodes, null);
+  }
+
+  if (!view.explanation && app.eligibilityNotes && app.eligibilityNotes.length) {
+    view.explanation = {
+      headline: 'Your application was not eligible for allocation',
+      groups: [{ title: 'Eligibility', items: (app.eligibilityNotes || []).map(function (t) {
+        return { ok: false, text: t };
+      }) }]
+    };
+  }
+
+  return view;
+}
+
+/** Who else is in the room, and how well matched. */
+function roommatesFor_(alloc, bed) {
+  if (!bed) return [];
+  var siblings = Db.where('Beds', { roomId: bed.roomId })
+    .filter(function (b) { return b.bedId !== bed.bedId && b.occupantAppId; });
+  return siblings.map(function (b) {
+    var otherApp = Db.byId('Applications', b.occupantAppId);
+    var other = otherApp ? Db.byId('Students', otherApp.studentId) : null;
+    var mine = Db.byId('Lifestyle', alloc.appId);
+    var theirs = Db.byId('Lifestyle', b.occupantAppId);
+    var sc = (mine && theirs) ? Roommate.score(mine, theirs) : null;
+    return {
+      name: other ? other.name : 'Not yet allotted',
+      programme: other ? other.programme : '',
+      year: other ? other.year : '',
+      bedNo: b.bedNo,
+      compatPercent: sc ? Math.round(sc.score * 100) : null,
+      strengths: sc ? topStrengths_(sc.parts) : []
+    };
+  });
+}
+
+/** The two dimensions a pair matched best on - more useful than a bare score. */
+function topStrengths_(parts) {
+  var labels = {
+    sleep: 'sleep schedule', study: 'study style', clean: 'cleanliness',
+    social: 'sociability', food: 'food preference', lang: 'language'
+  };
+  return Object.keys(labels)
+    .map(function (k) { return { k: k, v: parts[k] }; })
+    .filter(function (x) { return x.v >= 0.75; })
+    .sort(function (a, b) { return b.v - a.v; })
+    .slice(0, 2)
+    .map(function (x) { return labels[x.k]; });
+}
+
+/**
+ * Turn the raw reason trace into grouped, display-ready sections.
+ * This is the "why did I get this room?" panel - novelty feature 1.
+ */
+function buildExplanation_(reasonCodes, alloc) {
+  var trace = reasonCodes;
+  if (typeof trace === 'string') {
+    try { trace = JSON.parse(trace); } catch (e) { trace = []; }
+  }
+  if (!trace || !trace.length) return null;
+
+  var groups = [
+    { title: 'Eligibility',            prefixes: ['ELIG_'],                    items: [] },
+    { title: 'Your position',          prefixes: ['MERIT_POSITION'],           items: [] },
+    { title: 'How your seat was awarded', prefixes: ['SEAT_', 'WAITLIST_'],    items: [] },
+    { title: 'Your room preferences',  prefixes: ['PREF_', 'FALLBACK_', 'PARETO_'], items: [] },
+    { title: 'Accessibility',          prefixes: ['ACCESSIBLE_'],              items: [] },
+    { title: 'Roommate matching',      prefixes: ['ROOMMATE_'],                items: [] }
+  ];
+
+  trace.forEach(function (r) {
+    for (var i = 0; i < groups.length; i++) {
+      var hit = groups[i].prefixes.some(function (p) { return String(r.code).indexOf(p) === 0; });
+      if (hit) {
+        groups[i].items.push({ ok: r.ok, text: r.text, code: r.code, detail: r.detail });
+        return;
+      }
+    }
+  });
+
+  var merit = trace.filter(function (r) { return r.code === 'MERIT_POSITION'; })[0];
+  var headline = alloc
+    ? (alloc.prefRankMet >= 1
+        ? 'You were allotted your preference ' + alloc.prefRankMet + ' room'
+        : 'You were allotted a room outside your stated preferences')
+    : 'You are on the waiting list';
+
+  return {
+    headline: headline,
+    meritDetail: merit ? merit.detail : null,
+    groups: groups.filter(function (g) { return g.items.length; })
+  };
+}
+
+// ============================================================ apply form
+
+/** Reference data for the application form, plus any saved draft. */
+function apiGetApplyForm() {
+  var s = Auth.session();
+  if (!s.email) return { signedIn: false };
+  if (!s.student) return { signedIn: true, unregistered: true };
+
+  var hostels = Db.readAll('Hostels').filter(function (h) {
+    return h.active && (h.gender === s.student.gender || h.gender === 'CO');
+  });
+
+  var options = [];
+  hostels.forEach(function (h) {
+    ['SINGLE', 'DOUBLE', 'TRIPLE'].forEach(function (rt) {
+      var capacity = Db.readAll('Rooms').filter(function (r) {
+        return r.hostelId === h.hostelId && r.roomType === rt && r.status === 'ACTIVE';
+      }).length;
+      if (!capacity) return;
+      options.push({
+        key: h.hostelId + '|' + rt,
+        hostelId: h.hostelId, hostelName: h.name, campus: h.campus,
+        roomType: rt, roomTypeLabel: roomTypeLabel_(rt), rooms: capacity
+      });
+    });
+  });
+
+  var existing = s.application;
+  var draft = null;
+  if (existing) {
+    draft = {
+      appId: existing.appId,
+      status: existing.status,
+      campusPref: existing.campusPref,
+      needsAccessible: existing.needsAccessible,
+      preferences: Db.where('Preferences', { appId: existing.appId })
+        .sort(function (a, b) { return a.rank - b.rank; })
+        .map(function (p) { return p.hostelId + '|' + p.roomType; }),
+      lifestyle: Db.byId('Lifestyle', existing.appId)
+    };
+  }
+
+  return {
+    signedIn: true,
+    applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
+    student: s.student,
+    maxPreferences: Number(Db.cfg('MAX_PREFERENCES', 5)),
+    options: options,
+    documents: existing ? Documents.statusFor(existing.appId, s.student)
+                        : Documents.requiredFor(s.student),
+    draft: draft,
+    minDistanceKm: Policy.value('eligibility', 'MIN_DISTANCE_KM', 30)
+  };
+}
+
+function roomTypeLabel_(rt) {
+  return { SINGLE: 'Single room', DOUBLE: '2-seater', TRIPLE: '3-seater' }[rt] || rt;
+}
+
+/**
+ * Save or submit an application.
+ * @param {Object} payload {campusPref, needsAccessible, preferences[], lifestyle{}, submit:boolean}
+ */
+function apiSaveApplication(payload) {
+  var s = Auth.session();
+  if (!s.email) throw new Error('Please sign in first.');
+  if (!s.student) throw new Error('No student record is linked to ' + s.email + '.');
+
+  if (String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() !== 'TRUE') {
+    throw new Error('Applications are closed.');
+  }
+
+  var errors = validateApplication_(payload, s.student);
+  if (errors.length) throw new Error(errors.join(' '));
+
+  var app = s.application;
+  var isNew = !app;
+  var appId = app ? app.appId : Db.nextId('APP');
+
+  // Locking an allotted application prevents a student editing preferences
+  // after results are out and quietly rewriting the basis of their allocation.
+  if (app && ['ALLOTTED', 'WAITLISTED', 'CANCELLED', 'WITHDRAWN'].indexOf(app.status) >= 0) {
+    throw new Error('Your application is ' + String(app.status).toLowerCase() +
+                    ' and can no longer be edited. Raise a grievance if something is wrong.');
+  }
+
+  var geo = Geo.distanceFromHome(s.student.homePincode);
+  var status = payload.submit ? 'SUBMITTED' : 'DRAFT';
+  var now = new Date();
+
+  var record = {
+    appId: appId,
+    studentId: s.student.studentId,
+    campusPref: payload.campusPref || 'ANY',
+    status: status,
+    submittedAt: payload.submit ? now : (app ? app.submittedAt : ''),
+    meritScore: app ? app.meritScore : 0,
+    distanceKm: geo.resolved ? geo.km : -1,
+    eligible: app ? app.eligible : false,
+    eligibilityNotes: app ? app.eligibilityNotes : [],
+    docStatus: app ? app.docStatus : 'PENDING',
+    docFolderUrl: app ? app.docFolderUrl : '',
+    needsAccessible: !!payload.needsAccessible,
+    updatedAt: now
+  };
+
+  if (isNew) {
+    Db.append('Applications', record);
+  } else {
+    Db.update('Applications', appId, record);
+  }
+
+  // Preferences are replaced wholesale - simpler and safer than diffing ranks.
+  var others = Db.readAll('Preferences').filter(function (p) { return p.appId !== appId; });
+  var mine = (payload.preferences || []).map(function (key, i) {
+    var parts = String(key).split('|');
+    return { appId: appId, rank: i + 1, hostelId: parts[0], roomType: parts[1] };
+  });
+  Db.replaceAll('Preferences', others.concat(mine));
+
+  if (payload.lifestyle) {
+    var life = Object.assign({ appId: appId }, payload.lifestyle);
+    if (Db.byId('Lifestyle', appId)) Db.update('Lifestyle', appId, life);
+    else Db.append('Lifestyle', life);
+  }
+
+  Documents.provision(appId, s.student);
+  Db.update('Applications', appId, { docStatus: Documents.rollUp(appId, s.student) });
+
+  if (payload.submit) {
+    Ledger.append('APPLICATION_SUBMITTED', {
+      appId: appId, studentId: s.student.studentId,
+      preferences: mine.length, campusPref: record.campusPref
+    }, s.email);
+  }
+
+  return { ok: true, appId: appId, status: status };
+}
+
+/** Field-level validation. Returns human-readable messages, not codes. */
+function validateApplication_(payload, student) {
+  var errors = [];
+  var maxPrefs = Number(Db.cfg('MAX_PREFERENCES', 5));
+  var prefs = payload.preferences || [];
+
+  if (payload.submit && !prefs.length) {
+    errors.push('Please rank at least one room preference.');
+  }
+  if (prefs.length > maxPrefs) {
+    errors.push('You may rank at most ' + maxPrefs + ' preferences.');
+  }
+  if (new Set(prefs).size !== prefs.length) {
+    errors.push('The same choice appears more than once in your preference list.');
+  }
+
+  // A preference in the wrong gender's hostel would violate the allocator's one
+  // hard partition, so it is rejected at the door rather than filtered later.
+  var hostels = Db.indexBy('Hostels', 'hostelId');
+  prefs.forEach(function (key) {
+    var hostelId = String(key).split('|')[0];
+    var h = hostels[hostelId];
+    if (!h) { errors.push('Unknown hostel in your preferences.'); return; }
+    if (h.gender !== 'CO' && h.gender !== student.gender) {
+      errors.push(h.name + ' does not accept applications from your gender.');
+    }
+  });
+
+  if (payload.submit) {
+    var life = payload.lifestyle || {};
+    ['sleepTime', 'wakeTime', 'studyStyle', 'foodPref'].forEach(function (f) {
+      if (!life[f]) errors.push('Please complete the roommate questionnaire.');
+    });
+  }
+  return errors.filter(function (v, i, a) { return a.indexOf(v) === i; });
+}
+
+/** Withdraw an application. */
+function apiWithdrawApplication() {
+  var s = Auth.session();
+  if (!s.application) throw new Error('You have no application to withdraw.');
+  Db.update('Applications', s.application.appId, { status: 'WITHDRAWN', updatedAt: new Date() });
+  Ledger.append('APPLICATION_WITHDRAWN', { appId: s.application.appId }, s.email);
+  return { ok: true };
+}
+
+// ============================================================ documents
+
+/**
+ * Upload one document to Drive and attach it to the application.
+ * @param {{docType, fileName, mimeType, bytes}} payload  bytes = base64
+ */
+function apiUploadDocument(payload) {
+  var s = Auth.session();
+  if (!s.application) throw new Error('Submit your application before uploading documents.');
+  Auth.requireOwner(s.application.appId);
+
+  var folder = documentsFolder_(s.application.appId);
+  var blob = Utilities.newBlob(
+    Utilities.base64Decode(payload.bytes), payload.mimeType, payload.fileName);
+  var file = folder.createFile(blob);
+
+  Documents.recordUpload(s.application.appId, payload.docType, file.getId(), payload.fileName);
+  Db.update('Applications', s.application.appId, {
+    docStatus: Documents.rollUp(s.application.appId, s.student),
+    docFolderUrl: folder.getUrl()
+  });
+  return { ok: true, fileName: payload.fileName };
+}
+
+function documentsFolder_(appId) {
+  var rootId = Db.cfg('LETTER_FOLDER_ID', '');
+  var root = rootId ? DriveApp.getFolderById(rootId) : DriveApp.getRootFolder();
+  var name = 'HostelDocs-' + appId;
+  var it = root.getFoldersByName(name);
+  return it.hasNext() ? it.next() : root.createFolder(name);
+}
+
+// ============================================================ helpers
+
+function fmtDate_(d) {
+  if (!d) return '';
+  try {
+    return Utilities.formatDate(new Date(d), 'Asia/Kolkata', 'd MMM yyyy');
+  } catch (e) { return ''; }
+}

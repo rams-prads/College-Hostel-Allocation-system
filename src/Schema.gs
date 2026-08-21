@@ -277,6 +277,24 @@ var SCHEMA = {
     ]
   },
 
+  Documents: {
+    desc: 'Per-document verification records. Which documents are required is ' +
+          'computed per applicant by Documents.gs, not stored as a fixed list.',
+    pk: 'docId',
+    cols: [
+      { name: 'docId',      type: T.STR },
+      { name: 'appId',      type: T.STR },
+      { name: 'docType',    type: T.ENUM, values: ['ADMISSION_LETTER', 'ID_CARD', 'CATEGORY_CERT', 'PWD_CERT', 'ADDRESS_PROOF'] },
+      { name: 'status',     type: T.ENUM, values: ['REQUIRED', 'UPLOADED', 'VERIFIED', 'REJECTED', 'WAIVED'] },
+      { name: 'driveFileId',type: T.STR },
+      { name: 'fileName',   type: T.STR },
+      { name: 'uploadedAt', type: T.DATE },
+      { name: 'verifiedBy', type: T.STR },
+      { name: 'verifiedAt', type: T.DATE },
+      { name: 'note',       type: T.STR }
+    ]
+  },
+
   Notifications: {
     desc: 'Email outbox and delivery log. Respects Gmail free-tier quota.',
     pk: 'msgId',
@@ -299,7 +317,7 @@ var SHEET_ORDER = [
   'Students', 'Applications', 'Preferences', 'Lifestyle',
   'Hostels', 'Rooms', 'Beds',
   'Runs', 'Allocations', 'Waitlist',
-  'Transfers', 'Grievances',
+  'Transfers', 'Grievances', 'Documents',
   'AuditLog', 'PincodeGeo', 'Notifications'
 ];
 

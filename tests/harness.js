@@ -74,7 +74,7 @@ function check(name, cond, detail) {
 }
 
 console.log('\n=== Schema contract ===');
-check('18 tabs defined', SHEET_ORDER.length === 18, SHEET_ORDER.length + ' found');
+check('19 tabs defined', SHEET_ORDER.length === 19, SHEET_ORDER.length + ' found');
 check('every ordered tab exists in SCHEMA', SHEET_ORDER.every(t => !!SCHEMA[t]));
 check('every SCHEMA tab is in SHEET_ORDER',
   Object.keys(SCHEMA).every(t => SHEET_ORDER.indexOf(t) >= 0));

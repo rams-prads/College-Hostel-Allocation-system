@@ -413,7 +413,16 @@ var Allocator = (function () {
         // vacancies are in the other gender's hostels. Release the seat and try
         // the next student rather than stopping: halting here would strand beds
         // while students wait, which is the inefficiency we exist to remove.
+        //
+        // Tell them WHY. Without this the top waitlisted student is only told
+        // that open seats ran out, which is true but is no longer the binding
+        // reason once conversion has run.
         releaseSeat_(ctx, src.bucket);
+        trace_(ctx, c.appId, reason('WAITLIST_NO_BED_FOR_GENDER', false,
+          'A seat was available for you when unfilled reserved seats were converted, ' +
+          'but every room in the hostels open to your gender was already occupied. ' +
+          'The remaining vacancies are in hostels you cannot be allotted to.',
+          { meritPosition: c.meritPosition }));
         if (totalVacantBeds_(pools) === 0) break;
       }
     }

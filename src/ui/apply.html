@@ -1,0 +1,315 @@
+<!-- Application form. Drag-to-rank preferences are the reason this is a custom
+     page rather than a Google Form - Forms cannot express an ordered list. -->
+<?!= include('ui/styles'); ?>
+
+<header class="top">
+  <div class="inner">
+    <div>
+      <h1>Hostel Application</h1>
+      <div class="sub">Academic session 2026&ndash;27</div>
+    </div>
+    <div class="who"><a href="?" style="color:inherit">Back to my application</a></div>
+  </div>
+</header>
+
+<div class="wrap" id="root"><div class="empty">Loading&hellip;</div></div>
+
+<script>
+  var FORM = null;
+  var chosen = [];          // ordered array of "hostelId|roomType" keys
+  var lifestyle = {};
+  var campusPref = 'ANY';
+  var needsAccessible = false;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  function el(id) { return document.getElementById(id); }
+
+  google.script.run.withSuccessHandler(boot).withFailureHandler(function (e) {
+    el('root').innerHTML = '<div class="banner err">' + esc(e.message) + '</div>';
+  }).apiGetApplyForm();
+
+  function boot(f) {
+    FORM = f;
+    if (!f.signedIn) {
+      el('root').innerHTML = '<div class="card center"><h3>Please sign in</h3></div>'; return;
+    }
+    if (f.unregistered) {
+      el('root').innerHTML = '<div class="card"><h3>No student record found</h3>' +
+        '<p class="muted">Your account is not linked to a student record.</p></div>'; return;
+    }
+    if (!f.applicationsOpen) {
+      el('root').innerHTML = '<div class="card"><h3>Applications are closed</h3></div>'; return;
+    }
+
+    if (f.draft) {
+      chosen = (f.draft.preferences || []).slice();
+      campusPref = f.draft.campusPref || 'ANY';
+      needsAccessible = !!f.draft.needsAccessible;
+      lifestyle = f.draft.lifestyle || {};
+    }
+    if (!lifestyle.cleanliness) lifestyle.cleanliness = 3;
+    if (!lifestyle.sociability) lifestyle.sociability = 3;
+
+    el('root').innerHTML = shell(f);
+    paintCampus(); paintOptions(); paintChosen(); paintLifestyle();
+  }
+
+  function shell(f) {
+    var s = f.student;
+    return '<div id="msg"></div>' +
+
+      '<div class="card"><h2>Your details</h2>' +
+        '<dl class="kv">' +
+          '<dt>Name</dt><dd>' + esc(s.name) + '</dd>' +
+          '<dt>Enrolment no.</dt><dd>' + esc(s.enrollmentNo) + '</dd>' +
+          '<dt>Programme</dt><dd>' + esc(s.programme) + ' ' + esc(s.branch) +
+            ', year ' + esc(s.year) + '</dd>' +
+          '<dt>Category</dt><dd>' + esc(s.category) + (s.isPwD ? ' &middot; PwD' : '') + '</dd>' +
+          '<dt>Home PIN</dt><dd>' + esc(s.homePincode) + ' (' + esc(s.homeState) + ')</dd>' +
+        '</dl>' +
+        '<p class="small muted" style="margin:11px 0 0">These come from the university registry. ' +
+        'Contact the hostel office if anything is wrong &mdash; they affect your eligibility and score.</p>' +
+      '</div>' +
+
+      '<div class="card"><h2>Campus preference</h2>' +
+        '<div class="seg" id="campus"></div>' +
+        '<p class="small muted" style="margin:9px 0 0">Dwarka and East Delhi are allocated from a ' +
+        'single merit pool, so this only biases your room preferences &mdash; it does not restrict ' +
+        'where you can be allotted.</p>' +
+      '</div>' +
+
+      '<div class="card"><h2>Room preferences</h2>' +
+        '<p class="small muted" style="margin:-4px 0 12px">Pick up to ' + esc(f.maxPreferences) +
+        ' choices, then drag to put them in order. Rank 1 is your first choice.</p>' +
+        '<div id="chosenWrap"></div>' +
+        '<div class="divider"></div>' +
+        '<div class="grp-title" style="margin-bottom:7px">Available options</div>' +
+        '<div id="options"></div>' +
+      '</div>' +
+
+      '<div class="card"><h2>Accessibility</h2>' +
+        '<label class="field" style="display:flex;gap:9px;align-items:flex-start;margin:0">' +
+          '<input type="checkbox" id="acc" ' + (needsAccessible ? 'checked' : '') +
+            ' style="width:auto;margin-top:3px" onchange="needsAccessible=this.checked">' +
+          '<span><span class="lab" style="margin:0">I need an accessible room</span>' +
+          '<span class="help">Ground floor, step-free access and an adapted washroom. ' +
+          'Requires a disability certificate at verification.</span></span>' +
+        '</label>' +
+      '</div>' +
+
+      '<div class="card"><h2>Roommate questionnaire</h2>' +
+        '<p class="small muted" style="margin:-4px 0 13px">Used only to pair you with compatible ' +
+        'roommates inside the room type you are allotted. It never affects which room you get.</p>' +
+        '<div id="life"></div>' +
+      '</div>' +
+
+      '<div class="card"><h2>Documents you will need</h2>' +
+        f.documents.map(function (d) {
+          return '<div class="doc"><div class="body">' +
+            '<div class="n">' + esc(d.label) + '</div>' +
+            '<div class="h">' + esc(d.hint) + '</div>' +
+            '<div class="w">' + esc(d.why) + '</div></div></div>';
+        }).join('') +
+        '<p class="small muted" style="margin:11px 0 0">Upload happens after you submit. ' +
+        'This list is built from your own registry record, so you are never asked for a ' +
+        'certificate that does not apply to you.</p>' +
+      '</div>' +
+
+      '<div class="card"><div class="btn-row">' +
+        '<button class="btn" id="submitBtn" onclick="save(true)">Submit application</button>' +
+        '<button class="btn quiet" onclick="save(false)">Save draft</button>' +
+      '</div></div>';
+  }
+
+  /* ------------------------------------------------------------- campus */
+  function paintCampus() {
+    var opts = [['ANY','No preference'], ['DWARKA','Dwarka'], ['EDC','East Delhi']];
+    el('campus').innerHTML = opts.map(function (o) {
+      return '<button type="button" aria-pressed="' + (campusPref === o[0]) +
+        '" onclick="setCampus(\'' + o[0] + '\')">' + esc(o[1]) + '</button>';
+    }).join('');
+  }
+  function setCampus(v) { campusPref = v; paintCampus(); paintOptions(); }
+
+  /* ------------------------------------------------------------ options */
+  function paintOptions() {
+    var avail = FORM.options.filter(function (o) { return chosen.indexOf(o.key) < 0; });
+    if (campusPref !== 'ANY') {
+      avail.sort(function (a, b) {
+        return (b.campus === campusPref) - (a.campus === campusPref);
+      });
+    }
+    var full = chosen.length >= FORM.maxPreferences;
+    el('options').innerHTML = avail.length
+      ? avail.map(function (o) {
+          return '<div class="doc"><div class="body">' +
+            '<div class="n">' + esc(o.hostelName) + ' &middot; ' + esc(o.roomTypeLabel) + '</div>' +
+            '<div class="h">' + esc(o.campus) + ' &middot; ' + esc(o.rooms) + ' rooms</div></div>' +
+            '<button class="btn ghost" ' + (full ? 'disabled' : '') +
+            ' onclick="addPref(\'' + o.key + '\')">Add</button></div>';
+        }).join('')
+      : '<p class="muted small">All available options are in your list.</p>';
+  }
+
+  function addPref(key) {
+    if (chosen.length >= FORM.maxPreferences) return;
+    if (chosen.indexOf(key) >= 0) return;
+    chosen.push(key);
+    paintChosen(); paintOptions();
+  }
+  function removePref(key) {
+    chosen = chosen.filter(function (k) { return k !== key; });
+    paintChosen(); paintOptions();
+  }
+  function movePref(from, to) {
+    if (to < 0 || to >= chosen.length) return;
+    var item = chosen.splice(from, 1)[0];
+    chosen.splice(to, 0, item);
+    paintChosen();
+  }
+
+  function paintChosen() {
+    if (!chosen.length) {
+      el('chosenWrap').innerHTML =
+        '<p class="muted small">No preferences chosen yet. Add options from the list below.</p>';
+      return;
+    }
+    var byKey = {};
+    FORM.options.forEach(function (o) { byKey[o.key] = o; });
+
+    var items = chosen.map(function (key, i) {
+      var o = byKey[key];
+      if (!o) return '';
+      return '<li draggable="true" data-i="' + i + '">' +
+        '<span class="rank">' + (i + 1) + '</span>' +
+        '<span class="grip" aria-hidden="true">⠿</span>' +
+        '<span class="meta"><span class="n">' + esc(o.hostelName) + ' &middot; ' +
+          esc(o.roomTypeLabel) + '</span>' +
+        '<span class="d">' + esc(o.campus) + '</span></span>' +
+        '<button class="btn quiet" style="padding:4px 9px;font-size:12px" ' +
+          'onclick="movePref(' + i + ',' + (i - 1) + ')" ' + (i === 0 ? 'disabled' : '') +
+          ' aria-label="Move up">↑</button>' +
+        '<button class="btn quiet" style="padding:4px 9px;font-size:12px" ' +
+          'onclick="movePref(' + i + ',' + (i + 1) + ')" ' +
+          (i === chosen.length - 1 ? 'disabled' : '') + ' aria-label="Move down">↓</button>' +
+        '<button class="btn quiet" style="padding:4px 9px;font-size:12px" ' +
+          'onclick="removePref(\'' + key + '\')" aria-label="Remove">✕</button>' +
+        '</li>';
+    }).join('');
+
+    el('chosenWrap').innerHTML = '<ul class="pref-list" id="chosenList">' + items + '</ul>';
+    wireDrag();
+  }
+
+  /* Drag to reorder. Arrow buttons above do the same job for keyboard and
+     touch users, so dragging is an enhancement rather than the only route. */
+  function wireDrag() {
+    var list = el('chosenList');
+    if (!list) return;
+    var dragFrom = null;
+    Array.prototype.forEach.call(list.children, function (li) {
+      li.addEventListener('dragstart', function () {
+        dragFrom = Number(li.dataset.i); li.classList.add('drag');
+      });
+      li.addEventListener('dragend', function () { li.classList.remove('drag'); });
+      li.addEventListener('dragover', function (e) { e.preventDefault(); li.classList.add('over'); });
+      li.addEventListener('dragleave', function () { li.classList.remove('over'); });
+      li.addEventListener('drop', function (e) {
+        e.preventDefault(); li.classList.remove('over');
+        var to = Number(li.dataset.i);
+        if (dragFrom !== null && dragFrom !== to) movePref(dragFrom, to);
+        dragFrom = null;
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------- lifestyle */
+  function paintLifestyle() {
+    var seg = function (field, opts) {
+      return '<label class="field"><span class="lab">' + esc(opts.label) + '</span>' +
+        '<div class="seg">' + opts.values.map(function (v) {
+          return '<button type="button" aria-pressed="' + (lifestyle[field] === v[0]) +
+            '" onclick="setLife(\'' + field + '\',\'' + v[0] + '\')">' + esc(v[1]) + '</button>';
+        }).join('') + '</div>' +
+        (opts.help ? '<span class="help">' + esc(opts.help) + '</span>' : '') + '</label>';
+    };
+    var scale = function (field, label, lo, hi) {
+      var btns = [1,2,3,4,5].map(function (n) {
+        return '<button type="button" aria-pressed="' + (Number(lifestyle[field]) === n) +
+          '" onclick="setLife(\'' + field + '\',' + n + ')">' + n + '</button>';
+      }).join('');
+      return '<label class="field"><span class="lab">' + esc(label) + '</span>' +
+        '<div class="scale">' + btns + '</div>' +
+        '<span class="help">1 = ' + esc(lo) + ', 5 = ' + esc(hi) + '</span></label>';
+    };
+
+    el('life').innerHTML =
+      '<div class="row2">' +
+        seg('sleepTime', { label: 'When do you usually sleep?', values:
+          [['EARLY','Before 11pm'], ['MODERATE','11pm–1am'], ['LATE','After 1am']] }) +
+        seg('wakeTime', { label: 'When do you usually wake?', values:
+          [['EARLY','Before 7am'], ['MODERATE','7–9am'], ['LATE','After 9am']] }) +
+      '</div>' +
+      seg('studyStyle', { label: 'How do you prefer to study in your room?', values:
+        [['QUIET','Silence'], ['MUSIC','With music'], ['GROUP','With others']] }) +
+      '<div class="row2">' +
+        scale('cleanliness', 'How tidy do you keep your space?', 'relaxed', 'very tidy') +
+        scale('sociability', 'How social are you in the room?', 'keep to myself', 'very social') +
+      '</div>' +
+      '<div class="row2">' +
+        seg('foodPref', { label: 'Food preference', values:
+          [['VEG','Vegetarian'], ['EGG','Eggetarian'], ['NONVEG','Non-vegetarian']] }) +
+        seg('guestsFrequency', { label: 'How often do you have visitors?', values:
+          [['NEVER','Rarely'], ['SOMETIMES','Sometimes'], ['OFTEN','Often']] }) +
+      '</div>' +
+      '<div class="row2">' +
+        '<label class="field"><span class="lab">Language you are most comfortable in</span>' +
+        '<input type="text" id="lang" value="' + esc(lifestyle.language || '') +
+        '" oninput="lifestyle.language=this.value" placeholder="e.g. Hindi">' +
+        '<span class="help">A mild pairing bonus only. Rooms are never grouped by region.</span></label>' +
+        seg('smokingTolerance', { label: 'Would you share with someone who smokes?', values:
+          [[true,'Yes'], [false,'No']] }) +
+      '</div>';
+  }
+
+  function setLife(field, value) {
+    if (value === 'true') value = true;
+    if (value === 'false') value = false;
+    lifestyle[field] = value;
+    paintLifestyle();
+  }
+
+  /* --------------------------------------------------------------- save */
+  function save(submit) {
+    var btn = el('submitBtn');
+    btn.disabled = true;
+    if (submit) btn.innerHTML = '<span class="spin"></span> Submitting';
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (submit) { window.top.location.href = window.top.location.pathname; return; }
+        btn.disabled = false; btn.textContent = 'Submit application';
+        banner('good', 'Draft saved. You can come back and finish later.');
+      })
+      .withFailureHandler(function (e) {
+        btn.disabled = false; btn.textContent = 'Submit application';
+        banner('err', e.message);
+      })
+      .apiSaveApplication({
+        campusPref: campusPref,
+        needsAccessible: needsAccessible,
+        preferences: chosen,
+        lifestyle: lifestyle,
+        submit: !!submit
+      });
+  }
+
+  function banner(kind, text) {
+    el('msg').innerHTML = '<div class="banner ' + kind + '">' + esc(text) + '</div>';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+</script>

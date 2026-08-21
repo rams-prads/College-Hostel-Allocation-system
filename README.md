@@ -56,6 +56,7 @@ iterated in seconds:
 ```bash
 node tests/phase1.test.js     # 57 checks: data integrity, quotas, determinism
 node tests/phase2.test.js     # 93 checks: allocation engine correctness
+node tests/phase3.test.js     # 65 checks: document rules and portal API
 node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
 ```
 
@@ -89,7 +90,7 @@ docs/                diagrams and supporting material
 | 0 | Foundation — schema, Db layer, setup, ledger, auth, router | ✅ done |
 | 1 | Synthetic data, hostel inventory, policy, offline pincode geo | ✅ done |
 | 2 | Allocation engine, roommate matching, waitlist, metrics | ✅ done |
-| 3 | Student portal | ⏳ next |
-| 4 | Admin dashboard, letters, email | ⏳ |
+| 3 | Student portal | ✅ done |
+| 4 | Admin dashboard, letters, email | ⏳ next |
 | 5 | Simulator, swaps, grievance auto-triage | ⏳ |
 | 6 | Demo hardening and deliverables | ⏳ |

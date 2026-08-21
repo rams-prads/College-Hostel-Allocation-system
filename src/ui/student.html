@@ -1,0 +1,252 @@
+<!-- Student dashboard. The explanation panel is the centrepiece: novelty 1. -->
+<?!= include('ui/styles'); ?>
+
+<header class="top">
+  <div class="inner">
+    <div>
+      <h1>GGSIPU Hostel Portal</h1>
+      <div class="sub">Application status and room allotment</div>
+    </div>
+    <div class="who" id="who"></div>
+  </div>
+</header>
+
+<div class="wrap" id="root">
+  <div class="empty">Loading your application&hellip;</div>
+</div>
+
+<script>
+  var VIEW = null;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  function el(id) { return document.getElementById(id); }
+  function initials(name) {
+    return String(name || '?').split(/\s+/).slice(0, 2)
+      .map(function (w) { return w.charAt(0); }).join('').toUpperCase();
+  }
+
+  google.script.run.withSuccessHandler(render).withFailureHandler(function (e) {
+    el('root').innerHTML = '<div class="banner err">Could not load your application: ' +
+      esc(e.message) + '</div>';
+  }).apiGetStudentView();
+
+  function render(v) {
+    VIEW = v;
+    if (!v.signedIn) {
+      el('root').innerHTML = '<div class="card center"><h3>Please sign in</h3>' +
+        '<p class="muted">Open this page while signed in to your Google account.</p></div>';
+      return;
+    }
+    el('who').innerHTML = esc(v.name || v.email) +
+      (v.isAdmin ? ' &middot; <a href="?page=admin" style="color:inherit">Admin</a>' : '');
+
+    if (v.unregistered) {
+      el('root').innerHTML = '<div class="card"><h3>No student record found</h3>' +
+        '<p class="muted">The address <strong>' + esc(v.email) + '</strong> is not linked to a ' +
+        'student record. Contact the hostel office at ' + esc(v.supportEmail) + '.</p></div>';
+      return;
+    }
+
+    var html = [];
+    html.push(statusStrip(v));
+    if (!v.application) html.push(noApplication(v));
+    else {
+      if (v.allocation) html.push(allotmentCard(v));
+      else if (v.waitlist) html.push(waitlistCard(v));
+      else html.push(pendingCard(v));
+
+      if (v.explanation) html.push(explanationCard(v.explanation));
+      if (v.allocation && v.allocation.roommates.length) html.push(roommateCard(v));
+      html.push(preferencesCard(v));
+      html.push(documentsCard(v));
+      html.push(actionsCard(v));
+    }
+    el('root').innerHTML = html.join('');
+  }
+
+  /* ---------------------------------------------------------------- pieces */
+
+  function statusStrip(v) {
+    var st = v.application ? v.application.status : 'NOT_STARTED';
+    var order = ['DRAFT', 'SUBMITTED', 'VERIFIED', 'ALLOTTED'];
+    var labels = { DRAFT:'Draft', SUBMITTED:'Submitted', VERIFIED:'Verified', ALLOTTED:'Allotted' };
+    if (st === 'WAITLISTED') { order[3] = 'WAITLISTED'; labels.WAITLISTED = 'Waitlisted'; }
+    if (st === 'REJECTED')   { order[3] = 'REJECTED';   labels.REJECTED = 'Not eligible'; }
+    var at = order.indexOf(st);
+    var items = order.map(function (s, i) {
+      var cls = i < at ? 'done' : (i === at ? 'done current' : '');
+      return '<li class="' + cls + '">' + esc(labels[s]) + '</li>';
+    }).join('');
+    return '<div class="card"><ul class="steps">' + items + '</ul></div>';
+  }
+
+  function noApplication(v) {
+    if (!v.applicationsOpen) {
+      return '<div class="card"><h3>Applications are closed</h3>' +
+        '<p class="muted">The hostel application window is not currently open.</p></div>';
+    }
+    return '<div class="card"><h3>You have not applied yet</h3>' +
+      '<p class="muted">Submit a hostel application to be considered in this year\'s allocation.</p>' +
+      '<div class="btn-row"><a class="btn" href="?page=apply">Start application</a></div></div>';
+  }
+
+  function allotmentCard(v) {
+    var a = v.allocation;
+    var prefTxt = a.prefRankMet >= 1
+      ? 'Preference ' + a.prefRankMet + ' granted'
+      : 'Assigned outside your preferences';
+    return '<div class="card"><h2>Your allotment</h2><div class="allot">' +
+      '<div style="flex:1;min-width:200px">' +
+        '<div class="room">Room ' + esc(a.roomNo) + '</div>' +
+        '<div class="where">' + esc(a.hostelName) + ' &middot; ' + esc(a.campus) +
+          ' &middot; Block ' + esc(a.block) + ', floor ' + esc(a.floor) + '</div>' +
+        '<div style="margin-top:9px"><span class="pill ok">' + esc(prefTxt) + '</span>' +
+          (a.isAccessible ? ' <span class="pill info">Accessible room</span>' : '') + '</div>' +
+      '</div>' +
+      '<dl class="kv">' +
+        '<dt>Room type</dt><dd>' + esc(roomLabel(a.roomType)) + '</dd>' +
+        '<dt>Bed</dt><dd>' + esc(a.bedNo) + '</dd>' +
+        '<dt>Warden</dt><dd>' + esc(a.warden) + '</dd>' +
+        '<dt>Allotted on</dt><dd>' + esc(a.allocatedAt) + '</dd>' +
+      '</dl></div>' +
+      '<div class="divider"></div>' +
+      '<div class="btn-row">' +
+        '<button class="btn" disabled title="Available in the next build">Download allotment letter</button>' +
+        '<span class="small muted">Letter generation arrives in Phase 4.</span>' +
+      '</div></div>';
+  }
+
+  function waitlistCard(v) {
+    var w = v.waitlist;
+    return '<div class="card"><h2>Waiting list</h2>' +
+      '<div class="allot"><div style="flex:1;min-width:200px">' +
+        '<div class="room">Position ' + esc(w.position) + '</div>' +
+        '<div class="where">Estimated chance of allotment: <strong>' + esc(w.etaPercent) +
+          '%</strong></div>' +
+        '<div style="margin-top:9px"><span class="pill warn">Waitlisted</span></div>' +
+      '</div></div>' +
+      '<p class="small muted" style="margin-bottom:0">This estimate is based on how many students ' +
+      'historically withdraw after allotment. It is an estimate, not a guarantee.</p></div>';
+  }
+
+  function pendingCard(v) {
+    var s = v.application.status;
+    if (s === 'REJECTED') {
+      return '<div class="card"><h3>Your application was not eligible</h3>' +
+        '<p class="muted">The reasons are listed below. If you believe this is a mistake, ' +
+        'you can raise a grievance once that module is live.</p></div>';
+    }
+    return '<div class="card"><h3>Application ' + esc(s.toLowerCase()) + '</h3>' +
+      '<p class="muted">Your application has been recorded. Room allocation has not been run yet — ' +
+      'you will be emailed as soon as results are published.</p></div>';
+  }
+
+  /* The "why did I get this room?" panel. */
+  function explanationCard(x) {
+    var groups = x.groups.map(function (g) {
+      var items = g.items.map(function (it) {
+        return '<li class="' + (it.ok ? 'yes' : 'no') + '">' +
+          '<span class="mark">' + (it.ok ? '✓' : '✗') + '</span>' +
+          '<span>' + esc(it.text) + '</span></li>';
+      }).join('');
+      return '<div class="grp"><div class="grp-title">' + esc(g.title) + '</div>' +
+             '<ul>' + items + '</ul></div>';
+    }).join('');
+
+    return '<div class="card">' +
+      '<h2>Why you got this result</h2>' +
+      '<h3 style="margin-bottom:12px">' + esc(x.headline) + '</h3>' +
+      '<div class="why">' + groups + '</div>' +
+      (x.meritDetail ? scoreBars(x.meritDetail) : '') +
+      '<p class="small muted" style="margin:14px 0 0">Every step above was recorded when the ' +
+      'allocation ran and is stored in a tamper-evident audit log. Nothing here is reconstructed ' +
+      'after the fact.</p></div>';
+  }
+
+  function scoreBars(d) {
+    if (!d || !d.breakdown) return '';
+    var names = { merit:'Academic merit', distance:'Distance from home', year:'Year of study', special:'Special need' };
+    var rows = Object.keys(names).map(function (k) {
+      var b = d.breakdown[k];
+      if (!b) return '';
+      var contribution = b.value * b.weight;
+      return '<div class="bar-row">' +
+        '<span class="lbl">' + esc(names[k]) + '</span>' +
+        '<span class="bar"><i style="width:' + Math.round(b.value * 100) + '%"></i></span>' +
+        '<span class="num">' + contribution.toFixed(3) + '</span></div>';
+    }).join('');
+    return '<div class="divider"></div>' +
+      '<div class="grp-title">How your score of ' + esc(d.score) + ' was calculated</div>' +
+      '<div class="bars">' + rows + '</div>' +
+      '<p class="small muted" style="margin:8px 0 0">Bars show your value on each factor; the number ' +
+      'is that value multiplied by the weight the hostel policy assigns to it.</p>';
+  }
+
+  function roommateCard(v) {
+    var mates = v.allocation.roommates.map(function (m) {
+      var strengths = m.strengths.length
+        ? 'Matched on ' + m.strengths.join(' and ')
+        : 'Assigned to the same room';
+      return '<div class="mate">' +
+        '<div class="av">' + esc(initials(m.name)) + '</div>' +
+        '<div class="info"><div class="n">' + esc(m.name) + '</div>' +
+          '<div class="d">' + esc(m.programme) + (m.year ? ', year ' + esc(m.year) : '') +
+          ' &middot; ' + esc(strengths) + '</div></div>' +
+        (m.compatPercent != null
+          ? '<span class="pill ' + (m.compatPercent >= 70 ? 'ok' : 'warn') + '">' +
+            esc(m.compatPercent) + '% match</span>' : '') +
+        '</div>';
+    }).join('');
+    return '<div class="card"><h2>Your roommates</h2>' + mates +
+      '<p class="small muted" style="margin:11px 0 0">Roommates were matched on your lifestyle ' +
+      'answers among everyone allotted the same room type. This never changed which room you got.</p>' +
+      '</div>';
+  }
+
+  function preferencesCard(v) {
+    if (!v.preferences || !v.preferences.length) return '';
+    var rows = v.preferences.map(function (p) {
+      var got = v.allocation && v.allocation.prefRankMet === p.rank;
+      return '<li>' +
+        '<span class="rank">' + esc(p.rank) + '</span>' +
+        '<span class="meta"><span class="n">' + esc(p.hostelName) + '</span>' +
+        '<span class="d">' + esc(p.campus) + ' &middot; ' + esc(roomLabel(p.roomType)) + '</span></span>' +
+        (got ? '<span class="pill ok">Granted</span>' : '') + '</li>';
+    }).join('');
+    return '<div class="card"><h2>Your preferences</h2><ul class="pref-list">' + rows + '</ul></div>';
+  }
+
+  function documentsCard(v) {
+    if (!v.documents || !v.documents.length) return '';
+    var rows = v.documents.map(function (d) {
+      var cls = { VERIFIED:'ok', UPLOADED:'info', REJECTED:'bad', WAIVED:'ok', REQUIRED:'warn' }[d.status] || 'warn';
+      var label = { VERIFIED:'Verified', UPLOADED:'Under review', REJECTED:'Rejected',
+                    WAIVED:'Not required', REQUIRED:'Not uploaded' }[d.status] || d.status;
+      return '<div class="doc"><div class="body">' +
+        '<div class="n">' + esc(d.label) + '</div>' +
+        '<div class="h">' + esc(d.hint) + '</div>' +
+        '<div class="w">' + esc(d.why) + '</div>' +
+        (d.note ? '<div class="h" style="color:var(--bad)">' + esc(d.note) + '</div>' : '') +
+        '</div><span class="pill ' + cls + '">' + esc(label) + '</span></div>';
+    }).join('');
+    return '<div class="card"><h2>Documents</h2>' + rows + '</div>';
+  }
+
+  function actionsCard(v) {
+    var canEdit = ['DRAFT', 'SUBMITTED', 'VERIFIED'].indexOf(v.application.status) >= 0;
+    return '<div class="card"><h2>Actions</h2><div class="btn-row">' +
+      (canEdit ? '<a class="btn ghost" href="?page=apply">Edit application</a>' : '') +
+      '<button class="btn quiet" disabled title="Available in the next build">Request room swap</button>' +
+      '<button class="btn quiet" disabled title="Available in the next build">Raise a grievance</button>' +
+      '</div><p class="small muted" style="margin:11px 0 0">Application ID ' +
+      esc(v.application.appId) + '</p></div>';
+  }
+
+  function roomLabel(rt) {
+    return { SINGLE:'Single room', DOUBLE:'2-seater', TRIPLE:'3-seater' }[rt] || rt;
+  }
+</script>
