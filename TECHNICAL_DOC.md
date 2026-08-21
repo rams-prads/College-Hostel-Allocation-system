@@ -20,7 +20,7 @@ No server. No database licence. No paid API. No developer required to operate it
 | Frontend | HTML Service, vanilla JS, no framework |
 | Documents | Drive (PDF letters), Gmail (notifications) |
 | Source control | Git, pushed with `clasp` |
-| Tests | 530 assertions, run offline in Node |
+| Tests | 537 assertions offline, plus a 24-point live self-test |
 | Cost | ₹0 |
 
 ---
@@ -58,25 +58,6 @@ flowchart TD
 
 The dashed line is the important one: the simulator **reads** the database and
 never writes to it.
-
-```
-                    ┌──────────────────────────────────────┐
-                    │  Google Sheet — the entire database   │
-                    │  19 tabs · Policy is DATA, not code   │
-                    └──────────────┬───────────────────────┘
-                                   │  Db.gs — batched, typed access
-        ┌──────────────────────────┼──────────────────────────┐
-        │                          │                          │
-  ┌─────▼──────┐          ┌────────▼────────┐        ┌────────▼────────┐
-  │  ENGINE    │          │   SERVICES      │        │   WEB APP       │
-  │ Eligibility│          │  Letters + QR   │        │  Api.gs         │
-  │ Allocator  │          │  Notify (Gmail) │        │  AdminApi.gs    │
-  │ Roommate   │          │  Ledger (hash)  │        │  5 HTML pages   │
-  │ Simulator  │          │  Documents      │        │  Auth guard     │
-  │ Swap       │          │  QrCode (PNG)   │        │                 │
-  │ Grievance  │          │                 │        │                 │
-  └────────────┘          └─────────────────┘        └─────────────────┘
-```
 
 ### Why Sheets is the right database here
 
