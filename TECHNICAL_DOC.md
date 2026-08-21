@@ -27,6 +27,38 @@ No server. No database licence. No paid API. No developer required to operate it
 
 ## 2. Architecture
 
+```mermaid
+flowchart TD
+    S[Student] -->|Google login| P[Student Portal]
+    A[Administrator] -->|role-guarded| D[Admin Dashboard]
+    W[Warden at the gate] -->|scan or type code| V[Verification page<br/>public, no login]
+
+    P --> API[Api.gs]
+    D --> ADM[AdminApi.gs]
+    V --> ADM
+
+    API --> ENG[Allocation engine]
+    ADM --> ENG
+    ADM --> SIM[What-if simulator]
+
+    ENG --> DB[(Google Sheet<br/>19 tabs)]
+    SIM -.->|reads only| DB
+    ENG --> LED[Hash-chained ledger]
+    ENG --> LET[Letters + QR]
+    ENG --> NOT[Gmail notifications]
+
+    LET --> DRIVE[(Google Drive)]
+    LED --> DB
+    NOT --> GMAIL[(Gmail)]
+
+    style DB fill:#1f3864,color:#fff
+    style LED fill:#7f1d1d,color:#fff
+    style SIM stroke-dasharray: 5 5
+```
+
+The dashed line is the important one: the simulator **reads** the database and
+never writes to it.
+
 ```
                     ┌──────────────────────────────────────┐
                     │  Google Sheet — the entire database   │
@@ -232,6 +264,30 @@ Reed-Solomon is verified against the worked example in **ISO/IEC 18004 Annex I**
 and by the syndrome property, which holds for any input rather than one fixed
 vector. The PNG is verified by inflating it with Node's zlib and comparing every
 pixel back to the matrix.
+
+### Known defect: scanning
+
+**As of 22 Aug 2026 the printed QR does not reliably scan with a phone camera.**
+
+Everything behind it is verified working: the encoder passes the ISO spec vector,
+the PNG decodes back to the exact matrix, and the verification endpoint accepts
+genuine letters and rejects forgeries. The failure is at the optical step.
+
+Mitigations applied so far — compact `?v=` route, 10-character signature,
+error-correction level L, rendered at 186px from a scale-6 image — took the
+symbol from version 8 to version 4 and roughly doubled module size to 4.5 px per
+module, which should be ample. It still fails, so the remaining suspects are PDF
+rasterisation at display time, or contrast/anti-aliasing introduced by the
+viewer.
+
+**The feature is not blocked on it.** The verification page accepts the code
+typed or pasted by hand (`apiVerifyByCode`), and the code is printed in full
+beneath the QR on every letter. Gate staff can verify a letter with no camera at
+all — which is arguably what a real deployment needs anyway.
+
+**Diagnosing it:** `Hostel System > Diagnostics > QR diagnostics` separates the
+three possible causes — camera cannot resolve the modules, URL is wrong, or
+verification rejects the letter.
 
 ### Anti-forgery
 

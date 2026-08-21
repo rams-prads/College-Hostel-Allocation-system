@@ -117,6 +117,16 @@ loadSrc('Schema');
 
 global.Db = {
   _store: store,
+  // Enough of a spreadsheet for DryRun's structural check. A tab "exists" once
+  // the schema knows it, which is what createDatabase guarantees on Google.
+  ss() {
+    return {
+      getSheetByName(tab) {
+        return SCHEMA[tab] ? { getName: () => tab } : null;
+      },
+      getSheets: () => Object.keys(SCHEMA).map(t => ({ getName: () => t }))
+    };
+  },
   readAll(tab) {
     const cols = schemaCols(tab);
     return (store[tab] || []).map((r, i) => {
@@ -188,7 +198,7 @@ global.Db = {
 };
 
 // ----------------------------------------------------------- load engine code
-['Util', 'Ledger', 'Geo', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'Auth', 'Api', 'QrCode', 'Letters', 'Notify', 'Simulator', 'Swap', 'Grievance', 'DemoScenario', 'AdminApi'].forEach(loadSrc);
+['Util', 'Ledger', 'Geo', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'Auth', 'Api', 'QrCode', 'Letters', 'Notify', 'Simulator', 'Swap', 'Grievance', 'DemoScenario', 'DryRun', 'AdminApi'].forEach(loadSrc);
 
 // Setup.gs seeds Config/Policy; we call only its seed functions, not the
 // sheet-building parts, which need a real SpreadsheetApp.

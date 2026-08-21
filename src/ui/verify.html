@@ -31,9 +31,8 @@
   var P = <?!= JSON.stringify(params || {}) ?>;
 
   if (!P.id || !P.sig) {
-    document.getElementById('root').innerHTML =
-      '<div class="card"><h3>Nothing to verify</h3><p class="muted">Scan the QR code printed on ' +
-      'an allotment letter to check whether it is genuine.</p></div>';
+    showManualEntry('Scan the QR code on an allotment letter, or type the code printed ' +
+                    'beneath it.');
   } else {
     google.script.run
       .withSuccessHandler(show)
@@ -44,14 +43,46 @@
       .apiVerifyAllotment(P.id, P.sig);
   }
 
+  /** Camera-free entry. A warden at a gate cannot be stopped by a bad photocopy. */
+  function showManualEntry(intro, error) {
+    document.getElementById('root').innerHTML =
+      (error ? '<div class="banner err">' + esc(error) + '</div>' : '') +
+      '<div class="card"><h2>Verify a letter</h2>' +
+      '<p class="small muted" style="margin:-4px 0 12px">' + esc(intro) + '</p>' +
+      '<label class="field"><span class="lab">Verification code</span>' +
+      '<input type="text" id="codeInput" placeholder="ALC-RUN-…~a3f9c2d17b" ' +
+      'autocomplete="off" autocapitalize="off" spellcheck="false"></label>' +
+      '<div class="btn-row"><button class="btn" onclick="checkCode()">Verify</button></div>' +
+      '<p class="small muted" style="margin:11px 0 0">You can paste the whole line printed ' +
+      'under the QR code, or just the code itself.</p></div>';
+    var box = document.getElementById('codeInput');
+    if (box) {
+      box.focus();
+      box.addEventListener('keydown', function (e) { if (e.key === 'Enter') checkCode(); });
+    }
+  }
+
+  function checkCode() {
+    var v = (document.getElementById('codeInput') || {}).value || '';
+    document.getElementById('root').innerHTML =
+      '<div class="empty"><span class="spin"></span> Checking&hellip;</div>';
+    google.script.run
+      .withSuccessHandler(show)
+      .withFailureHandler(function (e) { showManualEntry('Try again.', e.message); })
+      .apiVerifyByCode(v);
+  }
+
   function show(r) {
     if (!r.valid) {
       document.getElementById('root').innerHTML =
         '<div class="verdict bad"><div class="icon">&#10007;</div>' +
         '<div class="t">Not verified</div>' +
         '<div class="s">' + esc(r.reason) + '</div></div>' +
-        '<div class="card"><p class="small muted" style="margin:0">Do not accept this letter as ' +
-        'proof of allotment. Refer the student to the hostel office.</p></div>';
+        '<div class="card"><p class="small muted" style="margin:0 0 12px">Do not accept this letter ' +
+        'as proof of allotment. Refer the student to the hostel office.</p>' +
+        '<div class="btn-row"><button class="btn ghost" onclick="showManualEntry(' +
+        '&quot;Type or paste the code printed beneath the QR.&quot;)">Try another code</button>' +
+        '</div></div>';
       return;
     }
 

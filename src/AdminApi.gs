@@ -338,3 +338,34 @@ function apiAdminFindStudent(query) {
     };
   });
 }
+
+/**
+ * PUBLIC - verify by typing the code printed on the letter, with no camera.
+ *
+ * Accepts the compact token, a full URL pasted from anywhere, or just the
+ * reference number with the signature given separately. Gate staff should never
+ * be blocked because a phone camera will not focus.
+ */
+function apiVerifyByCode(input) {
+  var raw = String(input || '').trim();
+  if (!raw) return { valid: false, reason: 'Enter the code printed beneath the QR on the letter.' };
+
+  // A whole URL pasted in.
+  var vMatch = raw.match(/[?&]v=([^&\s]+)/);
+  if (vMatch) raw = decodeURIComponent(vMatch[1]);
+
+  var idMatch = raw.match(/[?&]id=([^&\s]+)/);
+  var sigMatch = raw.match(/[?&]sig=([^&\s]+)/);
+  if (idMatch && sigMatch) {
+    return Letters.verifyAllotment(decodeURIComponent(idMatch[1]), decodeURIComponent(sigMatch[1]));
+  }
+
+  var parsed = Letters.parseToken(raw);
+  if (parsed) return Letters.verifyAllotment(parsed.allocId, parsed.sig);
+
+  return {
+    valid: false,
+    reason: 'That does not look like a verification code. Copy the whole line printed ' +
+            'under the QR code on the letter, or scan the QR.'
+  };
+}

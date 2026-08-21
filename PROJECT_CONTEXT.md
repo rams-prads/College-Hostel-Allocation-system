@@ -544,10 +544,17 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 ---
 
+## 15b. Open defects
+
+| # | Defect | Status |
+|---|---|---|
+| 1 | **The printed QR does not scan with a phone camera.** Encoder verified against the ISO spec; PNG decodes back to the exact matrix; verification endpoint works. The failure is optical. Density already improved from 2.3 to 4.5 px per module (version 8 to version 4) and it still fails. Remaining suspects: PDF rasterisation at display size, or viewer anti-aliasing. | **Open.** Not blocking: the verification page accepts the code typed by hand, and the code is printed beneath the QR on every letter. |
+
 ## 16. Changelog
 
 | Date | Change |
 |---|---|
+| 2026-08-22 | Camera-free verification added: the code printed under the QR can be typed or pasted into the verification page. DryRun.gs added - a 24-point end-to-end self-test against the LIVE spreadsheet, since every failure so far has been in the gap the offline suites cannot reach. QR scanning remains an open defect, tracked in section 15b. |
 | 2026-08-22 | Phase 6 complete. QR was invisible in the generated PDF - Google's HTML-to-PDF converter drops background colours on empty cells, so the cell-grid QR vanished. Replaced with a real PNG built byte by byte in pure JS (zlib stored blocks, CRC32, Adler-32), verified by inflating it in Node and comparing every pixel to the matrix. Letter layout tightened to one page. TECHNICAL_DOC.md written. 530 checks. |
 | 2026-08-22 | Deployed to Google for the first time. Database creation, seeding and allocation all confirmed working against a real spreadsheet. Phase 6 started: demo cast, admin view-as, DEPLOYMENT.md, DEMO_SCRIPT.md. 45 new checks; 514 total. |
 | 2026-08-21 | Phase 5 complete. What-if simulator with a who-moved diff, mutual swap marketplace with auto-approval, and grievance auto-triage that AUDITS the recorded run rather than replaying the stored explanation. Fixed a serious allocator bug: a second run treated already-OCCUPIED beds as unavailable, so re-running allocated only the buffer and every simulation baseline was wrong. 99 new checks; 469 total. |

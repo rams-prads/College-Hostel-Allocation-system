@@ -17,6 +17,8 @@ function onOpen() {
     .addItem('Generate demo letters only', 'generateCastLettersFromMenu')
     .addItem('Verify ledger integrity', 'showLedgerStatus')
     .addSeparator()
+    .addItem('Run pre-demo dry run', 'runDryRun')
+    .addSeparator()
     .addItem('Add me as administrator', 'addMeAsAdmin')
     .addItem('Who am I?', 'showWhoAmI')
     .addSeparator()

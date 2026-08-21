@@ -168,8 +168,11 @@ Describe the flow: Kavya posts, Meera accepts, done.
 
 ## 7 · The letter and the QR (1.5 min)
 
-**Do:** open a generated PDF from Drive. **Scan the QR with your phone, on
-camera.**
+**Do:** open a generated PDF from Drive. Either scan the QR, or — more reliably —
+open the verification page and paste the code printed beneath the QR.
+
+> The typed route is not a fallback to apologise for. Say it plainly: a gate
+> should not depend on a camera focusing. Both routes reach the same check.
 
 **Say as the verification page loads:**
 
