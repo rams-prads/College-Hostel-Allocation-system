@@ -14,6 +14,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Run allocation', 'runAllocationFromMenu')
     .addItem('Prepare demo scenario', 'prepareDemoFromMenu')
+    .addItem('Generate demo letters only', 'generateCastLettersFromMenu')
     .addItem('Verify ledger integrity', 'showLedgerStatus')
     .addSeparator()
     .addItem('Add me as administrator', 'addMeAsAdmin')

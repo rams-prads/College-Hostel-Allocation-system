@@ -235,3 +235,39 @@ function prepareDemoFromMenu() {
   }
   ui.alert('Demo cast ready', msg, ui.ButtonSet.OK);
 }
+
+/**
+ * Generate letters for the demo cast only.
+ *
+ * A full run is 741 letters, which at a few seconds each is half an hour of
+ * clicking. A demo needs six. This produces exactly the ones the script names,
+ * in seconds, and returns their Drive links.
+ */
+function generateCastLetters() {
+  var res = DemoScenario.prepare({});
+  var out = [];
+
+  res.cast.forEach(function (c) {
+    if (!c.allocId) return;             // waitlisted and rejected characters have no letter
+    try {
+      out.push({ code: c.code, name: c.name, room: c.room, url: Letters.generate(c.allocId) });
+    } catch (e) {
+      out.push({ code: c.code, name: c.name, error: e.message });
+    }
+  });
+  return out;
+}
+
+/** Menu entry for the above. */
+function generateCastLettersFromMenu() {
+  var ui = SpreadsheetApp.getUi();
+  var rows = generateCastLetters();
+  var msg = rows.map(function (r) {
+    return r.error ? r.code + ' - FAILED: ' + r.error
+                   : r.code + ' - ' + r.name + ' (room ' + r.room + ')';
+  }).join('\n');
+  ui.alert('Demo letters ready',
+    rows.length + ' letters generated in the "GGSIPU Hostel Letters" folder in your Drive.\n\n' +
+    msg + '\n\nOpen any of them and scan the QR code with your phone.',
+    ui.ButtonSet.OK);
+}

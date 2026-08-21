@@ -62,10 +62,22 @@ check('names the warden as signatory', html.indexOf(data.hostel.warden) > 0);
 check('includes terms of allotment', html.toLowerCase().indexOf('terms of allotment') > 0);
 check('states the letter is non-transferable',
   html.toLowerCase().indexOf('not transferable') > 0);
-check('embeds a QR grid', html.indexOf('<table cellpadding="0"') > 0);
-check('makes no external requests',
-  html.indexOf('http://') < 0 && html.indexOf('https://') < 0 && html.indexOf('src=') < 0,
+check('embeds the QR as a real image', html.indexOf('<img src="data:image/png;base64,') > 0,
+  'coloured table cells were dropped entirely by the PDF converter');
+check('the QR image is a self-contained data URI, not a remote file',
+  html.indexOf('src="http') < 0 && html.indexOf("src='http") < 0,
   'the letter must render with no network access');
+check('no stylesheet, script or font is fetched',
+  html.indexOf('<link') < 0 && html.indexOf('@import') < 0 && html.indexOf('<script') < 0);
+check('the embedded PNG decodes back to the right QR', (() => {
+  const m = html.match(/data:image\/png;base64,([A-Za-z0-9+/=]+)/);
+  if (!m) return false;
+  const buf = Buffer.from(m[1], 'base64');
+  return buf[0] === 0x89 && buf.toString('ascii', 1, 4) === 'PNG' &&
+         buf.readUInt32BE(16) === buf.readUInt32BE(20);
+})(), 'a valid square PNG must be present in the letter');
+check('the letter keeps its footer on one page',
+  (html.match(/page-break-inside:avoid/g) || []).length >= 2);
 check('contains no script tags', html.toLowerCase().indexOf('<script') < 0);
 check('flags an accessible room when relevant', (() => {
   const acc = allocs.find(a => {

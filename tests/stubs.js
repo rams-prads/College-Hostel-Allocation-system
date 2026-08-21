@@ -36,7 +36,11 @@ global.Utilities = {
       getDataAsString() { return String(this._c); }
     };
   },
-  base64Decode(s) { return Array.from(Buffer.from(s, 'base64')); }
+  base64Decode(s) { return Array.from(Buffer.from(s, 'base64')); },
+  base64Encode(bytes) {
+    const b = Array.isArray(bytes) ? Buffer.from(bytes.map(x => x & 0xFF)) : Buffer.from(String(bytes));
+    return b.toString('base64');
+  }
 };
 
 // Drive and Mail: recording stubs. Real behaviour needs a deployed script, so

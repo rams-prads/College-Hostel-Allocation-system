@@ -247,4 +247,73 @@ check('data placement is reversible', (() => {
   return un.length === size;
 })(), 'structural sanity only - full decode is out of scope');
 
+section('PNG output - the form that actually survives PDF conversion');
+const zlib = require('zlib');
+const pngScale = 4, pngQuiet = 4;
+const png = QrCode.toPngBytes(qr, pngScale, pngQuiet);
+const pbuf = Buffer.from(png.map(b => b & 0xFF));
+
+check('starts with the PNG signature',
+  [0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A].every((b, i) => pbuf[i] === b));
+
+const expectedDim = (qr.size + pngQuiet * 2) * pngScale;
+check('IHDR declares the right dimensions',
+  pbuf.readUInt32BE(16) === expectedDim && pbuf.readUInt32BE(20) === expectedDim,
+  pbuf.readUInt32BE(16) + 'x' + pbuf.readUInt32BE(20) + ', expected ' + expectedDim);
+check('8-bit greyscale', pbuf[24] === 8 && pbuf[25] === 0);
+
+// Walk the chunks and check every CRC, which is what a decoder does first.
+let off = 8; const seen = []; const idat = []; let crcOk = true;
+while (off < pbuf.length) {
+  const len = pbuf.readUInt32BE(off);
+  const type = pbuf.toString('ascii', off + 4, off + 8);
+  const body = pbuf.slice(off + 4, off + 8 + len);
+  const stored = pbuf.readUInt32BE(off + 8 + len);
+  if (zlib.crc32 && zlib.crc32(body) !== stored) crcOk = false;
+  seen.push(type);
+  if (type === 'IDAT') idat.push(pbuf.slice(off + 8, off + 8 + len));
+  off += 12 + len;
+}
+check('has IHDR, IDAT and IEND in order',
+  seen[0] === 'IHDR' && seen.indexOf('IDAT') > 0 && seen[seen.length - 1] === 'IEND',
+  seen.join(' '));
+check('every chunk CRC is correct', crcOk);
+
+// The real test: inflate it and compare every pixel back to the matrix.
+let raw = null, inflateOk = true;
+try { raw = zlib.inflateSync(Buffer.concat(idat)); } catch (e) { inflateOk = false; }
+check('the zlib stream decompresses', inflateOk,
+  'a broken stream means no decoder can read the image');
+check('inflated size matches width x height plus filter bytes',
+  raw && raw.length === expectedDim * (expectedDim + 1),
+  raw ? raw.length + ' vs ' + (expectedDim * (expectedDim + 1)) : 'n/a');
+check('every scanline uses filter 0', (() => {
+  if (!raw) return false;
+  for (let y = 0; y < expectedDim; y++) if (raw[y * (expectedDim + 1)] !== 0) return false;
+  return true;
+})());
+check('every pixel matches the QR matrix', (() => {
+  if (!raw) return false;
+  for (let y = 0; y < expectedDim; y++) {
+    for (let x = 0; x < expectedDim; x++) {
+      const my = Math.floor(y / pngScale) - pngQuiet;
+      const mx = Math.floor(x / pngScale) - pngQuiet;
+      const dark = my >= 0 && my < qr.size && mx >= 0 && mx < qr.size && qr.modules[my][mx];
+      if (raw[y * (expectedDim + 1) + 1 + x] !== (dark ? 0 : 255)) return false;
+    }
+  }
+  return true;
+})(), 'this is what makes the image scannable rather than merely valid');
+check('the quiet zone is white', (() => {
+  if (!raw) return false;
+  for (let x = 0; x < expectedDim; x++) if (raw[1 + x] !== 255) return false;
+  return true;
+})(), 'scanners need the white margin');
+
+const uri = QrCode.toPngDataUri(qr, pngScale, pngQuiet);
+check('data URI is well formed', uri.indexOf('data:image/png;base64,') === 0);
+check('data URI is a sane size', uri.length < 400000, Math.round(uri.length / 1024) + ' KB');
+console.log('        ' + expectedDim + 'x' + expectedDim + ' px, ' +
+  Math.round(pbuf.length / 1024) + ' KB, data URI ' + Math.round(uri.length / 1024) + ' KB');
+
 process.exit(summarise());

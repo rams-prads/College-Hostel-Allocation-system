@@ -491,6 +491,106 @@ var QrCode = (function () {
     return out;
   }
 
+  // ------------------------------------------------------------------ PNG
+  //
+  // A real image, built byte by byte. The first version of this drew the QR as
+  // a grid of coloured table cells, which looked right in a browser and then
+  // vanished entirely from the PDF - Google's HTML-to-PDF converter discards
+  // background colours on empty cells. An <img> with a data URI survives.
+  //
+  // The PNG is 8-bit greyscale with no compression (zlib "stored" blocks), so
+  // there is no deflate implementation to get wrong. A QR is tiny, so the size
+  // cost does not matter.
+
+  var CRC_TABLE = null;
+  function crcTable_() {
+    if (CRC_TABLE) return CRC_TABLE;
+    CRC_TABLE = [];
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      CRC_TABLE[n] = c >>> 0;
+    }
+    return CRC_TABLE;
+  }
+
+  function crc32_(bytes) {
+    var t = crcTable_(), c = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) c = t[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function adler32_(bytes) {
+    var a = 1, b = 0;
+    for (var i = 0; i < bytes.length; i++) {
+      a = (a + bytes[i]) % 65521;
+      b = (b + a) % 65521;
+    }
+    return (((b << 16) | a) >>> 0);
+  }
+
+  function u32_(n) {
+    return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  }
+
+  function chunk_(type, data) {
+    var body = [];
+    for (var i = 0; i < type.length; i++) body.push(type.charCodeAt(i));
+    body = body.concat(data);
+    return u32_(data.length).concat(body).concat(u32_(crc32_(body)));
+  }
+
+  /**
+   * Encode the matrix as PNG bytes.
+   * @param {Object} qr      result of encode()
+   * @param {number} scale   pixels per module
+   * @param {number} quiet   quiet-zone width in modules (4 is the spec minimum)
+   */
+  function toPngBytes(qr, scale, quiet) {
+    scale = scale || 4;
+    quiet = quiet === undefined ? 4 : quiet;
+    var n = qr.size;
+    var dim = (n + quiet * 2) * scale;
+
+    // Raw scanlines: one filter byte (0 = none) then one byte per pixel.
+    var raw = [];
+    for (var y = 0; y < dim; y++) {
+      raw.push(0);
+      var my = Math.floor(y / scale) - quiet;
+      for (var x = 0; x < dim; x++) {
+        var mx = Math.floor(x / scale) - quiet;
+        var dark = my >= 0 && my < n && mx >= 0 && mx < n && qr.modules[my][mx];
+        raw.push(dark ? 0 : 255);
+      }
+    }
+
+    // zlib stream using stored (uncompressed) deflate blocks.
+    var z = [0x78, 0x01];
+    var pos = 0;
+    while (pos < raw.length) {
+      var len = Math.min(65535, raw.length - pos);
+      var last = (pos + len >= raw.length) ? 1 : 0;
+      z.push(last);
+      z.push(len & 255, (len >>> 8) & 255);
+      z.push((~len) & 255, ((~len) >>> 8) & 255);
+      for (var i = 0; i < len; i++) z.push(raw[pos + i]);
+      pos += len;
+    }
+    z = z.concat(u32_(adler32_(raw)));
+
+    var ihdr = u32_(dim).concat(u32_(dim)).concat([8, 0, 0, 0, 0]);  // 8-bit greyscale
+    return [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+      .concat(chunk_('IHDR', ihdr))
+      .concat(chunk_('IDAT', z))
+      .concat(chunk_('IEND', []));
+  }
+
+  /** The same PNG as a data URI, ready to drop into an <img src>. */
+  function toPngDataUri(qr, scale, quiet) {
+    var bytes = toPngBytes(qr, scale, quiet);
+    return 'data:image/png;base64,' + Utilities.base64Encode(bytes);
+  }
+
   /** Text rendering, used by tests and for eyeballing output in logs. */
   function toText(qr) {
     return qr.modules.map(function (row) {
@@ -501,6 +601,8 @@ var QrCode = (function () {
   return {
     encode: encode,
     toHtmlTable: toHtmlTable,
+    toPngBytes: toPngBytes,
+    toPngDataUri: toPngDataUri,
     toText: toText,
     // exposed for tests
     _rsEncode: rsEncode,
