@@ -1,9 +1,86 @@
+<!-- Public letter verification. Deliberately requires no sign-in: a warden at
+     the hostel gate must be able to scan a letter and get an answer. -->
 <?!= include('ui/styles'); ?>
+<style>
+  .verdict { border-radius: 11px; padding: 24px; text-align: center; margin-bottom: 15px; }
+  .verdict.good { background: var(--ok-soft);  border: 2px solid var(--ok); }
+  .verdict.bad  { background: var(--bad-soft); border: 2px solid var(--bad); }
+  .verdict .icon { font-size: 42px; line-height: 1; }
+  .verdict .t { font-size: 21px; font-weight: 700; margin-top: 7px; letter-spacing: -.01em; }
+  .verdict.good .t, .verdict.good .icon { color: var(--ok); }
+  .verdict.bad  .t, .verdict.bad  .icon { color: var(--bad); }
+  .verdict .s { font-size: 14px; margin-top: 6px; color: var(--text); opacity: .85; }
+</style>
+
 <header class="top">
-  <div class="inner"><div><h1>Allotment Verification</h1>
-  <div class="sub">GGSIPU Hostels</div></div></div>
+  <div class="inner"><div>
+    <h1>Allotment Verification</h1>
+    <div class="sub">GGSIPU Hostels</div>
+  </div></div>
 </header>
-<div class="wrap">
-  <div class="card"><h3>Coming in Phase 4</h3>
-  <p class="muted">Scanning the QR code on an allotment letter will confirm its validity here.</p></div>
-</div>
+
+<div class="wrap" id="root"><div class="empty">Checking this letter&hellip;</div></div>
+
+<script>
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+
+  var P = <?!= JSON.stringify(params || {}) ?>;
+
+  if (!P.id || !P.sig) {
+    document.getElementById('root').innerHTML =
+      '<div class="card"><h3>Nothing to verify</h3><p class="muted">Scan the QR code printed on ' +
+      'an allotment letter to check whether it is genuine.</p></div>';
+  } else {
+    google.script.run
+      .withSuccessHandler(show)
+      .withFailureHandler(function (e) {
+        document.getElementById('root').innerHTML =
+          '<div class="banner err">' + esc(e.message) + '</div>';
+      })
+      .apiVerifyAllotment(P.id, P.sig);
+  }
+
+  function show(r) {
+    if (!r.valid) {
+      document.getElementById('root').innerHTML =
+        '<div class="verdict bad"><div class="icon">&#10007;</div>' +
+        '<div class="t">Not verified</div>' +
+        '<div class="s">' + esc(r.reason) + '</div></div>' +
+        '<div class="card"><p class="small muted" style="margin:0">Do not accept this letter as ' +
+        'proof of allotment. Refer the student to the hostel office.</p></div>';
+      return;
+    }
+
+    document.getElementById('root').innerHTML =
+      '<div class="verdict good"><div class="icon">&#10003;</div>' +
+      '<div class="t">Genuine allotment letter</div>' +
+      '<div class="s">Verified ' + esc(r.checkedAt) + '</div></div>' +
+
+      '<div class="card"><h2>Student</h2><dl class="kv">' +
+        '<dt>Name</dt><dd>' + esc(r.studentName) + '</dd>' +
+        '<dt>Enrolment no.</dt><dd>' + esc(r.enrollmentNo) + '</dd>' +
+        '<dt>Programme</dt><dd>' + esc(r.programme) + '</dd>' +
+      '</dl></div>' +
+
+      '<div class="card"><h2>Accommodation</h2><dl class="kv">' +
+        '<dt>Hostel</dt><dd>' + esc(r.hostel) + '</dd>' +
+        '<dt>Campus</dt><dd>' + esc(r.campus) + '</dd>' +
+        '<dt>Room</dt><dd>' + esc(r.roomNo) + ' (Block ' + esc(r.block) +
+          ', Floor ' + esc(r.floor) + ')</dd>' +
+        '<dt>Bed</dt><dd>' + esc(r.bedNo) + '</dd>' +
+        '<dt>Warden</dt><dd>' + esc(r.warden) + '</dd>' +
+        '<dt>Session</dt><dd>' + esc(r.session) + '</dd>' +
+        '<dt>Allotted on</dt><dd>' + esc(r.allocatedAt) + '</dd>' +
+        '<dt>Reference</dt><dd>' + esc(r.allocId) + '</dd>' +
+      '</dl></div>' +
+
+      '<div class="card"><p class="small muted" style="margin:0">This check confirms that the ' +
+      'reference number carries a valid signature issued by the hostel allocation system, and ' +
+      'that the allotment is still active. Confirm the student\'s identity separately against ' +
+      'their photo ID.</p></div>';
+  }
+</script>

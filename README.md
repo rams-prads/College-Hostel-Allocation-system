@@ -57,6 +57,8 @@ iterated in seconds:
 node tests/phase1.test.js     # 57 checks: data integrity, quotas, determinism
 node tests/phase2.test.js     # 93 checks: allocation engine correctness
 node tests/phase3.test.js     # 65 checks: document rules and portal API
+node tests/phase4.test.js     # 91 checks: letters, QR anti-forgery, email, admin
+node tests/qr.test.js         # 45 checks: QR encoder vs the ISO 18004 spec
 node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
 ```
 
@@ -91,6 +93,6 @@ docs/                diagrams and supporting material
 | 1 | Synthetic data, hostel inventory, policy, offline pincode geo | ✅ done |
 | 2 | Allocation engine, roommate matching, waitlist, metrics | ✅ done |
 | 3 | Student portal | ✅ done |
-| 4 | Admin dashboard, letters, email | ⏳ next |
-| 5 | Simulator, swaps, grievance auto-triage | ⏳ |
+| 4 | Admin dashboard, letters, QR verification, email | ✅ done |
+| 5 | Simulator, swaps, grievance auto-triage | ⏳ next |
 | 6 | Demo hardening and deliverables | ⏳ |

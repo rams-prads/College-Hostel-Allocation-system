@@ -20,7 +20,72 @@ global.Utilities = {
     return Array.from(crypto.createHash('sha256').update(str, 'utf8').digest())
       .map(b => (b > 127 ? b - 256 : b));            // mimic Apps Script signed bytes
   },
-  formatDate(d) { return new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z'); }
+  formatDate(d) { return new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z'); },
+  computeHmacSha256Signature(msg, key) {
+    return Array.from(crypto.createHmac('sha256', key).update(msg, 'utf8').digest())
+      .map(b => (b > 127 ? b - 256 : b));
+  },
+  getUuid() { return crypto.randomUUID(); },
+  newBlob(content, type, name) {
+    return {
+      _c: content, _t: type, _n: name,
+      getAs(mime) { return Object.assign({}, this, { _t: mime }); },
+      setName(n) { this._n = n; return this; },
+      getName() { return this._n; },
+      getBytes() { return Buffer.from(String(this._c)); },
+      getDataAsString() { return String(this._c); }
+    };
+  },
+  base64Decode(s) { return Array.from(Buffer.from(s, 'base64')); }
+};
+
+// Drive and Mail: recording stubs. Real behaviour needs a deployed script, so
+// tests assert what we asked for rather than pretending files were written.
+global.__drive = { files: [], folders: {} };
+function makeFolder(name) {
+  if (global.__drive.folders[name]) return global.__drive.folders[name];
+  const f = {
+    _name: name,
+    getId: () => 'folder-' + name,
+    getUrl: () => 'https://drive.example/' + name,
+    createFile(blob) {
+      const file = {
+        _blob: blob,
+        getId: () => 'file-' + global.__drive.files.length,
+        getUrl: () => 'https://drive.example/file-' + global.__drive.files.length,
+        setSharing() { return this; },
+        setTrashed() { return this; },
+        getName: () => blob.getName()
+      };
+      global.__drive.files.push(file);
+      return file;
+    },
+    getFilesByName(n) {
+      const hits = global.__drive.files.filter(f => f.getName() === n);
+      let i = 0;
+      return { hasNext: () => i < hits.length, next: () => hits[i++] };
+    },
+    getFoldersByName(n) {
+      const f2 = global.__drive.folders[n];
+      let used = false;
+      return { hasNext: () => !!f2 && !used, next: () => { used = true; return f2; } };
+    },
+    createFolder(n) { return makeFolder(n); }
+  };
+  global.__drive.folders[name] = f;
+  return f;
+}
+global.DriveApp = {
+  Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
+  Permission: { VIEW: 'VIEW' },
+  getRootFolder: () => makeFolder('root'),
+  getFolderById: (id) => makeFolder(String(id).replace('folder-', ''))
+};
+
+global.__mail = [];
+global.MailApp = {
+  sendEmail(opts) { global.__mail.push(opts); },
+  getRemainingDailyQuota: () => 100
 };
 
 global.LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) };
@@ -119,7 +184,7 @@ global.Db = {
 };
 
 // ----------------------------------------------------------- load engine code
-['Util', 'Ledger', 'Geo', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'Auth', 'Api'].forEach(loadSrc);
+['Util', 'Ledger', 'Geo', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'Auth', 'Api', 'QrCode', 'Letters', 'Notify', 'AdminApi'].forEach(loadSrc);
 
 // Setup.gs seeds Config/Policy; we call only its seed functions, not the
 // sheet-building parts, which need a real SpreadsheetApp.

@@ -41,12 +41,12 @@ administrative team without dedicated servers, paid licences, or a full-time dev
 
 ### Required deliverables
 
-- [ ] Smart Hostel Management Portal
+- [x] Smart Hostel Management Portal
 - [x] Automated Allocation Engine
 - [x] Student Self-Service Portal
-- [ ] Administrator Dashboard
-- [ ] Waiting List & Vacancy Management Module
-- [ ] Automated Email Notification System
+- [x] Administrator Dashboard
+- [x] Waiting List & Vacancy Management Module
+- [x] Automated Email Notification System
 - [ ] Technical Documentation
 - [ ] Source Code Repository
 - [ ] Deployment Guide
@@ -539,7 +539,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 - [ ] **Phase 2** — Scoring weights: how should merit, distance, seniority and special need trade off?
 - [ ] **Phase 2** — Is there a minimum distance-from-home threshold for eligibility? A minimum CGPA?
 - [x] **Phase 3** — Documents confirmed 21 Aug 2026: admission letter (year 1, no ID card issued yet), ID card (year 2+), category certificate (non-GEN only, where a reserved seat is claimed), PwD certificate (PwD only), address proof (everyone - distance gates eligibility and carries score weight, so it is the main gaming vector).
-- [ ] **Phase 4** — Letter format: letterhead, signatory, mandatory clauses?
+- [x] **Phase 4** — Letter format implemented 21 Aug 2026 with a standard university layout: DSW letterhead, warden + Dean of Student Welfare as signatories, five terms of allotment, signed QR. Swap in the real letterhead and clauses when available - it is one function in Letters.gs.
 - [x] **General** — Dwarka and EDC are a SINGLE allocation pool. Confirmed 21 Aug 2026. Students compete in one merit pool and may be allotted to either campus; campus choice is expressed through ranked hostel preferences, not a hard partition. Gender remains the only hard partition.
 
 ---
@@ -548,6 +548,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 | Date | Change |
 |---|---|
+| 2026-08-21 | Phase 4 complete. Allotment letters as PDFs with a signed verification QR, a complete offline QR encoder (ISO 18004, versions 1-10, L and M), public verification page, quota-aware Gmail notifications, and the admin dashboard with the ledger integrity badge. 136 new checks. |
 | 2026-08-21 | Phase 3 complete. Student portal: apply form with drag-to-rank preferences, dashboard with the "why did I get this room?" panel, per-applicant document rules, roommate display. Added a Documents tab (19 total). 65 offline checks passing. |
 | 2026-08-21 | Phase 2 complete. Allocation engine (stages A-H), eligibility with reasons, roommate matching, waitlist ETA, fairness metrics. Two significant fixes: unfilled reserved seats are now dereserved and reissued (utilisation 82 -> 98%), and the vacancy buffer holds real beds per hostel instead of a global seat cap that made one gender absorb the whole reserve. 93 offline checks passing. |
 | 2026-08-21 | Phase 1 complete. Synthetic cohort (900 students, 756 beds, 6 hostels), offline pincode geo table, seeded generator. Fixed a real bug in largest-remainder apportionment that over-reserved quota seats. 57 offline checks passing. |

@@ -1,12 +1,269 @@
 <?!= include('ui/styles'); ?>
+<style>
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 11px; }
+  .tile { background: var(--surface-2); border-radius: 9px; padding: 13px 15px; }
+  .tile .n { font-size: 25px; font-weight: 680; letter-spacing: -.02em; line-height: 1.1;
+             font-variant-numeric: tabular-nums; }
+  .tile .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  table.grid { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.grid th { text-align: left; font-size: 11.5px; text-transform: uppercase;
+                  letter-spacing: .05em; color: var(--muted); font-weight: 620;
+                  padding: 0 10px 7px 0; border-bottom: 1px solid var(--border); }
+  table.grid td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border);
+                  vertical-align: middle; }
+  table.grid tr:last-child td { border-bottom: 0; }
+  .meter { height: 7px; background: var(--surface-2); border-radius: 4px;
+           overflow: hidden; min-width: 80px; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  .meter i.hot { background: var(--bad); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .ledger-ok  { background: var(--ok-soft);  border: 1px solid var(--ok);  color: var(--ok); }
+  .ledger-bad { background: var(--bad-soft); border: 1px solid var(--bad); color: var(--bad); }
+  .ledger { padding: 13px 15px; border-radius: 9px; font-size: 13.5px; }
+  .ledger .t { font-weight: 640; font-size: 14.5px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+</style>
+
 <header class="top">
   <div class="inner">
-    <div><h1>Administrator Dashboard</h1><div class="sub">GGSIPU Hostels</div></div>
-    <div class="who"><a href="?" style="color:inherit">Student view</a></div>
+    <div><h1>Administrator Dashboard</h1><div class="sub">GGSIPU Hostel Allocation</div></div>
+    <div class="who" id="who"><a href="?" style="color:inherit">Student view</a></div>
   </div>
 </header>
-<div class="wrap">
-  <div class="card"><h3>Coming in Phase 4</h3>
-  <p class="muted">Occupancy and vacancy by hostel, allocation runs, fairness metrics,
-  the verification queue, waitlist management and the ledger integrity badge.</p></div>
-</div>
+
+<div class="wrap" id="root"><div class="empty">Loading dashboard&hellip;</div></div>
+
+<script>
+  var D = null;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  function el(id) { return document.getElementById(id); }
+
+  function load() {
+    google.script.run.withSuccessHandler(render).withFailureHandler(function (e) {
+      el('root').innerHTML = '<div class="banner err">' + esc(e.message) + '</div>';
+    }).apiAdminOverview();
+  }
+  load();
+
+  function render(d) {
+    D = d;
+    el('who').innerHTML = esc(d.admin.name || d.admin.email) + ' &middot; ' + esc(d.admin.role) +
+      ' &middot; <a href="?" style="color:inherit">Student view</a>';
+
+    var m = d.latestRun && d.latestRun.metrics ? d.latestRun.metrics.summary : null;
+
+    el('root').innerHTML = [
+      '<div id="msg"></div>',
+      ledgerCard(d),
+      countsCard(d),
+      m ? metricsCard(d, m) : noRunCard(),
+      occupancyCard(d),
+      m ? quotaCard(d.latestRun.metrics) : '',
+      operationsCard(d)
+    ].join('');
+  }
+
+  /* The tamper-evidence badge. Novelty feature 1, second half. */
+  function ledgerCard(d) {
+    var ok = d.ledger.intact;
+    return '<div class="card"><h2>Audit ledger</h2>' +
+      '<div class="ledger ' + (ok ? 'ledger-ok' : 'ledger-bad') + '">' +
+        '<div class="t">' + (ok ? '&#10003; Chain intact' : '&#10007; TAMPERING DETECTED') + '</div>' +
+        '<div style="margin-top:3px">' + esc(d.ledger.reason) + '</div>' +
+      '</div>' +
+      '<div class="btn-row" style="margin-top:11px">' +
+        '<button class="btn ghost" onclick="showLedger()">View recent entries</button>' +
+      '</div><div id="ledgerDetail"></div></div>';
+  }
+
+  function showLedger() {
+    el('ledgerDetail').innerHTML = '<p class="muted small">Loading&hellip;</p>';
+    google.script.run.withSuccessHandler(function (r) {
+      var rows = r.recent.map(function (e) {
+        return '<tr><td class="num">' + esc(e.seq) + '</td><td>' + esc(e.ts) + '</td>' +
+          '<td>' + esc(e.action) + '</td><td class="muted small">' + esc(e.actor) + '</td>' +
+          '<td><code>' + esc(e.hash) + '&hellip;</code></td></tr>';
+      }).join('');
+      el('ledgerDetail').innerHTML =
+        '<div class="divider"></div><div class="scroll-x"><table class="grid">' +
+        '<thead><tr><th>Seq</th><th>When</th><th>Action</th><th>Actor</th><th>Hash</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table></div>' +
+        '<p class="small muted" style="margin:9px 0 0">Each row\'s hash covers the previous row\'s ' +
+        'hash. Editing any historical entry breaks every hash after it.</p>';
+    }).apiAdminVerifyLedger();
+  }
+
+  function countsCard(d) {
+    var c = d.counts, cap = d.capacity;
+    return '<div class="card"><h2>At a glance</h2><div class="tiles">' +
+      tile(c.applications, 'Applications') +
+      tile(c.allotted, 'Allotted') +
+      tile(c.waitlisted, 'Waitlisted') +
+      tile(c.rejected, 'Not eligible') +
+      tile(cap.vacant, 'Vacant beds') +
+      tile(d.docQueue, 'Docs to verify') +
+      '</div></div>';
+  }
+  function tile(n, l) {
+    return '<div class="tile"><div class="n">' + esc(n) + '</div><div class="l">' + esc(l) + '</div></div>';
+  }
+
+  function noRunCard() {
+    return '<div class="card"><h3>No allocation has been run yet</h3>' +
+      '<p class="muted">Run the allocation to produce allotments, a waiting list and fairness metrics.</p>' +
+      '<div class="btn-row"><button class="btn" onclick="runAllocation()">Run allocation</button>' +
+      '<button class="btn ghost" onclick="preview()">Preview without committing</button></div></div>';
+  }
+
+  function metricsCard(d, m) {
+    return '<div class="card"><h2>Fairness and efficiency</h2>' +
+      '<div class="tiles">' +
+        tile(m.pref1Pct + '%', 'First preference met') +
+        tile(m.meanPrefRank, 'Mean preference granted') +
+        tile(m.utilisationPct + '%', 'Room utilisation') +
+        tile(m.meanCompatPct + '%', 'Roommate compatibility') +
+        tile(m.accessibilityHonouredPct + '%', 'Accessibility honoured') +
+        tile(m.paretoSwaps, 'Pareto swaps found') +
+      '</div>' +
+      '<p class="small muted" style="margin:12px 0 0">' +
+      '<strong>Pareto swaps found: ' + esc(m.paretoSwaps) + '.</strong> After allocating, the engine ' +
+      'searches for any two students who would both rather have each other\'s room. Zero means no ' +
+      'such pair exists, so no student can be made better off without making another worse off.</p>' +
+      '<div class="divider"></div>' +
+      '<dl class="kv">' +
+        '<dt>Run</dt><dd><code>' + esc(d.latestRun.runId) + '</code></dd>' +
+        '<dt>Seed</dt><dd><code>' + esc(d.latestRun.seed) + '</code></dd>' +
+        '<dt>Policy hash</dt><dd><code>' + esc(d.latestRun.policyHash) + '</code></dd>' +
+        '<dt>Completed</dt><dd>' + esc(d.latestRun.finishedAt) + '</dd>' +
+      '</dl>' +
+      '<p class="small muted" style="margin:9px 0 0">The seed and policy hash together make this run ' +
+      'reproducible: re-running with both unchanged produces an identical allocation.</p></div>';
+  }
+
+  function occupancyCard(d) {
+    var rows = d.occupancy.map(function (h) {
+      var hot = h.pct >= 98;
+      return '<tr><td><strong>' + esc(h.name) + '</strong><div class="muted small">' +
+        esc(h.campus) + ' &middot; ' + (h.gender === 'M' ? 'Boys' : h.gender === 'F' ? 'Girls' : 'Co-ed') +
+        '</div></td>' +
+        '<td style="width:34%"><span class="meter"><i class="' + (hot ? 'hot' : '') +
+          '" style="width:' + h.pct + '%"></i></span></td>' +
+        '<td class="num">' + esc(h.pct) + '%</td>' +
+        '<td class="num">' + esc(h.occupied) + ' / ' + esc(h.total) + '</td>' +
+        '<td class="num">' + esc(h.vacant) + '</td></tr>';
+    }).join('');
+    return '<div class="card"><h2>Occupancy and vacancies</h2><div class="scroll-x">' +
+      '<table class="grid"><thead><tr><th>Hostel</th><th>Occupancy</th><th class="num">%</th>' +
+      '<th class="num">Beds</th><th class="num">Vacant</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div></div>';
+  }
+
+  function quotaCard(metrics) {
+    var rows = metrics.quotaTable.map(function (q) {
+      if (q.category === 'CONVERTED') {
+        return '<tr><td><strong>Converted</strong><div class="muted small">' +
+          'unfilled reserved seats reissued in merit order</div></td>' +
+          '<td class="num">&mdash;</td><td class="num">' + esc(q.filled) + '</td>' +
+          '<td class="num">&mdash;</td></tr>';
+      }
+      return '<tr><td>' + esc(q.category) + '</td>' +
+        '<td class="num">' + esc(q.reservedSeats) + '</td>' +
+        '<td class="num">' + esc(q.filled) + '</td>' +
+        '<td class="num">' + (q.unfilled > 0
+          ? '<span class="muted">' + esc(q.unfilled) + ' converted</span>' : '&mdash;') + '</td></tr>';
+    }).join('');
+    return '<div class="card"><h2>Quota compliance</h2><div class="scroll-x">' +
+      '<table class="grid"><thead><tr><th>Category</th><th class="num">Reserved</th>' +
+      '<th class="num">Filled</th><th class="num">Unfilled</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>' +
+      '<p class="small muted" style="margin:10px 0 0">Seats a category could not fill are ' +
+      'dereserved and reissued to the waiting list in merit order, rather than left empty.</p></div>';
+  }
+
+  function operationsCard(d) {
+    return '<div class="card"><h2>Operations</h2>' +
+      '<div class="btn-row">' +
+        '<button class="btn" onclick="runAllocation()">Run allocation</button>' +
+        '<button class="btn ghost" onclick="preview()">Preview only</button>' +
+        '<button class="btn ghost" onclick="letters()">Generate letters</button>' +
+        '<button class="btn ghost" onclick="notifyAll()">Send notifications</button>' +
+      '</div>' +
+      '<div class="divider"></div>' +
+      '<dl class="kv">' +
+        '<dt>Email sending</dt><dd>' + (d.email.enabled
+          ? '<span class="pill ok">Enabled</span>'
+          : '<span class="pill warn">Disabled (safe for rehearsal)</span>') + '</dd>' +
+        '<dt>Remaining quota today</dt><dd>' + esc(d.email.remainingQuota) + '</dd>' +
+        '<dt>Sent / queued</dt><dd>' + esc(d.email.sent) + ' / ' + esc(d.email.queued) + '</dd>' +
+      '</dl>' +
+      '<p class="small muted" style="margin:9px 0 0">Letters and emails are generated in batches ' +
+      'so each call finishes inside the Apps Script execution limit. Run them repeatedly until ' +
+      'nothing remains.</p></div>';
+  }
+
+  /* ------------------------------------------------------------- actions */
+  function busy(text) {
+    el('msg').innerHTML = '<div class="banner info"><span class="spin"></span> ' + esc(text) + '</div>';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function done(kind, text) {
+    el('msg').innerHTML = '<div class="banner ' + kind + '">' + esc(text) + '</div>';
+  }
+
+  function runAllocation() {
+    if (!confirm('Run the allocation and commit it? This replaces the previous committed result.')) return;
+    busy('Allocating rooms…');
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done('good', 'Allocation complete: ' + r.metrics.summary.allocated + ' allotted, ' +
+          r.metrics.summary.waitlisted + ' waitlisted, ' + r.converted +
+          ' converted seats reissued. Took ' + r.elapsedSec + 's.');
+        load();
+      })
+      .withFailureHandler(function (e) { done('err', e.message); })
+      .apiAdminRunAllocation({});
+  }
+
+  function preview() {
+    busy('Running a preview — nothing will be written…');
+    google.script.run
+      .withSuccessHandler(function (r) {
+        var m = r.metrics.summary;
+        done('info', 'Preview only, nothing committed: ' + m.allocated + ' would be allotted, ' +
+          m.waitlisted + ' waitlisted, first preference met ' + m.pref1Pct + '%, ' +
+          'utilisation ' + m.utilisationPct + '%.');
+      })
+      .withFailureHandler(function (e) { done('err', e.message); })
+      .apiAdminPreviewAllocation({});
+  }
+
+  function letters() {
+    busy('Generating allotment letters…');
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done(r.remaining ? 'info' : 'good',
+          'Generated ' + r.generated + ' of ' + r.total + ' letters.' +
+          (r.remaining ? ' ' + r.remaining + ' remaining — run again to continue.' : ' All done.'));
+      })
+      .withFailureHandler(function (e) { done('err', e.message); })
+      .apiAdminGenerateLetters(null, 25);
+  }
+
+  function notifyAll() {
+    busy('Dispatching notifications…');
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done(r.failed ? 'err' : 'good',
+          'Sent ' + r.sent + ', queued ' + r.queued + ', skipped ' + r.skipped +
+          ', failed ' + r.failed + (r.remaining ? ', ' + r.remaining + ' remaining' : '') + '.');
+        load();
+      })
+      .withFailureHandler(function (e) { done('err', e.message); })
+      .apiAdminNotify(null, 50);
+  }
+</script>
