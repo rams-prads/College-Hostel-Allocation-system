@@ -34,6 +34,15 @@ function setupEverything() {
   var migrated = migrateSchema();
   if (migrated.added.length) out.push('Brought up to date: ' + migrated.added.join(' | '));
 
+  // Settings and rules introduced since this sheet was first built. Additive:
+  // anything already there keeps the value it has.
+  var newCfg = seedConfig_();
+  var newPol = seedPolicy_();
+  out.push(newCfg && newCfg.length ? 'Settings added: ' + newCfg.join(', ')
+                                   : 'No new settings needed.');
+  out.push(newPol && newPol.length ? 'Policy rules added: ' + newPol.join(', ')
+                                   : 'No new policy rules needed.');
+
   // Text columns must be plain text or the spreadsheet silently rewrites their
   // contents. See repairFormatting().
   repairFormatting();
@@ -397,9 +406,24 @@ function columnWidth_(col) {
 
 // ----------------------------------------------------------------------- seeds
 
+/**
+ * Config defaults, added but never overwritten.
+ *
+ * This used to return early whenever the sheet had any rows at all, which meant
+ * a setting introduced after the first setup never reached an existing
+ * installation - LOGO_URL and ALLOW_DEMO_LINKS simply were not there to edit.
+ * The code fell back to a default and behaved correctly, which made it worse:
+ * nothing was broken, so nothing was noticed, and the settings the office is
+ * supposed to control were invisible.
+ *
+ * Missing keys are inserted. An existing value is left exactly as it is, whether
+ * or not it matches the default - it was set by somebody, and that is the point.
+ */
 function seedConfig_() {
-  if (Db.readAll('Config', { fresh: true }).length) return;
-  Db.appendMany('Config', [
+  var existing = {};
+  Db.readAll('Config', { fresh: true }).forEach(function (r) { existing[r.key] = true; });
+
+  var defaults = [
     { key: 'ACADEMIC_YEAR',        value: '2026',  notes: 'Used in generated IDs and letters' },
     { key: 'INSTITUTION_NAME',     value: 'Guru Gobind Singh Indraprastha University', notes: '' },
     { key: 'INSTITUTION_SHORT',    value: 'GGSIPU', notes: '' },
@@ -415,7 +439,11 @@ function seedConfig_() {
       notes: 'University crest shown in the masthead. Any public image URL, or a Drive file shared "anyone with the link". Blank falls back to the IPU monogram.' },
     { key: 'ALLOC_LOCAL_SEARCH',   value: 'TRUE',  notes: 'Stage F of the allocator. Set FALSE to disable.' },
     { key: 'ALLOC_MAX_ITERATIONS', value: '2000',  notes: 'Cap on local-search iterations (execution-time guard)' }
-  ]);
+  ];
+
+  var missing = defaults.filter(function (row) { return !existing[row.key]; });
+  if (missing.length) Db.appendMany('Config', missing);
+  return missing.map(function (r) { return r.key; });
 }
 
 /**
@@ -423,8 +451,17 @@ function seedConfig_() {
  * see the open questions in PROJECT_CONTEXT.md section 15.
  * The admin team edits these in the sheet; no code change is needed.
  */
+/**
+ * Policy defaults, added but never overwritten. Same reasoning as seedConfig_:
+ * a rule added later never appeared in an existing sheet, so the office could
+ * not see or tune it even though the engine was reading it.
+ *
+ * A value someone has already tuned is never touched. Only absent rules are
+ * written, matched on ruleId.
+ */
 function seedPolicy_() {
-  if (Db.readAll('Policy', { fresh: true }).length) return;
+  var have = {};
+  Db.readAll('Policy', { fresh: true }).forEach(function (r) { have[r.ruleId] = true; });
   var now = new Date();
   var rows = [
     // Reservation percentages.
@@ -477,12 +514,17 @@ function seedPolicy_() {
      'Distance difference between declared and documented PIN that is worth raising']
   ];
 
-  Db.appendMany('Policy', rows.map(function (r) {
-    return {
-      ruleId: r[0], category: r[1], key: r[2], value: r[3],
-      effectiveFrom: now, active: true, notes: r[4]
-    };
-  }));
+  var missing = rows.filter(function (r) { return !have[r[0]]; });
+  if (missing.length) {
+    Db.appendMany('Policy', missing.map(function (r) {
+      return {
+        ruleId: r[0], category: r[1], key: r[2], value: r[3],
+        effectiveFrom: now, active: true, notes: r[4]
+      };
+    }));
+    Policy.invalidate();
+  }
+  return missing.map(function (r) { return r[0]; });
 }
 
 function seedAdmins_() {

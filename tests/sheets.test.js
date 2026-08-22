@@ -133,6 +133,54 @@ check('a hash with a letter in it was never at risk',
   asStoredBySheets('a3f9c2', null) === 'a3f9c2',
   'which is why only the genesis row ever broke, and only on real sheets');
 
+// ================================================= settings on an old sheet
+section('A setting added later still reaches an existing sheet');
+
+seedConfig_();
+seedPolicy_();
+
+// An installation from before LOGO_URL and the identity rules existed.
+Db.replaceAll('Config', Db.readAll('Config')
+  .filter(r => r.key !== 'LOGO_URL' && r.key !== 'ALLOW_DEMO_LINKS'));
+Db.replaceAll('Policy', Db.readAll('Policy')
+  .filter(r => String(r.ruleId).indexOf('POL-ID-') !== 0));
+Db.invalidate();
+
+// And somebody has tuned a value since.
+Db.update('Config', 'ACADEMIC_YEAR', { value: '2031' });
+Db.update('Policy', 'POL-RES-SC', { value: 22 });
+Db.invalidate();
+
+const beforeCfg = Db.readAll('Config').length;
+const addedCfg = seedConfig_();
+const addedPol = seedPolicy_();
+Db.invalidate();
+
+check('the missing settings are added', addedCfg.indexOf('LOGO_URL') >= 0,
+  'seeding used to stop dead if the sheet had any rows at all, so a setting ' +
+  'introduced later was never visible to edit');
+check('the missing policy rules are added', addedPol.indexOf('POL-ID-PATTERN') >= 0);
+check('LOGO_URL can now be edited in the sheet',
+  !!Db.readAll('Config').filter(r => r.key === 'LOGO_URL')[0]);
+
+check('a tuned setting is not reset to the default',
+  Db.cfg('ACADEMIC_YEAR') === '2031',
+  'it was set by somebody, which is the entire point of it being in the sheet');
+check('a tuned policy value is not reset either',
+  Number(Db.byId('Policy', 'POL-RES-SC').value) === 22);
+
+check('nothing is duplicated', (() => {
+  const keys = Db.readAll('Config').map(r => r.key);
+  return new Set(keys).size === keys.length;
+})());
+check('running it again adds nothing', (() => {
+  const n = Db.readAll('Config').length;
+  seedConfig_(); seedPolicy_(); Db.invalidate();
+  return Db.readAll('Config').length === n;
+})());
+check('the count grew by exactly what was missing',
+  Db.readAll('Config').length === beforeCfg + addedCfg.length);
+
 // ============================================================ ledger repair
 section('The ledger repair restores; it does not rewrite');
 
