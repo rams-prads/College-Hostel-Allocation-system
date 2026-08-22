@@ -14,9 +14,10 @@
 
 <script>
   var VIEW = null;
+  loadToken();
   el('root').innerHTML = loadingState('Loading your application');
 
-  google.script.run.withSuccessHandler(render).withFailureHandler(function (e) {
+  srv().withSuccessHandler(render).withFailureHandler(function (e) {
     el('root').innerHTML = banner('err', 'Could not load your application: ' + e.message);
   }).apiGetStudentView(null, DEMO_TOKEN);
 
@@ -24,9 +25,9 @@
     VIEW = v;
 
     if (!v.signedIn) {
-      paintChrome({});
-      el('root').innerHTML = card('', emptyState('&#128274;', 'Please sign in',
-        'This portal identifies you by your Google account. Open this page while signed in.'));
+      paintChrome({ unit: 'Hostel Allocation Portal' });
+      saveToken(null);
+      el('root').innerHTML = signInPanel();
       return;
     }
 
@@ -34,7 +35,8 @@
       unit: 'Hostel Allocation Portal',
       user: v.demoMode
         ? { name: v.student ? v.student.name : 'Preview', role: 'READ ONLY' }
-        : { name: v.name || v.email, role: v.viewingAs ? 'ADMIN VIEW' : null },
+        : { name: v.name || v.email, role: v.viewingAs ? 'ADMIN VIEW' : null,
+            signOut: !v.viewingAs && !!SESSION.token },
       // A demo visitor has no session, so every tab would land them back on the
       // sign-in wall. Showing navigation that cannot work is worse than none.
       tabs: v.demoMode ? [] : [
@@ -331,7 +333,7 @@
       // readAsDataURL gives "data:<mime>;base64,<payload>" - the server wants
       // only the payload.
       var b64 = String(reader.result).split(',')[1] || '';
-      google.script.run
+      srv()
         .withSuccessHandler(function () { window.top.location.reload(); })
         .withFailureHandler(function (e) { say(e.message, true); input.value = ''; })
         .apiUploadDocument({
@@ -428,7 +430,7 @@
     var value = input.value;
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Submitting'; }
 
-    google.script.run
+    srv()
       .withSuccessHandler(function () {
         // Clear the field before anything else. There is no reason for the
         // number to sit in a form control after it has been submitted.
@@ -470,7 +472,7 @@
   function loadSwaps() {
     if (!VIEW.allocation) { el('swapCard').innerHTML = ''; return; }
     el('swapCard').innerHTML = card('Room swap', loadingState('Checking the swap board'));
-    google.script.run.withSuccessHandler(paintSwaps)
+    srv().withSuccessHandler(paintSwaps)
       .withFailureHandler(function () { el('swapCard').innerHTML = ''; }).apiGetSwapView();
   }
 
@@ -515,7 +517,7 @@
 
   function postSwap() {
     var reason = (el('swapReason') || {}).value || '';
-    google.script.run.withSuccessHandler(loadSwaps)
+    srv().withSuccessHandler(loadSwaps)
       .withFailureHandler(function (e) { swapErr(e.message); })
       .apiPostSwap({ reason: reason });
   }
@@ -523,7 +525,7 @@
   function acceptSwap(reqId) {
     if (!confirm('Swap rooms with this student? Both allotment letters will be reissued.')) return;
     el('swapMsg').innerHTML = banner('info', 'Checking hostel rules and applying…');
-    google.script.run
+    srv()
       .withSuccessHandler(function (r) {
         if (r.ok) window.top.location.reload(); else swapErr(r.message);
       })
@@ -532,7 +534,7 @@
   }
 
   function cancelSwap(reqId) {
-    google.script.run.withSuccessHandler(loadSwaps)
+    srv().withSuccessHandler(loadSwaps)
       .withFailureHandler(function (e) { swapErr(e.message); }).apiCancelSwap(reqId);
   }
 
@@ -540,7 +542,7 @@
 
   /* ========================================================== grievances */
   function loadGrievances() {
-    google.script.run.withSuccessHandler(paintGrievances)
+    srv().withSuccessHandler(paintGrievances)
       .withFailureHandler(function () { el('grievCard').innerHTML = ''; }).apiGetGrievances();
   }
 
@@ -581,7 +583,7 @@
   function raiseGrievance() {
     var text = (el('grievText') || {}).value || '';
     el('grievMsg').innerHTML = banner('info', 'Checking your case against the recorded run…');
-    google.script.run.withSuccessHandler(loadGrievances)
+    srv().withSuccessHandler(loadGrievances)
       .withFailureHandler(function (e) {
         el('grievMsg').innerHTML = banner('err', e.message);
       }).apiRaiseGrievance(text);

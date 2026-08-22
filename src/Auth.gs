@@ -19,6 +19,19 @@ var Auth = (function () {
   /** Email addresses are case-insensitive; a stored address may not be. */
   function norm_(e) { return String(e || '').trim().toLowerCase(); }
 
+  // The session token supplied by the client for THIS request. Apps Script runs
+  // one request per execution, so a module variable is request-scoped by nature.
+  var _requestToken = null;
+
+  /** Called by the dispatcher before it runs anything. */
+  function useToken(token) { _requestToken = token || null; }
+
+  /** The address the current request's token asserts, or '' if there is none. */
+  function tokenEmail() {
+    if (!_requestToken) return '';
+    try { return SignIn.emailFromToken(_requestToken); } catch (e) { return ''; }
+  }
+
   function session() {
     var email = '';
     var authError = '';
@@ -30,10 +43,22 @@ var Auth = (function () {
       email = '';
       authError = e.message || String(e);
     }
+
+    // Google identifies the owner and their own domain, and nobody else. A
+    // first-year applicant has no college address yet, so for them the signed
+    // token IS the session. The platform's answer wins when it has one, because
+    // it cannot be forged; the token is checked only when there is no answer.
+    var via = email ? 'GOOGLE' : null;
+    if (!email) {
+      email = tokenEmail();
+      if (email) via = 'EMAIL_CODE';
+    }
+
     var key = norm_(email);
 
     var s = {
       email: email,
+      via: via,
       authError: authError,
       name: '',
       isAdmin: false,
@@ -234,6 +259,8 @@ var Auth = (function () {
     requireOwner: requireOwner,
     canCommit: canCommit,
     rateLimit: rateLimit,
+    useToken: useToken,
+    tokenEmail: tokenEmail,
     demoEnabled: demoEnabled,
     demoToken: demoToken,
     checkDemoToken: checkDemoToken,

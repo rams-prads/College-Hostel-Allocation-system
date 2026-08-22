@@ -1,4 +1,144 @@
 <script>
+/* ===================================================================== auth
+ *
+ * Google identifies the project owner and their own Workspace domain, and
+ * nobody else. A first-year applicant has no college address yet, so for them
+ * the session is a signed token this browser holds and sends with each call.
+ *
+ * srv() is a drop-in for google.script.run: same chaining, but it routes
+ * through apiCall so the token rides along. Every existing call site changed by
+ * one word, which is why none of them were missed.
+ */
+var SESSION = { token: null, email: '', isAdmin: false, via: null, checked: false };
+
+var TOKEN_KEY = 'ggsipu.hostel.session';
+
+function loadToken() {
+  try { SESSION.token = window.localStorage.getItem(TOKEN_KEY) || null; }
+  catch (e) { SESSION.token = null; }   // private windows throw rather than return null
+  return SESSION.token;
+}
+function saveToken(t) {
+  SESSION.token = t || null;
+  try {
+    if (t) window.localStorage.setItem(TOKEN_KEY, t);
+    else window.localStorage.removeItem(TOKEN_KEY);
+  } catch (e) { /* the in-memory copy still carries this page load */ }
+}
+
+function srv() {
+  var ok = null, fail = null;
+
+  // The handlers must return the PROXY, not the object behind it. Returning the
+  // target breaks the chain at the second link: .withFailureHandler() would hand
+  // back a bare object with no api methods on it, and every call site in the
+  // project chains twice.
+  var proxy = new Proxy({}, {
+    get: function (_, prop) {
+      if (prop === 'withSuccessHandler') return function (h) { ok = h; return proxy; };
+      if (prop === 'withFailureHandler') return function (h) { fail = h; return proxy; };
+      return function () {
+        var args = Array.prototype.slice.call(arguments);
+        var r = google.script.run;
+        if (ok) r = r.withSuccessHandler(ok);
+        if (fail) r = r.withFailureHandler(fail);
+        return r.apiCall(SESSION.token, String(prop), args);
+      };
+    }
+  });
+  return proxy;
+}
+
+/**
+ * The sign-in panel. Shown by any page that finds no session.
+ *
+ * @param {string} note  optional line explaining why they are seeing it
+ */
+function signInPanel(note) {
+  return card('',
+    '<div class="signin">' +
+    '<div class="big">&#127891;</div>' +
+    '<h3>Sign in to continue</h3>' +
+    (note ? '<p class="small muted intro">' + esc(note) + '</p>' : '') +
+    '<p class="small muted intro">Enter the email address you want to apply with. ' +
+    'Any address works &mdash; first-year students will not have a college one yet.</p>' +
+    '<div id="signinBody">' + emailStep() + '</div>' +
+    '<div id="signinMsg"></div>' +
+    '</div>');
+}
+
+function emailStep() {
+  return '<label class="field signin-field"><span class="lab">Email address</span>' +
+    '<input type="email" id="siEmail" autocomplete="email" inputmode="email" ' +
+    'placeholder="you@example.com" onkeydown="if(event.key===&quot;Enter&quot;)sendCode()">' +
+    '</label>' +
+    '<button class="btn" id="siBtn" onclick="sendCode()">Email me a code</button>';
+}
+
+function codeStep(email) {
+  return '<p class="small muted intro">We sent a six-digit code to <strong>' +
+    esc(email) + '</strong>. It expires in ten minutes.</p>' +
+    '<label class="field signin-field"><span class="lab">Six-digit code</span>' +
+    '<input type="text" id="siCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" ' +
+    'placeholder="000000" onkeydown="if(event.key===&quot;Enter&quot;)submitCode()">' +
+    '</label>' +
+    '<button class="btn" id="siBtn" onclick="submitCode()">Sign in</button> ' +
+    '<button class="btn ghost" onclick="backToEmail()">Use a different address</button>';
+}
+
+var _siEmail = '';
+
+function backToEmail() {
+  el('signinBody').innerHTML = emailStep();
+  el('signinMsg').innerHTML = '';
+}
+
+function sendCode() {
+  var input = el('siEmail');
+  if (!input) return;
+  var addr = String(input.value || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(addr)) {
+    el('signinMsg').innerHTML = banner('err', 'That does not look like an email address.');
+    return;
+  }
+  _siEmail = addr;
+  var btn = el('siBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Sending'; }
+
+  srv().withSuccessHandler(function () {
+      el('signinBody').innerHTML = codeStep(_siEmail);
+      el('signinMsg').innerHTML = '';
+      if (el('siCode')) el('siCode').focus();
+    })
+    .withFailureHandler(function (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Email me a code'; }
+      el('signinMsg').innerHTML = banner('err', e.message);
+    })
+    .apiRequestSignInCode(addr);
+}
+
+function submitCode() {
+  var input = el('siCode');
+  if (!input) return;
+  var btn = el('siBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Checking'; }
+
+  srv().withSuccessHandler(function (r) {
+      saveToken(r.token);
+      window.top.location.href = appUrl('?');
+    })
+    .withFailureHandler(function (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+      el('signinMsg').innerHTML = banner('err', e.message);
+    })
+    .apiVerifySignInCode(_siEmail, String(input.value || ''));
+}
+
+function signOut() {
+  saveToken(null);
+  window.top.location.href = appUrl('?');
+}
+
 /**
  * chrome.html - shared page furniture and helpers.
  *
@@ -51,7 +191,11 @@ function paintChrome(opts) {
   var chip = user
     ? '<div class="userchip"><span class="av">' + esc(initials(user.name || user.email)) +
       '</span><span class="nm">' + esc(user.name || user.email) + '</span>' +
-      (user.role ? '<span class="rl">' + esc(user.role) + '</span>' : '') + '</div>'
+      (user.role ? '<span class="rl">' + esc(user.role) + '</span>' : '') +
+      // Only offered to someone holding a browser session. A visitor Google
+      // identified has nothing here to sign out of.
+      (user.signOut ? '<button class="signout" onclick="signOut()">Sign out</button>' : '') +
+      '</div>'
     : '';
 
   var target = el('chrome');

@@ -38,7 +38,7 @@
     showManualEntry('Scan the QR code on an allotment letter, or type the code printed ' +
                     'beneath it.');
   } else {
-    google.script.run
+    srv()
       .withSuccessHandler(show)
       .withFailureHandler(function (e) {
         el('root').innerHTML =
@@ -70,7 +70,7 @@
     var v = (document.getElementById('codeInput') || {}).value || '';
     el('root').innerHTML =
       '<div class="empty"><span class="spin"></span> Checking&hellip;</div>';
-    google.script.run
+    srv()
       .withSuccessHandler(show)
       .withFailureHandler(function (e) { showManualEntry('Try again.', e.message); })
       .apiVerifyByCode(v);

@@ -358,6 +358,23 @@
   .findings li.info{color:var(--muted)}
   .findings li.info:before{content:"\2139"}
 
+  /* Sign-in. Narrow on purpose: one field, one button, nothing to scan past. */
+  .signin{text-align:center;padding:22px 8px 8px}
+  .signin .big{font-size:38px;line-height:1;margin-bottom:12px;opacity:.9}
+  .signin h3{margin:0 0 8px;font-size:20px}
+  .signin .intro{max-width:400px;margin:0 auto 16px;display:block}
+  .signin-field{max-width:320px;margin:0 auto 14px;text-align:left}
+  .signin-field input{text-align:center;font-size:16px}
+  .signin-field input#siCode{
+    letter-spacing:10px;font-size:24px;font-weight:650;
+    font-variant-numeric:tabular-nums;padding-left:10px
+  }
+  .signout{
+    background:none;border:0;color:var(--muted);font:inherit;font-size:12px;
+    cursor:pointer;padding:2px 0 2px 10px;text-decoration:underline;width:auto
+  }
+  .signout:hover{color:var(--text)}
+
   .seg{display:flex;gap:6px;flex-wrap:wrap}
   .seg button{
     padding:8px 14px;font:inherit;font-size:13.5px;font-weight:550;cursor:pointer;

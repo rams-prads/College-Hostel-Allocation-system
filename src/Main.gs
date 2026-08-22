@@ -84,16 +84,22 @@ function route_(e) {
     });
   }
 
-  if (!session.email) {
-    return render_('ui/index', 'Hostel Portal', {
-      session: session,
-      needsLogin: true,
-      authError: session.authError || ''
-    });
-  }
+  // No server-side sign-in gate any more.
+  //
+  // A visitor signed in with an email code holds their session in the browser,
+  // and doGet cannot see it - the token arrives on the API call, not the page
+  // request. Gating here would have bounced every first-year applicant to a
+  // sign-in page they had already passed.
+  //
+  // Nothing is weakened by this: the page is only chrome. Every function behind
+  // it resolves the caller through Auth.session() and enforces its own access,
+  // which is where enforcement belonged all along.
 
   if (page === 'admin') {
-    if (!session.isAdmin) return accessDenied_(session);
+    // Only refuse outright when Google DID identify the visitor and they are
+    // definitely not an administrator. Otherwise render, and let the dashboard's
+    // first call - which is guarded server-side - decide.
+    if (session.email && !session.isAdmin) return accessDenied_(session);
     return render_('ui/admin', 'Admin Dashboard', { session: session });
   }
   if (page === 'apply')  return render_('ui/apply',   'Hostel Application', { session: session });

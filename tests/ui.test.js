@@ -302,15 +302,36 @@ check('it offers a way to actually sign in',
   /<a[^>]+class="btn"/.test(r.screen) || /<button/.test(r.screen),
   'this page shipped with no button on it - a page whose only job is to get ' +
   'the visitor somewhere must give them something to press');
-check('the sign-in link goes through Google and comes back here',
-  r.screen.indexOf('accounts.google.com') > 0 &&
-  r.screen.indexOf('continue=') > 0);
-check('it escapes the iframe', r.screen.indexOf('target="_top"') > 0,
-  'a sign-in opened inside the sandbox frame goes nowhere');
-check('no spurious error banner when nothing failed',
-  r.screen.indexOf('could not check who you are') < 0);
-check('it tells an administrator where to look',
-  r.screen.indexOf('page=diag') > 0);
+check('it asks for an email address', r.screen.indexOf('siEmail') > 0);
+check('the address may be any address', r.screen.indexOf('Any address works') > 0,
+  'a first-year has no college address for months after allocation');
+check('it does not demand a Google account',
+  r.screen.toLowerCase().indexOf('google account') < 0,
+  'the whole point is that the students who need this most do not have one');
+
+section('Every page can sign someone in, not just the front one');
+// A student portal reached without a session used to be a dead end that told
+// the visitor to go and be signed in. Each page now carries the panel itself.
+['student.html', 'apply.html', 'admin.html'].forEach(function (f) {
+  const src = fs.readFileSync(path.join(UI, f), 'utf8');
+  check(f + ' falls back to the sign-in panel', src.indexOf('signInPanel(') > 0);
+});
+check('no page still tells the visitor to go and be signed in elsewhere', (() => {
+  return ['student.html', 'apply.html', 'index.html'].every(f =>
+    fs.readFileSync(path.join(UI, f), 'utf8').indexOf('while signed in') < 0);
+})(), 'that instruction was never actionable from inside the page');
+
+section('The session shim');
+const chromeSrcAuth = fs.readFileSync(path.join(UI, 'chrome.html'), 'utf8');
+check('every call is routed through the dispatcher',
+  chromeSrcAuth.indexOf('r.apiCall(SESSION.token') > 0);
+check('no page calls google.script.run directly any more', (() => {
+  return ['student.html', 'apply.html', 'admin.html', 'verify.html'].every(f =>
+    fs.readFileSync(path.join(UI, f), 'utf8').indexOf('google.script.run') < 0);
+})(), 'a direct call would silently drop the session and look signed-out');
+check('the token is read from storage defensively',
+  /try\s*\{[\s\S]{0,120}localStorage/.test(chromeSrcAuth),
+  'a private window throws rather than returning null');
 
 section('Non-admin is refused the dashboard cleanly');
 r = renderPage('admin.html', studentEmail);

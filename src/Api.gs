@@ -13,6 +13,36 @@
 // ============================================================ student portal
 
 /**
+ * Single entry point for a client that signed in with an email code.
+ *
+ * Every api* function reads its caller from Auth.session(). Rather than adding a
+ * token parameter to twenty of them - twenty chances to forget one, and the one
+ * you forget is the hole - the token is attached to the request here, once, and
+ * cleared in a finally so it cannot leak into the next execution.
+ *
+ * Only names beginning "api" are dispatchable. That is not a new restriction:
+ * every api* function is already callable directly over google.script.run, so
+ * this exposes nothing that was not exposed before. It does keep the dispatcher
+ * from being turned into a way to call anything else in the project.
+ */
+function apiCall(sessionToken, fnName, args) {
+  if (!/^api[A-Z][A-Za-z0-9]*$/.test(String(fnName || ''))) {
+    throw new Error('Unknown operation.');
+  }
+  if (fnName === 'apiCall') throw new Error('Unknown operation.');
+
+  var fn = this[fnName];
+  if (typeof fn !== 'function') throw new Error('Unknown operation.');
+
+  Auth.useToken(sessionToken);
+  try {
+    return fn.apply(null, args || []);
+  } finally {
+    Auth.useToken(null);
+  }
+}
+
+/**
  * Everything needed to render the student dashboard in one round trip.
  */
 function apiGetStudentView(asAppId, demoToken) {

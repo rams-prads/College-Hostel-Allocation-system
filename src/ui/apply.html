@@ -43,6 +43,7 @@
 
 <script>
   var FORM = null, REG = null, STEPS = [], step = 0, pinInfo = null;
+  loadToken();
 
   var reg = {
     name:'', enrollmentNo:'', phone:'', dob:'', gender:'',
@@ -59,7 +60,7 @@
 
   el('root').innerHTML = loadingState('Loading the application form');
 
-  google.script.run.withSuccessHandler(boot).withFailureHandler(function (e) {
+  srv().withSuccessHandler(boot).withFailureHandler(function (e) {
     el('root').innerHTML = banner('err', e.message);
   }).apiGetApplyForm();
 
@@ -75,8 +76,8 @@
     });
 
     if (!f.signedIn) {
-      el('root').innerHTML = card('', emptyState('&#128274;', 'Please sign in',
-        'Open this page while signed in to your Google account.'));
+      saveToken(null);
+      el('root').innerHTML = signInPanel();
       return;
     }
     if (!f.applicationsOpen) {
@@ -283,7 +284,7 @@
     if (!box) return;
     if (pin.length !== 6) { box.innerHTML = ''; return; }
     box.innerHTML = '<div class="hint"><span class="spin"></span> Locating&hellip;</div>';
-    google.script.run.withSuccessHandler(function (r) { pinInfo = r; showPin(r); })
+    srv().withSuccessHandler(function (r) { pinInfo = r; showPin(r); })
       .withFailureHandler(function () { box.innerHTML = ''; })
       .apiLookupPincode(pin, myCampus());
   }
@@ -451,7 +452,7 @@
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Submitting'; }
 
     if (FORM.needsRegistration) {
-      google.script.run
+      srv()
         .withSuccessHandler(function () { saveApplication(true); })
         .withFailureHandler(fail)
         .apiRegisterStudent(reg);
@@ -461,7 +462,7 @@
   }
 
   function saveApplication(submit) {
-    google.script.run
+    srv()
       .withSuccessHandler(function () { window.top.location.href = appUrl('?'); })
       .withFailureHandler(fail)
       .apiSaveApplication({
@@ -471,7 +472,7 @@
   }
 
   function saveDraft() {
-    google.script.run
+    srv()
       .withSuccessHandler(function () { say('good', 'Draft saved. You can finish it later.'); })
       .withFailureHandler(fail)
       .apiSaveApplication({
@@ -520,7 +521,7 @@
     if (box) box.innerHTML = '<div class="hint"><span class="spin"></span> ' +
       'Loading the hostels open to you&hellip;</div>';
 
-    google.script.run
+    srv()
       .withSuccessHandler(function (opts) {
         FORM.options = opts;
         optionsFor = key;

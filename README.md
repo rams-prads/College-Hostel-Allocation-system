@@ -34,11 +34,13 @@ Google Charts · Tailwind CSS. **Total running cost: ₹0.**
 
 ## Quick start
 
-> **Sign in first, decide the owner second.** Google only reveals a visitor's address to
-> a web app when that visitor shares a Workspace domain with the account that **owns the
-> project**. Own it from a personal Gmail account and *you are the only person who can
-> ever sign in* — everyone else bounces back to the sign-in page forever. Own it from
-> `@std.ggsipu.ac.in` and every student on that domain works. Decide before you build.
+> **Anyone can sign in, on any email address.** Google identifies visitors only on the
+> project owner's own Workspace domain — which would lock out every first-year, since
+> GGSIPU issues college addresses three to four months *after* students join and hostel
+> allocation happens before they arrive. The students most likely to need a bed are
+> exactly the ones a domain login shuts out. So the portal emails a one-time code to
+> whatever address an applicant actually has. Continuing students on `@std.ggsipu.ac.in`
+> are recognised by Google automatically and never see it.
 
 1. Sign in to Google as the account that should own this — for GGSIPU, a college address.
 2. Create a new Google Spreadsheet.
@@ -69,8 +71,9 @@ node tests/qr.test.js         # 57 checks: QR encoder vs ISO 18004, PNG round-tr
 node tests/phase5.test.js     # 102 checks: simulator, swaps, grievance audit
 node tests/phase6.test.js     # 45 checks: demo scenario and access guards
 node tests/phase7.test.js     # 77 checks: self-registration and first-year ranking
-node tests/ui.test.js         # 80 checks: every page renders, links escape the iframe
+node tests/ui.test.js         # 86 checks: every page renders, links escape the iframe
 node tests/phase8.test.js     # 107 checks: identity verification and upload hardening
+node tests/phase9.test.js     # 59 checks: email-code sign-in, session tokens, dispatcher
 node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
 ```
 

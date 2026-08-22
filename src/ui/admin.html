@@ -12,10 +12,18 @@
 
 <script>
   var D = null, KNOBS = [], PENDING = {};
+  loadToken();
   el('root').innerHTML = loadingState('Loading dashboard');
 
   function load() {
-    google.script.run.withSuccessHandler(render).withFailureHandler(function (e) {
+    srv().withSuccessHandler(render).withFailureHandler(function (e) {
+      // An unsigned visitor and a signed-in non-administrator both land here and
+      // need different things: one needs a way in, the other needs telling.
+      if (!SESSION.token && /sign in/i.test(e.message)) {
+        paintChrome({ unit: 'Hostel Administration' });
+        el('root').innerHTML = signInPanel('This page is for hostel administrators.');
+        return;
+      }
       el('root').innerHTML = banner('err', e.message);
     }).apiAdminOverview();
   }
@@ -25,7 +33,8 @@
     D = d;
     paintChrome({
       unit: 'Hostel Administration',
-      user: { name: d.admin.name || d.admin.email, role: d.admin.role.replace(/_/g, ' ') },
+      user: { name: d.admin.name || d.admin.email, role: d.admin.role.replace(/_/g, ' '),
+              signOut: !!SESSION.token },
       tabs: [
         { label: 'Overview', href: '?page=admin', on: true },
         { label: 'Student View', href: '?' }
@@ -61,7 +70,7 @@
 
   /* ---------------------------------------------------- verification */
   function loadIdentity() {
-    google.script.run.withSuccessHandler(paintIdentity)
+    srv().withSuccessHandler(paintIdentity)
       .withFailureHandler(function () { el('idCard').innerHTML = ''; })
       .apiAdminIdentityQueue(40);
   }
@@ -130,7 +139,7 @@
     }
 
     el('idCard').innerHTML = loadingState('Recording the decision');
-    google.script.run
+    srv()
       .withSuccessHandler(function () { loadIdentity(); })
       .withFailureHandler(function (e) {
         el('msg').innerHTML = banner('err', e.message);
@@ -176,7 +185,7 @@
 
   function showLedger() {
     el('ledgerDetail').innerHTML = loadingState('Reading the ledger');
-    google.script.run.withSuccessHandler(function (r) {
+    srv().withSuccessHandler(function (r) {
       var rows = r.recent.map(function (e) {
         return '<tr><td>' + esc(e.ts) + '</td>' +
           '<td>' + esc(String(e.action).replace(/_/g, ' ').toLowerCase()) + '</td>' +
@@ -287,7 +296,7 @@
    * so the failure message says exactly that rather than a bare error.
    */
   function demoLink(appId) {
-    google.script.run
+    srv()
       .withSuccessHandler(function (r) {
         el('msg').innerHTML = banner('good',
           'Read-only preview link, valid for ' + r.expiresInHours + ' hours. ' +
@@ -318,7 +327,7 @@
     clearTimeout(lookupTimer);
     if (!q || q.length < 2) { el('lookupResults').innerHTML = ''; return; }
     lookupTimer = setTimeout(function () {
-      google.script.run.withSuccessHandler(function (rows) {
+      srv().withSuccessHandler(function (rows) {
         if (!rows.length) {
           el('lookupResults').innerHTML = '<p class="muted small">No match.</p>'; return;
         }
@@ -340,7 +349,7 @@
 
   function viewStudent(appId) {
     el('studentView').innerHTML = loadingState('Opening');
-    google.script.run.withSuccessHandler(paintStudentView)
+    srv().withSuccessHandler(paintStudentView)
       .withFailureHandler(function (e) {
         el('studentView').innerHTML = banner('err', e.message);
       }).apiGetStudentView(appId);
@@ -398,7 +407,7 @@
   /* ==================================================== what-if simulator */
   function loadSimulator() {
     el('simCard').innerHTML = card('What-if simulator', loadingState('Loading policy settings'));
-    google.script.run.withSuccessHandler(function (k) { KNOBS = k; paintSimulator(); })
+    srv().withSuccessHandler(function (k) { KNOBS = k; paintSimulator(); })
       .withFailureHandler(function () { el('simCard').innerHTML = ''; }).apiAdminSimulatorKnobs();
   }
 
@@ -470,7 +479,7 @@
     el('simResult').innerHTML = '<div class="divider"></div>' +
       banner('info', 'Running two complete allocations so the difference is caused by your ' +
                      'change and nothing else…');
-    google.script.run.withSuccessHandler(paintSimResult)
+    srv().withSuccessHandler(paintSimResult)
       .withFailureHandler(function (e) {
         el('simResult').innerHTML = '<div class="divider"></div>' + banner('err', e.message);
       }).apiAdminSimulate(changes, null);
@@ -548,7 +557,7 @@
     if (!confirm('Save these policy changes and run a real allocation? ' +
                  'This replaces the current result.')) return;
     busy('Saving policy and reallocating…');
-    google.script.run.withSuccessHandler(function (r) {
+    srv().withSuccessHandler(function (r) {
       done('good', 'Policy saved and rooms reallocated: ' + r.metrics.allocated +
         ' allotted, ' + r.metrics.waitlisted + ' on the waiting list.');
       PENDING = {}; load();
@@ -558,7 +567,7 @@
 
   /* ======================================================== grievances */
   function loadGrievances() {
-    google.script.run.withSuccessHandler(paintGrievances)
+    srv().withSuccessHandler(paintGrievances)
       .withFailureHandler(function () { el('grievCard').innerHTML = ''; })
       .apiAdminGrievanceInbox(null, 40);
   }
@@ -599,7 +608,7 @@
 
   /* ============================================================= swaps */
   function loadSwaps() {
-    google.script.run.withSuccessHandler(paintSwaps)
+    srv().withSuccessHandler(paintSwaps)
       .withFailureHandler(function () { el('swapCard').innerHTML = ''; }).apiAdminSwapBoard();
   }
 
@@ -665,7 +674,7 @@
   function runAllocation() {
     if (!confirm('Run the allocation and save the result? This replaces the previous one.')) return;
     busy('Allocating rooms for all applicants…');
-    google.script.run.withSuccessHandler(function (r) {
+    srv().withSuccessHandler(function (r) {
       done('good', 'Allocation complete: ' + r.metrics.summary.allocated + ' rooms allotted, ' +
         r.metrics.summary.waitlisted + ' on the waiting list, ' + r.converted +
         ' reserved places reissued.');
@@ -675,7 +684,7 @@
 
   function preview() {
     busy('Running a preview — nothing will be saved…');
-    google.script.run.withSuccessHandler(function (r) {
+    srv().withSuccessHandler(function (r) {
       var m = r.metrics.summary;
       done('info', 'Preview only, nothing saved: ' + m.allocated + ' would be allotted, ' +
         m.waitlisted + ' on the waiting list, ' + m.pref1Pct + '% would get their first choice.');
@@ -684,7 +693,7 @@
 
   function letters() {
     busy('Producing allotment letters…');
-    google.script.run.withSuccessHandler(function (r) {
+    srv().withSuccessHandler(function (r) {
       done(r.remaining ? 'info' : 'good',
         'Produced ' + r.generated + ' of ' + r.total + ' letters.' +
         (r.remaining ? ' ' + r.remaining + ' to go — press again to continue.' : ' All done.'));
@@ -694,7 +703,7 @@
 
   function notifyAll() {
     busy('Sending notifications…');
-    google.script.run.withSuccessHandler(function (r) {
+    srv().withSuccessHandler(function (r) {
       done(r.failed ? 'err' : 'good',
         r.sent + ' sent, ' + r.queued + ' queued, ' + r.skipped + ' skipped' +
         (r.failed ? ', ' + r.failed + ' failed' : '') +

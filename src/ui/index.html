@@ -5,7 +5,6 @@
   // relative link would navigate that frame to the wrong place. Every link is
   // built from this absolute URL and targets _top.
   var WEBAPP_URL = '<?= webAppUrl() ?>';
-  var AUTH_ERROR = '<?= (typeof authError !== "undefined" && authError) ? authError : "" ?>';
 </script>
 
 <div id="chrome"></div>
@@ -13,53 +12,18 @@
 
 <script>
   paintChrome({ unit: 'Hostel Allocation Portal' });
+  loadToken();
 
-  /**
-   * Google's account chooser, returning here afterwards.
-   *
-   * There is no way to trigger a sign-in from inside the Apps Script iframe -
-   * the previous version of this page simply told the visitor to be signed in
-   * and gave them nothing to click, which is not a page, it is a wall. This
-   * hands them to Google with a continue URL so they land back here on the
-   * right account.
-   */
-  function signInUrl() {
-    var back = WEBAPP_URL || '';
-    return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(back);
+  // Already holding a session? Go where they were trying to go.
+  if (SESSION.token) {
+    srv().withSuccessHandler(function (who) {
+      if (who.signedIn) { window.top.location.href = appUrl('?'); return; }
+      saveToken(null);
+      el('root').innerHTML = signInPanel('Your previous sign-in has expired.');
+    }).withFailureHandler(function () {
+      el('root').innerHTML = signInPanel();
+    }).apiWhoAmI();
+  } else {
+    el('root').innerHTML = signInPanel();
   }
-
-  var body =
-    '<div class="empty"><div class="big">&#127891;</div>' +
-    '<h3 style="margin:0 0 6px">Sign in to continue</h3>' +
-    '<p class="small" style="max-width:440px;display:inline-block;margin:0 0 20px">' +
-    'This portal identifies you by your Google account, so there is no separate password ' +
-    'to remember.</p><br>' +
-    '<a class="btn" href="' + signInUrl() + '" target="_top">Sign in with Google</a>' +
-    '</div>';
-
-  // Two different faults land on this page, and they have different fixes. The
-  // visitor should not have to guess which one they are looking at.
-  var help = AUTH_ERROR
-    ? banner('err', 'The portal could not check who you are: ' + AUTH_ERROR +
-             ' This usually means the web app needs to be authorised again by its owner.')
-    : '';
-
-  var footer =
-    '<details class="tech"><summary>It still says this after signing in</summary>' +
-    '<div class="small" style="line-height:1.65">' +
-    '<p style="margin:0 0 10px">Two things cause it, and neither is your account:</p>' +
-    '<ol style="margin:0 0 12px;padding-left:20px">' +
-    '<li><strong>You are signed in to more than one Google account.</strong> ' +
-    'The portal only sees the one this browser treats as default. Use the button above ' +
-    'and pick the account you applied with.</li>' +
-    '<li><strong>The deployment is set to &ldquo;Anyone&rdquo; instead of &ldquo;Anyone with a ' +
-    'Google account&rdquo;.</strong> With the first setting the portal is not allowed to see ' +
-    'who you are at all, so everybody lands here. Only the administrator can change it.</li>' +
-    '</ol>' +
-    '<p style="margin:0">Administrators: open ' +
-    '<a href="' + appUrl('?page=diag') + '" target="_top">the deployment check</a> ' +
-    '&mdash; it names which of the two it is.</p>' +
-    '</div></details>';
-
-  el('root').innerHTML = help + card('', body) + footer;
 </script>
