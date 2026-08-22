@@ -61,10 +61,19 @@ function freshDom() {
     return nodes[id];
   }
   global.__known = known;
+  const attrs = {};
   global.document = {
     getElementById: node,
-    createElement() { return makeEl('new', known); }
+    createElement() { return makeEl('new', known); },
+    // A page may set the theme or tag the body before it paints. Leaving these
+    // off the stub meant the whole dashboard threw at line one.
+    documentElement: {
+      setAttribute(k, v) { attrs[k] = v; },
+      getAttribute(k) { return attrs[k]; }
+    },
+    body: { classList: { add() {}, remove() {}, contains() { return false; } } }
   };
+  global.__attrs = attrs;
   global.window = {
     top: { location: { reload() {}, href: '', pathname: '/' } },
     scrollTo() {}, location: { href: '' }
@@ -278,10 +287,37 @@ check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
 check('the dashboard body rendered', r.screen.length > 1500, r.screen.length + ' bytes');
 check('summary tiles are present', r.screen.indexOf('Rooms allotted') > 0);
 check('ledger status is present', r.screen.indexOf('Audit ledger') > 0);
-check('occupancy table is present', r.screen.indexOf('Occupancy') > 0);
+check('occupancy opens on its own tab', (() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("occupancy");');
+  return t.screen.indexOf('Occupancy and vacancies') > 0;
+})());
+check('students opens on its own tab', (() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("students");');
+  return t.screen.indexOf('Look up a student') > 0;
+})());
+check('the document queue finally has a screen', (() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
+  return t.screen.indexOf('Documents needing a decision') > 0;
+})(), 'apiAdminDocQueue existed since Phase 4 with nothing rendering it');
+
+section('The dashboard is a workspace, not one long page');
+r = renderPage('admin.html', 'admin@ipu.ac.in');
+check('it holds itself to the light palette',
+  global.__attrs['data-theme'] === 'light',
+  'an officer reads this beside printed forms');
+check('there is a section rail', r.screen.indexOf('class="anav"') > 0);
+check('every section is on it',
+  ['Overview', 'Allocation', 'Occupancy', 'Verification', 'Students', 'Requests',
+   'Policy', 'Operations'].every(t => r.screen.indexOf('>' + t + '<') > 0));
+check('exactly one section is open',
+  (r.screen.match(/aria-current="true"/g) || []).length === 1);
+check('it opens on the overview', r.screen.indexOf('Rooms allotted') > 0);
+check('and does not also render the other seven',
+  r.screen.indexOf('Look up a student') < 0,
+  'stacking everything on one page is what this replaced');
 
 section('Document reading is on the dashboard');
-r = renderPage('admin.html', 'admin@ipu.ac.in');
+r = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
 check('the reading summary renders', r.screen.indexOf('Document reading') > 0);
 check('it states what is actually compared',
   r.screen.indexOf('PIN code compared') > 0,
@@ -290,7 +326,7 @@ check('it says a difference is only raised when it matters',
   r.screen.indexOf('change') > 0 && r.screen.indexOf('outcome') > 0);
 
 section('Identity verification - the admin side');
-r = renderPage('admin.html', 'admin@ipu.ac.in');
+r = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
 check('the verification section is on the dashboard',
   r.screen.indexOf('Identity verification') > 0);
 check('the waiting applicant is listed', r.screen.indexOf(idStudent.name) > 0);

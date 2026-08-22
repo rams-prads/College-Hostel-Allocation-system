@@ -337,6 +337,86 @@
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
   @media (max-width:620px){.row2{grid-template-columns:1fr}}
 
+  /* ===================================================== admin shell
+     The dashboard is a workspace, not a document: a fixed left rail of
+     sections and one of them open at a time. Everything used to be on a
+     single page, which meant scrolling past six things to reach the
+     seventh and no way to tell where you were.
+
+     Held to the light palette whatever the operating system prefers. An
+     officer reads this beside printed forms and a dark field of navy is
+     the wrong ground for that. */
+  body.admin{background:#fff}
+  body.admin .card{background:#fff}
+  /* The rail is 1400 wide; the masthead defaults to 1120 and would sit inside
+     it, leaving the university name floating short of its own sidebar. */
+  body.admin .masthead .row,
+  body.admin .navbar .row{max-width:1400px}
+  /* On a white page the card header needs to be the thing that separates one
+     card from the next, so it keeps a tint while the body does not. */
+  body.admin .card>.hd{background:var(--surface-2)}
+  body.admin .tile{background:#fff}
+
+  .ashell{
+    display:flex;align-items:flex-start;gap:0;
+    max-width:1400px;margin:0 auto;padding:0 20px;
+  }
+  .asidebar{
+    flex:0 0 226px;width:226px;align-self:stretch;
+    padding:20px 18px 40px 0;border-right:1px solid var(--border);
+    position:sticky;top:0;
+  }
+  .amain{flex:1;min-width:0;padding:20px 0 72px 26px}
+
+  .anav{list-style:none;margin:0;padding:0}
+  .anav li{margin:0 0 2px}
+  .anav button{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:none;border:0;border-radius:var(--r-sm);cursor:pointer;
+    font:inherit;font-size:14px;font-weight:500;color:var(--text-2);
+    padding:9px 12px;position:relative;transition:background .12s,color .12s;
+  }
+  .anav button:hover{background:var(--surface-2);color:var(--text)}
+  .anav button[aria-current="true"]{
+    background:var(--navy-900);color:#fff;font-weight:600;
+  }
+  .anav button[aria-current="true"] .ico{opacity:1}
+  .anav .ico{
+    flex:0 0 16px;height:16px;opacity:.55;display:inline-flex;
+    align-items:center;justify-content:center;
+  }
+  .anav .ico svg{width:16px;height:16px;display:block}
+  .anav .cnt{
+    margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;
+    background:var(--amber);color:#26190a;font-size:11.5px;font-weight:700;
+    display:inline-flex;align-items:center;justify-content:center;
+  }
+  .anav button[aria-current="true"] .cnt{background:var(--amber);color:#26190a}
+
+  .arail-title{
+    font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 10px 12px;
+  }
+  .apagehead{margin:0 0 18px}
+  .apagehead h1{
+    font-family:var(--display);font-size:24px;font-weight:600;margin:0 0 3px;
+    letter-spacing:-.01em;color:var(--text);
+  }
+  .apagehead p{margin:0;color:var(--muted);font-size:13.5px}
+
+  @media (max-width:900px){
+    .ashell{display:block;padding:0 14px}
+    .asidebar{
+      width:auto;flex:none;position:static;border-right:0;
+      border-bottom:1px solid var(--border);padding:12px 0;
+    }
+    .arail-title{display:none}
+    .anav{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+    .anav li{margin:0}
+    .anav button{white-space:nowrap;width:auto}
+    .amain{padding:18px 0 60px}
+  }
+
   /* Verification queue. Each applicant is a block, not a table row - the
      findings need room to be read, and a verifier skimming a table will not
      read them at all. */

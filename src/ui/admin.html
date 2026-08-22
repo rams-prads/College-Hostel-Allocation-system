@@ -5,13 +5,86 @@
   // relative link would navigate that frame to the wrong place. Every link is
   // built from this absolute URL and targets _top.
   var WEBAPP_URL = '<?= webAppUrl() ?>';
+
+  // Before first paint, so there is no flash of the wrong ground. The
+  // dashboard is held to the light palette regardless of the operating
+  // system's preference: it is read beside printed forms, and a dark field
+  // of navy is the wrong background for that work.
+  document.documentElement.setAttribute('data-theme', 'light');
 </script>
 
 <div id="chrome"></div>
-<div class="wrap" id="root"></div>
+<div id="root"></div>
 
 <script>
+  document.body.classList.add('admin');
+
   var D = null, KNOBS = [], PENDING = {}, PENDING_NOTE = null;
+
+  /* ================================================================ tabs
+     One section open at a time. Everything below used to be stacked on a
+     single page, which meant scrolling past six things to reach the seventh
+     with no way to tell where you were or what still needed attention. */
+  var TAB = 'overview';
+
+  var ICON = {
+    overview:    'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+    allocation:  'M4 20V10M10 20V4M16 20v-7M22 20H2',
+    occupancy:   'M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5',
+    verification:'M9 12l2 2 4-4M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z',
+    students:    'M12 3l9 5-9 5-9-5zM5 11v5c0 1 3 3 7 3s7-2 7-3v-5',
+    requests:    'M4 5h16v12H8l-4 3z',
+    policy:      'M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1M12 8a4 4 0 100 8 4 4 0 000-8z',
+    operations:  'M13 2L4 14h6l-1 8 9-12h-6z'
+  };
+
+  var TABS = [
+    { id: 'overview',     label: 'Overview',
+      title: 'Overview', blurb: 'The state of this year\u2019s allocation at a glance.' },
+    { id: 'allocation',   label: 'Allocation',
+      title: 'Allocation', blurb: 'Run the allocation, and how fair the last one was.' },
+    { id: 'occupancy',    label: 'Occupancy',
+      title: 'Occupancy and vacancies', blurb: 'Where the beds are, and which are free.' },
+    { id: 'verification', label: 'Verification',
+      title: 'Verification', blurb: 'Documents that disagree with what was declared. ' +
+                                    'Ordered by risk, not by arrival.' },
+    { id: 'students',     label: 'Students',
+      title: 'Students', blurb: 'Open any applicant\u2019s portal exactly as they see it.' },
+    { id: 'requests',     label: 'Requests',
+      title: 'Grievances and swaps', blurb: 'What students have asked for.' },
+    { id: 'policy',       label: 'Policy',
+      title: 'Policy', blurb: 'Change a rule and see who moves, before committing it.' },
+    { id: 'operations',   label: 'Operations',
+      title: 'Operations', blurb: 'Letters, notifications and the audit trail.' }
+  ];
+
+  /** Counts that belong on the rail, so an officer sees the work without hunting. */
+  function tabCount(id, d) {
+    if (id === 'verification') return Number(d && d.docQueue) || 0;
+    return 0;
+  }
+
+  function sidebar(d) {
+    return '<div class="arail-title">Sections</div><ul class="anav">' +
+      TABS.map(function (t) {
+        var n = tabCount(t.id, d);
+        return '<li><button type="button" aria-current="' + (TAB === t.id) +
+          '" onclick="goTab(&quot;' + t.id + '&quot;)">' +
+          '<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+          'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="' + ICON[t.id] + '"/></svg></span>' +
+          '<span>' + esc(t.label) + '</span>' +
+          (n ? '<span class="cnt">' + esc(n) + '</span>' : '') +
+          '</button></li>';
+      }).join('') + '</ul>';
+  }
+
+  function goTab(id) {
+    TAB = id;
+    el('sidebar').innerHTML = sidebar(D);
+    paintTab();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
   loadToken();
   el('root').innerHTML = loadingState('Loading dashboard');
 
@@ -35,10 +108,11 @@
       // need different things: one needs a way in, the other needs telling.
       if (!SESSION.token && /sign in/i.test(e.message)) {
         paintChrome({ unit: 'Hostel Administration' });
-        el('root').innerHTML = signInPanel('This page is for hostel administrators.');
+        el('root').innerHTML = '<div class="wrap narrow">' +
+          signInPanel('This page is for hostel administrators.') + '</div>';
         return;
       }
-      el('root').innerHTML = banner('err', e.message);
+      el('root').innerHTML = '<div class="wrap">' + banner('err', e.message) + '</div>';
     }).apiAdminOverview();
   }
   load();
@@ -49,44 +123,77 @@
       unit: 'Hostel Administration',
       user: { name: d.admin.name || d.admin.email, role: d.admin.role.replace(/_/g, ' '),
               signOut: !!SESSION.token },
-      tabs: [
-        { label: 'Overview', href: '?page=admin', on: true },
-        { label: 'Student View', href: '?' }
-      ]
+      tabs: [{ label: 'Student View', href: '?' }]
     });
 
-    var m = d.latestRun && d.latestRun.metrics ? d.latestRun.metrics.summary : null;
+    el('root').innerHTML =
+      '<div class="ashell">' +
+        '<aside class="asidebar" id="sidebar">' + sidebar(d) + '</aside>' +
+        '<main class="amain"><div id="msg"></div><div id="tabBody"></div></main>' +
+      '</div>';
 
-    el('root').innerHTML = [
-      '<div id="msg"></div>',
-      summaryBand(d),
-      ledgerCard(d),
-      m ? sect('Allocation outcome', d.latestRun.finishedAt ? 'last run ' + d.latestRun.finishedAt : '') : '',
-      m ? metricsCard(d, m) : noRunCard(),
-      m ? quotaCard(d.latestRun.metrics) : '',
-      sect('Occupancy and vacancies'),
-      occupancyCard(d),
-      sect('Students'),
-      lookupCard(),
-      sect('Policy'),
-      '<div id="simCard"></div>',
-      sect('Verification', 'ordered by risk, not by arrival'),
-      '<div id="scanCard"></div>',
-      '<div id="idCard"></div>',
-      sect('Requests'),
-      '<div id="grievCard"></div>',
-      '<div id="swapCard"></div>',
-      sect('Operations'),
-      operationsCard(d)
-    ].join('');
+    paintTab();
 
     if (PENDING_NOTE) {
       el('msg').innerHTML = banner(PENDING_NOTE.kind, PENDING_NOTE.text);
       PENDING_NOTE = null;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  }
 
-    loadSimulator(); loadGrievances(); loadSwaps(); loadIdentity(); loadScans();
+  /**
+   * Draw the open section, and fetch only what that section needs.
+   *
+   * Loading all six panels on every visit meant six round trips before the
+   * page settled, five of them for things nobody was looking at.
+   */
+  function paintTab() {
+    var d = D;
+    var meta = TABS.filter(function (t) { return t.id === TAB; })[0] || TABS[0];
+    var m = d.latestRun && d.latestRun.metrics ? d.latestRun.metrics.summary : null;
+
+    var body = '';
+    if (TAB === 'overview') {
+      body = summaryBand(d) + ledgerCard(d);
+    } else if (TAB === 'allocation') {
+      body = runCard(d) + (m ? metricsCard(d, m) : noRunCard()) +
+             (m ? quotaCard(d.latestRun.metrics) : '');
+    } else if (TAB === 'occupancy') {
+      body = occupancyCard(d);
+    } else if (TAB === 'verification') {
+      body = '<div id="scanCard"></div><div id="queueCard"></div><div id="idCard"></div>';
+    } else if (TAB === 'students') {
+      body = lookupCard();
+    } else if (TAB === 'requests') {
+      body = '<div id="grievCard"></div><div id="swapCard"></div>';
+    } else if (TAB === 'policy') {
+      body = '<div id="simCard"></div>';
+    } else if (TAB === 'operations') {
+      body = operationsCard(d);
+    }
+
+    el('tabBody').innerHTML =
+      '<div class="apagehead"><h1>' + esc(meta.title) + '</h1>' +
+      '<p>' + esc(meta.blurb) +
+      (TAB === 'allocation' && d.latestRun && d.latestRun.finishedAt
+        ? ' Last run ' + esc(d.latestRun.finishedAt) + '.' : '') +
+      '</p></div>' + body;
+
+    if (TAB === 'verification') { loadScans(); loadDocQueue(); loadIdentity(); }
+    if (TAB === 'requests')     { loadGrievances(); loadSwaps(); }
+    if (TAB === 'policy')       { loadSimulator(); }
+  }
+
+  /** The buttons that actually start a run, lifted out of Operations. */
+  function runCard(d) {
+    return card('Run the allocation',
+      '<p class="small muted" style="margin:0 0 13px">A preview changes nothing and is ' +
+      'the safe way to see what a run would do. Committing replaces the previous ' +
+      'result and is recorded in the ledger.</p>' +
+      '<div class="btn-row">' +
+        '<button class="btn" onclick="runAllocation()">Run and save</button>' +
+        '<button class="btn ghost" onclick="preview()">Preview only</button>' +
+      '</div>');
   }
 
   /* -------------------------------------------------- document reading */
@@ -171,6 +278,94 @@
       })
       .withFailureHandler(function (e) { el('scanMsg').innerHTML = banner('err', e.message); })
       .apiAdminAutoClear();
+  }
+
+  /* ------------------------------------------------ the document queue */
+
+  /**
+   * The documents themselves, worst first.
+   *
+   * apiAdminDocQueue has existed since Phase 4 and no page ever rendered it, so
+   * the only way to act on a single document was to edit the sheet by hand.
+   */
+  function loadDocQueue() {
+    srv().withSuccessHandler(paintDocQueue)
+      .withFailureHandler(function () { el('queueCard').innerHTML = ''; })
+      .apiAdminDocQueue(40, true);
+  }
+
+  function paintDocQueue(rows) {
+    if (!rows || !rows.length) {
+      el('queueCard').innerHTML = card('Documents needing a decision',
+        emptyState('&#9989;', 'Nothing waiting',
+          'Every document held either agrees with its declaration or has already ' +
+          'been decided.'));
+      return;
+    }
+
+    var body = rows.map(function (r) {
+      var kind = { HIGH: 'bad', MEDIUM: 'warn', LOW: 'ok' }[r.riskLevel] || '';
+      var verdict = {
+        CONFLICT:   ['bad',  'Contradicts the declaration'],
+        UNREADABLE: ['warn', 'Could not be read'],
+        UNSCANNED:  ['',     'Not read yet'],
+        MINOR:      ['ok',   'Differs immaterially'],
+        MATCH:      ['ok',   'Agrees']
+      }[r.scanVerdict] || ['', r.scanVerdict];
+
+      var findings = (r.findings || []).length
+        ? '<ul class="findings">' + r.findings.map(function (f) {
+            return '<li class="' + esc(String(f.severity).toLowerCase()) + '">' +
+                   esc(f.text) + '</li>';
+          }).join('') + '</ul>'
+        : '<p class="small muted" style="margin:6px 0 0">Nothing inconsistent was found.</p>';
+
+      return '<div class="vrow">' +
+        '<div class="vhead"><div>' +
+          '<div class="vname">' + esc(r.studentName) + '</div>' +
+          '<div class="small muted">' + esc(r.label) + ' &middot; ' + esc(r.enrollmentNo) +
+          (r.campus ? ' &middot; ' + esc(label('campus', r.campus)) : '') + '</div>' +
+        '</div>' + pill(verdict[0], verdict[1]) + '</div>' +
+        '<div class="vmeta">' +
+          '<span>Uploaded ' + esc(r.uploadedAt) + '</span>' +
+          (r.sizeKb ? '<span>' + esc(r.sizeKb) + ' KB</span>' : '') +
+          (r.aadhaarMasked ? '<span>Aadhaar <strong>' + esc(r.aadhaarMasked) +
+                             '</strong></span>' : '') +
+          (r.driveFileId
+            ? '<a href="https://drive.google.com/file/d/' + esc(r.driveFileId) +
+              '/view" target="_blank" rel="noopener noreferrer">Open the document</a>' : '') +
+        '</div>' + findings +
+        '<div class="btn-row" style="margin-top:11px">' +
+          '<button class="btn sm" onclick="decideDoc(&quot;' + esc(r.docId) +
+            '&quot;,true)">Accept</button>' +
+          '<button class="btn ghost sm" onclick="decideDoc(&quot;' + esc(r.docId) +
+            '&quot;,false)">Reject</button>' +
+        '</div></div>';
+    }).join('');
+
+    el('queueCard').innerHTML = card('Documents needing a decision',
+      '<p class="small muted" style="margin:0 0 14px">' + rows.length + ' waiting, worst ' +
+      'first. Anything that agreed with its declaration has been left out of this list ' +
+      'entirely.</p>' + body);
+  }
+
+  function decideDoc(docId, approve) {
+    var note = '';
+    if (!approve) {
+      note = window.prompt('Why is this being rejected? The student is shown this text.');
+      if (note === null) return;
+      if (!String(note).trim()) {
+        el('msg').innerHTML = banner('err', 'A rejection needs a reason.');
+        return;
+      }
+    }
+    el('queueCard').innerHTML = loadingState('Recording the decision');
+    srv().withSuccessHandler(function () { loadDocQueue(); loadScans(); })
+      .withFailureHandler(function (e) {
+        el('msg').innerHTML = banner('err', e.message);
+        loadDocQueue();
+      })
+      .apiAdminDecideDocument(docId, approve, note);
   }
 
   /* ---------------------------------------------------- verification */
@@ -753,11 +948,12 @@
 
   /* ======================================================== operations */
   function operationsCard(d) {
+    // Running the allocation lives on its own tab now. Leaving a second copy of
+    // the button here would mean two places to look for the same thing, and one
+    // of them without the context that explains what it replaces.
     return card('Operations',
       '<div class="btn-row">' +
-        '<button class="btn" onclick="runAllocation()">Run allocation</button>' +
-        '<button class="btn ghost" onclick="preview()">Preview without saving</button>' +
-        '<button class="btn ghost" onclick="letters()">Generate allotment letters</button>' +
+        '<button class="btn" onclick="letters()">Generate allotment letters</button>' +
         '<button class="btn ghost" onclick="notifyAll()">Send notifications</button>' +
       '</div>' +
       '<div class="divider"></div>' +

@@ -71,7 +71,7 @@ node tests/qr.test.js         # 57 checks: QR encoder vs ISO 18004, PNG round-tr
 node tests/phase5.test.js     # 102 checks: simulator, swaps, grievance audit
 node tests/phase6.test.js     # 45 checks: demo scenario and access guards
 node tests/phase7.test.js     # 77 checks: self-registration and first-year ranking
-node tests/ui.test.js         # 100 checks: every page renders, links escape the iframe
+node tests/ui.test.js         # 108 checks: every page renders, links escape the iframe
 node tests/phase8.test.js     # 107 checks: identity verification and upload hardening
 node tests/phase9.test.js     # 59 checks: email-code sign-in, session tokens, dispatcher
 node tests/phase10.test.js    # 54 checks: reading documents, materiality, auto-clearing
