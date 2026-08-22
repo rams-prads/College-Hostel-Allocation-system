@@ -449,6 +449,47 @@ check('the document queue finally has a screen', (() => {
   return t.screen.indexOf('Documents needing a decision') > 0;
 })(), 'apiAdminDocQueue existed since Phase 4 with nothing rendering it');
 
+section('The waiting list has a screen of its own');
+
+(() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("waitlist");');
+  check('the tab renders', t.screen.indexOf('Waiting list') > 0);
+  check('no unhandled server errors', t.errors.length === 0, t.errors.join('; '));
+
+  const rows = (t.screen.match(/<tbody>[\s\S]*?<\/tbody>/)[0].match(/<tr>/g) || []).length;
+  check('it shows 25 at a time', rows === 25, rows + ' rows');
+
+  const total = apiAdminWaitlist({ page: 1, pageSize: 25 }).total;
+  check('and says how many there are altogether',
+    t.screen.indexOf(String(total)) > 0, total + ' waiting');
+  check('with a way to reach the next page', t.screen.indexOf('wlGo(2)') > 0);
+  check('and no way back from the first',
+    /wlGo\(0\)[^>]*>/.test(t.screen) === false ||
+    /disabled onclick="wlGo\(0\)/.test(t.screen),
+    'a Previous button on page one is a button that does nothing');
+
+  const p2 = renderPage('admin.html', 'admin@ipu.ac.in',
+    'goTab("waitlist"); wlGo(2);');
+  check('the next page shows different people', (() => {
+    const first = apiAdminWaitlist({ page: 1, pageSize: 25 }).rows[0];
+    const second = apiAdminWaitlist({ page: 2, pageSize: 25 }).rows[0];
+    return p2.screen.indexOf(second.enrollmentNo) > 0 &&
+           p2.screen.indexOf(first.enrollmentNo) < 0;
+  })());
+  check('and page 2 offers the way back', p2.screen.indexOf('wlGo(1)') > 0);
+
+  check('the rail carries the number waiting, so nobody has to open it to find out',
+    t.screen.indexOf('<span>Waiting list</span><span class="cnt">' + total + '</span>') > 0,
+    'the count belongs where the work is chosen, not behind the click that chooses it');
+
+  check('each row says which priority group put them there',
+    t.screen.indexOf('Priority group') > 0 &&
+    (t.screen.indexOf('Outside Delhi') > 0 || t.screen.indexOf('Delhi category') > 0),
+    'the queue is not sorted on one number, and a table that shows one looks wrong');
+  check('a student can be opened from the row',
+    t.screen.indexOf('viewStudent(') > 0);
+})();
+
 section('The dashboard is a workspace, not one long page');
 r = renderPage('admin.html', 'admin@ipu.ac.in');
 check('it holds itself to the light palette',

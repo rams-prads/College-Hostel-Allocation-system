@@ -492,31 +492,90 @@ function apiAdminVerifyLedger() {
   return { verification: v, recent: entries };
 }
 
-/** The waiting list, for the vacancy-management view. */
-function apiAdminWaitlist(limit) {
+/**
+ * The waiting list, one page at a time.
+ *
+ * Paged rather than capped. A cap answers "who are the first fifty?" and
+ * silently drops the rest - and on a list several hundred long, the people
+ * furthest down it are exactly the ones the office is asked about, because
+ * they are the ones who have heard nothing.
+ *
+ * @param {Object=} opts {page:1-based, pageSize, q:free-text}
+ * @return {{rows, total, matched, page, pages, pageSize, q}}
+ */
+function apiAdminWaitlist(opts) {
   Auth.requireAdmin();
-  limit = limit || 50;
+
+  // Tolerates a bare number, which is what this used to take. An old call site
+  // asking for 20 rows gets the first 20, not a page numbered 20.
+  if (typeof opts === 'number') opts = { pageSize: opts };
+  opts = opts || {};
+
+  var pageSize = Math.min(Math.max(Math.floor(Number(opts.pageSize) || 25), 1), 100);
+  var page = Math.max(Math.floor(Number(opts.page) || 1), 1);
+
   var apps = Db.indexBy('Applications', 'appId');
   var stu = Db.indexBy('Students', 'studentId');
   var hostels = Db.indexBy('Hostels', 'hostelId');
 
-  return Db.readAll('Waitlist')
-    .sort(function (a, b) { return a.position - b.position; })
-    .slice(0, limit)
-    .map(function (w) {
+  var all = Db.readAll('Waitlist').slice()
+    .sort(function (a, b) { return Number(a.position) - Number(b.position); });
+  var total = all.length;
+
+  // Searching the WHOLE list, not the page on screen. A filter that only looks
+  // at what is already visible is a filter that answers "no" to every question
+  // worth asking it.
+  var q = String(opts.q || '').trim().toLowerCase();
+  if (q) {
+    all = all.filter(function (w) {
       var app = apps[w.appId];
-      var student = app ? stu[app.studentId] : null;
-      return {
-        position: w.position, appId: w.appId,
-        name: student ? student.name : '',
-        programme: student ? student.programme : '',
-        category: student ? student.category : '',
-        gender: student ? student.gender : '',
-        meritScore: app ? app.meritScore : 0,
-        etaPercent: Math.round(Number(w.etaProbability) * 100),
-        topChoice: (hostels[w.hostelId] || {}).name || ''
-      };
+      var s = app ? stu[app.studentId] : null;
+      if (!s) return false;
+      return String(s.name || '').toLowerCase().indexOf(q) >= 0 ||
+             String(s.enrollmentNo || '').toLowerCase().indexOf(q) >= 0 ||
+             String(w.appId || '').toLowerCase().indexOf(q) >= 0;
     });
+  }
+
+  var matched = all.length;
+  var pages = Math.max(Math.ceil(matched / pageSize), 1);
+  if (page > pages) page = pages;
+  var from = (page - 1) * pageSize;
+
+  var rows = all.slice(from, from + pageSize).map(function (w) {
+    var app = apps[w.appId];
+    var student = app ? stu[app.studentId] : null;
+    return {
+      position: w.position, appId: w.appId,
+      studentId: student ? student.studentId : '',
+      name: student ? student.name : '',
+      enrollmentNo: student ? student.enrollmentNo : '',
+      programme: student ? student.programme : '',
+      year: student ? student.year : '',
+      campus: student ? student.campus : '',
+      category: student ? student.category : '',
+      gender: student ? student.gender : '',
+      // What the queue is actually ordered by: the group first, then the
+      // measure inside it. Showing merit alone would make the order look wrong.
+      tier: app ? app.priorityTier : '',
+      meritScore: app ? app.meritScore : 0,
+      // What this student was ACTUALLY ordered by inside their group. The
+      // Delhi group is ranked on distance, everyone else on marks, so showing
+      // the percentage for all of them would make a correct queue look wrong -
+      // a 60% ahead of an 85% with nothing on screen explaining it.
+      rankedOn: app
+        ? (app.priorityTier === 'DELHI' ? Number(app.distanceKm) : Number(app.meritScore))
+        : 0,
+      rankedOnUnit: (app && app.priorityTier === 'DELHI') ? 'km' : '%',
+      etaPercent: Math.round(Number(w.etaProbability) * 100),
+      topChoice: (hostels[w.hostelId] || {}).name || ''
+    };
+  });
+
+  return {
+    rows: rows, total: total, matched: matched,
+    page: page, pages: pages, pageSize: pageSize, q: opts.q || ''
+  };
 }
 
 /**

@@ -308,11 +308,75 @@ check('restoring the value re-validates the chain',
   apiAdminVerifyLedger().verification.intact === true);
 
 section('Waitlist view');
-const wl = apiAdminWaitlist(20);
+const wlPage = apiAdminWaitlist({ page: 1, pageSize: 25 });
+const wl = wlPage.rows;
 check('waitlist is returned', wl.length > 0, wl.length + ' rows');
 check('ordered by position', wl.every((w, i) => i === 0 || wl[i - 1].position <= w.position));
 check('each row names a student', wl.every(w => !!w.name));
 check('each row has an ETA', wl.every(w => w.etaPercent >= 0 && w.etaPercent <= 100));
+check('each row carries the priority group the order comes from',
+  wl.every(w => !!w.tier),
+  'merit alone makes the ordering look wrong, because it is not what sorts the queue');
+check('and the figure shown is the one that group is actually ranked on', (() => {
+  const apps = Db.indexBy('Applications', 'appId');
+  return wl.every(w => {
+    const a = apps[w.appId];
+    return w.tier === 'DELHI'
+      ? (Number(w.rankedOn) === Number(a.distanceKm) && w.rankedOnUnit === 'km')
+      : (Number(w.rankedOn) === Number(a.meritScore) && w.rankedOnUnit === '%');
+  });
+})(), 'the Delhi group is ordered on distance, so printing their marks explains nothing');
+check('and the list really is sorted on it, within each group', (() => {
+  for (let i = 1; i < wl.length; i++) {
+    if (wl[i].tier !== wl[i - 1].tier) continue;
+    if (Number(wl[i].rankedOn) > Number(wl[i - 1].rankedOn) + 0.001) return false;
+  }
+  return true;
+})(), 'if the column and the order disagree, one of them is lying to the warden');
+
+check('a page is a page, not the whole list', wl.length === 25,
+  wl.length + ' of ' + wlPage.total);
+check('and it says how many there are in total',
+  wlPage.total > 25 && wlPage.pages === Math.ceil(wlPage.total / 25),
+  wlPage.total + ' waiting, ' + wlPage.pages + ' pages');
+
+const wl2 = apiAdminWaitlist({ page: 2, pageSize: 25 });
+check('the next page continues where the first stopped',
+  Number(wl2.rows[0].position) > Number(wl[24].position),
+  wl[24].position + ' then ' + wl2.rows[0].position);
+check('and no row appears on both', (() => {
+  const first = wl.map(w => w.appId);
+  return wl2.rows.every(w => first.indexOf(w.appId) < 0);
+})());
+
+check('the last page is reachable and not empty', (() => {
+  const last = apiAdminWaitlist({ page: wlPage.pages, pageSize: 25 });
+  return last.rows.length > 0 && last.page === wlPage.pages;
+})());
+check('asking beyond the end lands on the last page, not on nothing', (() => {
+  const over = apiAdminWaitlist({ page: 9999, pageSize: 25 });
+  return over.page === over.pages && over.rows.length > 0;
+})(), 'an empty screen looks like a broken query, and gets reported as one');
+
+check('every waiting student is reachable by paging', (() => {
+  const seen = {};
+  for (let p = 1; p <= wlPage.pages; p++) {
+    apiAdminWaitlist({ page: p, pageSize: 25 }).rows.forEach(r => { seen[r.appId] = 1; });
+  }
+  return Object.keys(seen).length === wlPage.total;
+})(), 'a list you cannot reach the bottom of is a list that hides the people who have heard nothing');
+
+check('the search looks at the whole list, not the page on screen', (() => {
+  // Somebody deliberately far down the queue.
+  const deep = apiAdminWaitlist({ page: wlPage.pages, pageSize: 25 }).rows.pop();
+  const found = apiAdminWaitlist({ q: deep.enrollmentNo });
+  return found.rows.length === 1 && found.rows[0].appId === deep.appId;
+})(), 'a filter over the visible page answers no to every question worth asking it');
+
+check('the old call shape still returns the first rows', (() => {
+  const legacy = apiAdminWaitlist(20);
+  return legacy.rows.length === 20 && legacy.page === 1;
+})());
 
 section('Preview does not mutate state');
 const bedsBefore = JSON.stringify(Db.readAll('Beds'));

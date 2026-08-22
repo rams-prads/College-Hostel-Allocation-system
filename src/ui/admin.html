@@ -26,6 +26,7 @@
     overview:    'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
     allocation:  'M4 20V10M10 20V4M16 20v-7M22 20H2',
     occupancy:   'M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5',
+    waitlist:    'M12 6v6l4 2M12 3a9 9 0 100 18 9 9 0 000-18z',
     verification:'M9 12l2 2 4-4M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z',
     students:    'M12 3l9 5-9 5-9-5zM5 11v5c0 1 3 3 7 3s7-2 7-3v-5',
     requests:    'M4 5h16v12H8l-4 3z',
@@ -40,6 +41,9 @@
       title: 'Allocation', blurb: 'Run the allocation, and how fair the last one was.' },
     { id: 'occupancy',    label: 'Occupancy',
       title: 'Occupancy and vacancies', blurb: 'Where the beds are, and which are free.' },
+    { id: 'waitlist',     label: 'Waiting list',
+      title: 'Waiting list',
+      blurb: 'Everyone who applied and has no seat, in the order they would be offered one.' },
     { id: 'verification', label: 'Verification',
       title: 'Verification', blurb: 'Documents that disagree with what was declared. ' +
                                     'Ordered by risk, not by arrival.' },
@@ -57,6 +61,7 @@
   /** Counts that belong on the rail, so an officer sees the work without hunting. */
   function tabCount(id, d) {
     if (id === 'verification') return Number(d && d.docQueue) || 0;
+    if (id === 'waitlist') return Number(d && d.counts && d.counts.waitlisted) || 0;
     return 0;
   }
 
@@ -156,6 +161,8 @@
              (m ? quotaCard(d.latestRun.metrics) : '');
     } else if (TAB === 'occupancy') {
       body = occupancyCard(d);
+    } else if (TAB === 'waitlist') {
+      body = '<div id="wlCard"></div>';
     } else if (TAB === 'verification') {
       body = '<div id="scanCard"></div><div id="queueCard"></div><div id="idCard"></div>';
     } else if (TAB === 'students') {
@@ -176,6 +183,7 @@
       '</p></div>' + body;
 
     if (TAB === 'overview')     { loadLedgerBadge(); }
+    if (TAB === 'waitlist')     { loadWaitlist(); }
     if (TAB === 'verification') { loadScans(); loadDocQueue(); loadIdentity(); }
     if (TAB === 'requests')     { loadGrievances(); loadSwaps(); }
     if (TAB === 'policy')       { loadSimulator(); }
@@ -931,6 +939,118 @@
       load({ kind: 'good', text: 'Policy committed and the allocation re-run against it.' });
     }).withFailureHandler(function (e) { done('err', e.message); })
       .apiAdminCommitSimulation(changes, null);
+  }
+
+  /* ========================================================== waiting list */
+
+  // Which page is open and what is being searched for, kept out here so a
+  // redraw does not throw an officer back to page one of a list they were
+  // eighteen pages into.
+  var WL = { page: 1, q: '' };
+
+  function loadWaitlist() {
+    if (!el('wlCard')) return;
+    el('wlCard').innerHTML = card('Waiting list', loadingState('Reading the queue'));
+    srv('wlCard').withSuccessHandler(paintWaitlist)
+      .apiAdminWaitlist({ page: WL.page, pageSize: 25, q: WL.q });
+  }
+
+  function wlGo(page) {
+    WL.page = Math.max(1, page);
+    loadWaitlist();
+  }
+
+  function wlSearch() {
+    WL.q = (el('wlQ') || {}).value || '';
+    WL.page = 1;
+    loadWaitlist();
+  }
+
+  function wlClear() {
+    WL.q = '';
+    WL.page = 1;
+    loadWaitlist();
+  }
+
+  function paintWaitlist(d) {
+    if (!d || !d.rows) {
+      el('wlCard').innerHTML = card('Waiting list',
+        banner('warn', 'The waiting list could not be read. Nothing else on this page ' +
+                       'is affected.'));
+      return;
+    }
+    WL.page = d.page;
+
+    var search =
+      '<div class="btn-row" style="margin:0 0 14px">' +
+      '<input type="text" id="wlQ" value="' + esc(d.q || '') + '" ' +
+      'placeholder="Find a name, enrolment number or application id" ' +
+      'style="flex:1;min-width:230px" onkeydown="if(event.key===&quot;Enter&quot;)wlSearch()">' +
+      '<button class="btn" onclick="wlSearch()">Find</button>' +
+      (d.q ? '<button class="btn ghost" onclick="wlClear()">Show everyone</button>' : '') +
+      '</div>';
+
+    if (!d.total) {
+      el('wlCard').innerHTML = card('Waiting list',
+        '<p class="muted small" style="margin:0">Nobody is on the waiting list. It is ' +
+        'built when an allocation is committed.</p>');
+      return;
+    }
+    if (!d.matched) {
+      el('wlCard').innerHTML = card('Waiting list', search +
+        '<p class="muted small" style="margin:0">Nothing on the waiting list matches ' +
+        '&ldquo;' + esc(d.q) + '&rdquo;. ' + esc(d.total) + ' students are waiting.</p>');
+      return;
+    }
+
+    var rows = d.rows.map(function (w) {
+      return '<tr>' +
+        '<td class="num"><strong>' + esc(w.position) + '</strong></td>' +
+        '<td><div>' + esc(w.name) + '</div>' +
+          '<div class="small muted">' + esc(w.enrollmentNo) + '</div></td>' +
+        '<td>' + esc(w.programme) + (w.year ? ' &middot; year ' + esc(w.year) : '') + '</td>' +
+        // Not label('gender') - that map is written for HOSTELS, and calling a
+        // student "Boys" in a table of people reads as a mistake.
+        '<td>' + esc(label('campus', w.campus)) + ' &middot; ' +
+          esc({ M: 'Male', F: 'Female', O: 'Other' }[w.gender] || w.gender) + '</td>' +
+        '<td>' + esc(label('tier', w.tier, '—')) +
+          '<div class="small muted">' + esc(label('category', w.category)) + '</div></td>' +
+        '<td class="num">' + esc(Number(w.rankedOn).toFixed(2)) +
+          '<span class="small muted"> ' + esc(w.rankedOnUnit) + '</span></td>' +
+        '<td class="num">' + esc(w.etaPercent) + '%</td>' +
+        '<td>' + esc(w.topChoice) + '</td>' +
+        '<td><button class="btn ghost sm" onclick="goTab(&quot;students&quot;);' +
+          'viewStudent(&quot;' + esc(w.appId) + '&quot;)">Open</button></td>' +
+      '</tr>';
+    }).join('');
+
+    var from = (d.page - 1) * d.pageSize + 1;
+    var to = from + d.rows.length - 1;
+
+    var pager =
+      '<div class="btn-row" style="margin:15px 0 0;align-items:center">' +
+      '<button class="btn ghost sm" ' + (d.page <= 1 ? 'disabled' : '') +
+        ' onclick="wlGo(' + (d.page - 1) + ')">&larr; Previous</button>' +
+      '<button class="btn ghost sm" ' + (d.page >= d.pages ? 'disabled' : '') +
+        ' onclick="wlGo(' + (d.page + 1) + ')">Next &rarr;</button>' +
+      '<span class="small muted">Showing ' + esc(from) + '&ndash;' + esc(to) + ' of ' +
+        esc(d.matched) + (d.q ? ' matching' : '') +
+        ' &middot; page ' + esc(d.page) + ' of ' + esc(d.pages) + '</span>' +
+      '</div>';
+
+    el('wlCard').innerHTML = card('Waiting list',
+      '<p class="small muted" style="margin:0 0 14px">' + esc(d.total) + ' students are ' +
+      'waiting, in the order they would be offered a seat if one is given up. The order is ' +
+      'the priority group first and the measure inside it second &mdash; marks for the groups ' +
+      'ranked on marks, distance for the Delhi category &mdash; which is why a lower figure ' +
+      'can sit above a higher one.</p>' +
+      search +
+      '<div class="scroll-x"><table class="grid"><thead><tr>' +
+        '<th class="num">#</th><th>Student</th><th>Programme</th><th>Campus</th>' +
+        '<th>Priority group</th><th class="num">Ranked on</th><th class="num">Chance</th>' +
+        '<th>First choice</th><th></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      pager);
   }
 
   /* ======================================================== grievances */
