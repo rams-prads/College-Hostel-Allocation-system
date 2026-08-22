@@ -529,4 +529,49 @@ check('row title and detail are block-level',
   /\.rows\s+\.n\s*,[^{]*\{[^}]*display:\s*block/.test(css),
   'inline spans would render "Hostel ADwarka Campus" with no break');
 
+
+section('A spinner never outlives the call that put it there');
+
+// "Opening…" sat in the lookup panel indefinitely: whatever went wrong was
+// reported in the page-level strip at the top of the dashboard, which the
+// reader had already scrolled past, while the spinner itself was never
+// replaced. A call that owns an element must fail into that element.
+(function () {
+  const target = Db.readAll('Applications')[0];
+  const rr = renderPage('admin.html', 'admin@ipu.ac.in',
+    'goTab("students"); viewStudent("' + target.appId + '");');
+  check('opening a student renders', !rr.threw, rr.threw || '');
+  check('the spinner is gone afterwards', rr.screen.indexOf('Opening') < 0);
+  check('no unhandled errors', rr.errors.length === 0, rr.errors.join('; '));
+})();
+
+check('a failing call replaces the spinner it owns', (() => {
+  const nodes = freshDom();
+  global.Session = { getActiveUser: () => ({ getEmail: () => '' }) };
+  global.google = makeRunner([]);
+  (0, eval)(CHROME);
+  document.getElementById('root').innerHTML = '<div id="here">x</div>';
+  document.getElementById('here').innerHTML = loadingState('Opening');
+
+  srv('here').withSuccessHandler(function () {}).apiRequestSignInCode('not-an-email');
+
+  const here = nodes.here.innerHTML || '';
+  return here.indexOf('Opening') < 0 && here.indexOf('banner err') > 0;
+})(), 'reporting it anywhere else leaves the user watching a spinner forever');
+
+check('a throwing handler also replaces the spinner it owns', (() => {
+  const nodes = freshDom();
+  global.Session = { getActiveUser: () => ({ getEmail: () => studentEmail }) };
+  global.google = makeRunner([]);
+  (0, eval)(CHROME);
+  document.getElementById('root').innerHTML = '<div id="here2">x</div>';
+  document.getElementById('here2').innerHTML = loadingState('Opening');
+
+  srv('here2').withSuccessHandler(function () { throw new Error('render blew up'); })
+              .apiWhoAmI();
+
+  const here = nodes.here2.innerHTML || '';
+  return here.indexOf('Opening') < 0 && here.indexOf('render blew up') > 0;
+})());
+
 process.exit(summarise());

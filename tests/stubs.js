@@ -152,6 +152,11 @@ global.Db = {
       return o;
     });
   },
+  // Same contract as the real one; the store is already in memory, so the
+  // targeted path and the full read are the same thing here.
+  rowsWhere(tab, colName, value) {
+    return this.readAll(tab).filter(r => r[colName] === value);
+  },
   where(tab, filter) {
     const keys = Object.keys(filter);
     return this.readAll(tab).filter(r => keys.every(k => r[k] === filter[k]));

@@ -270,7 +270,7 @@
         'Conflicts and unreadable scans are left alone. Each one is recorded as a machine ' +
         'decision, not a person\u2019s.')) return;
     el('scanMsg').innerHTML = loadingState('Clearing');
-    srv().withSuccessHandler(function (r) {
+    srv('scanMsg').withSuccessHandler(function (r) {
         load({ kind: 'good',
                text: 'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
                      ' across ' + r.applications + ' application' +
@@ -360,11 +360,7 @@
       }
     }
     el('queueCard').innerHTML = loadingState('Recording the decision');
-    srv().withSuccessHandler(function () { loadDocQueue(); loadScans(); })
-      .withFailureHandler(function (e) {
-        el('msg').innerHTML = banner('err', e.message);
-        loadDocQueue();
-      })
+    srv('queueCard').withSuccessHandler(function () { loadDocQueue(); loadScans(); })
       .apiAdminDecideDocument(docId, approve, note);
   }
 
@@ -439,12 +435,8 @@
     }
 
     el('idCard').innerHTML = loadingState('Recording the decision');
-    srv()
+    srv('idCard')
       .withSuccessHandler(function () { loadIdentity(); })
-      .withFailureHandler(function (e) {
-        el('msg').innerHTML = banner('err', e.message);
-        loadIdentity();
-      })
       .apiAdminDecideIdentity(studentId, approve, note);
   }
 
@@ -485,7 +477,7 @@
 
   function showLedger() {
     el('ledgerDetail').innerHTML = loadingState('Reading the ledger');
-    srv().withSuccessHandler(function (r) {
+    srv('ledgerDetail').withSuccessHandler(function (r) {
       var rows = r.recent.map(function (e) {
         return '<tr><td>' + esc(e.ts) + '</td>' +
           '<td>' + esc(String(e.action).replace(/_/g, ' ').toLowerCase()) + '</td>' +
@@ -649,14 +641,19 @@
 
   function viewStudent(appId) {
     el('studentView').innerHTML = loadingState('Opening');
-    srv().withSuccessHandler(paintStudentView)
-      .withFailureHandler(function (e) {
-        el('studentView').innerHTML = banner('err', e.message);
-      }).apiGetStudentView(appId);
+    // The owner id matters here: whatever goes wrong has to replace this
+    // spinner, not appear in the strip at the top of a page the reader has
+    // already scrolled past.
+    srv('studentView').withSuccessHandler(paintStudentView)
+      .apiGetStudentView(appId);
   }
 
   function paintStudentView(v) {
-    if (!v.student) { el('studentView').innerHTML = ''; return; }
+    if (!v || !v.student) {
+      el('studentView').innerHTML = '<div class="divider"></div>' +
+        banner('warn', 'That application has no student record attached to it.');
+      return;
+    }
     var outcome;
     if (v.allocation) {
       outcome = '<div class="status good"><div class="sic">&#10003;</div><div>' +
@@ -679,7 +676,7 @@
     }
 
     var why = '';
-    if (v.explanation) {
+    if (v.explanation && v.explanation.groups) {
       why = '<div class="grp-title" style="margin:16px 0 8px">What this student is shown</div>' +
         v.explanation.groups.map(function (g) {
           return '<div class="grp"><div class="grp-title">' + esc(g.title) + '</div>' +

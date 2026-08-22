@@ -43,8 +43,30 @@ function showFailure(message, detail) {
 
 var CALL_TIMEOUT_MS = 25000;
 
-function srv() {
+/**
+ * Start a server call.
+ *
+ * @param {string=} ownerId id of the element this call is drawing into.
+ *
+ * Pass it whenever the call replaced something with a spinner. A failure then
+ * lands ON the spinner rather than in the page-level message strip, which may be
+ * far above the fold - "Opening…" sat there forever while the explanation of why
+ * was written somewhere the user was not looking.
+ */
+function srv(ownerId) {
   var ok = null, fail = null;
+
+  function report(message, detail) {
+    var owner = ownerId ? el(ownerId) : null;
+    if (owner) {
+      owner.innerHTML = banner('err', message) +
+        (detail ? '<details class="tech"><summary>Technical detail</summary>' +
+                  '<pre class="small" style="white-space:pre-wrap;margin:0">' + esc(detail) +
+                  '</pre></details>' : '');
+      return;
+    }
+    showFailure(message, detail);
+  }
 
   // The handlers must return the PROXY, not the object behind it. Returning the
   // target breaks the chain at the second link: .withFailureHandler() would hand
@@ -66,10 +88,9 @@ function srv() {
         var timer = setTimeout(function () {
           if (settled) return;
           settled = true;
-          showFailure('This is taking longer than it should. The server has not ' +
-                      'answered in 25 seconds. Reload the page; if it keeps happening, ' +
-                      'the deployment may be serving an older version of the code.',
-                      name);
+          report('This is taking longer than it should. The server has not answered in ' +
+                 '25 seconds. Try again; if it keeps happening, the deployment may be ' +
+                 'serving an older version of the code.', name);
         }, CALL_TIMEOUT_MS);
 
         function done() { settled = true; clearTimeout(timer); }
@@ -87,9 +108,9 @@ function srv() {
           try {
             ok(result);
           } catch (e) {
-            showFailure('The page could not display what the server sent back. ' +
-                        'This is a fault in the portal, not in anything you did.',
-                        name + ': ' + (e && e.message ? e.message : String(e)));
+            report('The page could not display what the server sent back. ' +
+                   'This is a fault in the portal, not in anything you did.',
+                   name + ': ' + (e && e.message ? e.message : String(e)));
           }
         });
 
@@ -98,7 +119,7 @@ function srv() {
           if (fail) {
             try { fail(e); return; } catch (inner) { /* fall through to the banner */ }
           }
-          showFailure(e && e.message ? e.message : 'The server returned an error.', name);
+          report(e && e.message ? e.message : 'The server returned an error.', name);
         });
 
         return r.apiCall(SESSION.token, name, args);

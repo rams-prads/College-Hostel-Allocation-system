@@ -95,6 +95,66 @@ var Db = (function () {
     return out;
   }
 
+  /**
+   * Rows where one column equals one value, WITHOUT reading the whole tab.
+   *
+   * readAll is right for the allocator, which needs every row anyway and is far
+   * better off paying for one batched read than for hundreds of small ones. It
+   * is exactly wrong for opening a single student: fetching one applicant's five
+   * ranked preferences pulled all four thousand rows of the Preferences tab, and
+   * ten such reads is why the admin lookup sat on a spinner for several seconds.
+   *
+   * Uses a text finder scoped to the one column, so the search happens inside
+   * the spreadsheet and only the matching rows come back. If the tab is already
+   * in the per-execution cache the filter is free and that path is taken instead,
+   * which means this is never slower than readAll.
+   */
+  function rowsWhere(tab, colName, value) {
+    if (_tableCache[tab]) {
+      return _tableCache[tab].filter(function (r) { return r[colName] === value; });
+    }
+
+    var cols = SCHEMA[tab].cols;
+    var sh = sheet(tab);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return [];
+
+    var col = schemaColIndex(tab, colName);
+    var matches;
+    try {
+      matches = sh.getRange(2, col, lastRow - 1, 1)
+        .createTextFinder(String(value))
+        .matchEntireCell(true)
+        .matchCase(true)
+        .findAll();
+    } catch (e) {
+      // No text finder available (older runtime, or a stubbed sheet). Falling
+      // back to the whole tab is slow but correct, which is the right way round.
+      return where(tab, (function () { var f = {}; f[colName] = value; return f; })());
+    }
+
+    if (!matches || !matches.length) return [];
+
+    // A handful of single-row reads beats one read of everything, but only while
+    // the handful stays small. Past that the batched read wins again.
+    if (matches.length > 40) {
+      return where(tab, (function () { var f = {}; f[colName] = value; return f; })());
+    }
+
+    return matches.map(function (m) {
+      var rowNum = m.getRow();
+      var values = sh.getRange(rowNum, 1, 1, cols.length).getValues()[0];
+      var obj = { _row: rowNum };
+      for (var c = 0; c < cols.length; c++) obj[cols[c].name] = decode(values[c], cols[c]);
+      return obj;
+    }).filter(function (r) {
+      // The finder works on the cell as text; the column may be typed. Comparing
+      // the decoded value is what makes this identical to where(), rather than
+      // merely usually identical.
+      return String(r[colName]) === String(value);
+    });
+  }
+
   /** Rows matching a {col: value} filter. */
   function where(tab, filter) {
     var keys = Object.keys(filter);
@@ -279,6 +339,7 @@ var Db = (function () {
     sheet: sheet,
     readAll: readAll,
     where: where,
+    rowsWhere: rowsWhere,
     findOne: findOne,
     byId: byId,
     indexBy: indexBy,

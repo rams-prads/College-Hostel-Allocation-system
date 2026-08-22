@@ -125,7 +125,10 @@ function apiGetStudentView(asAppId, demoToken) {
     eligible: app.eligible, docStatus: app.docStatus,
     needsAccessible: app.needsAccessible, meritScore: app.meritScore
   };
-  view.preferences = Db.where('Preferences', { appId: app.appId })
+  // Targeted reads. Auth.session() has already pulled Students and Applications,
+  // so those cost nothing more; Preferences, Allocations and Waitlist had not
+  // been touched and were being read in full for a handful of rows each.
+  view.preferences = Db.rowsWhere('Preferences', 'appId', app.appId)
     .sort(function (a, b) { return a.rank - b.rank; })
     .map(function (p) {
       var h = Db.byId('Hostels', p.hostelId);
@@ -144,7 +147,7 @@ function apiGetStudentView(asAppId, demoToken) {
     view.setupWarning = 'Identity verification is not available yet: ' + e.message;
   }
 
-  var alloc = Db.findOne('Allocations', { appId: app.appId });
+  var alloc = Db.rowsWhere('Allocations', 'appId', app.appId)[0] || null;
   if (alloc && alloc.status === 'ACTIVE') {
     var bed = Db.byId('Beds', alloc.bedId);
     var room = bed ? Db.byId('Rooms', bed.roomId) : null;
@@ -168,7 +171,7 @@ function apiGetStudentView(asAppId, demoToken) {
     view.explanation = buildExplanation_(alloc.reasonCodes, alloc);
   }
 
-  var wl = Db.findOne('Waitlist', { appId: app.appId });
+  var wl = Db.rowsWhere('Waitlist', 'appId', app.appId)[0] || null;
   if (wl && !view.allocation) {
     view.waitlist = {
       position: wl.position,

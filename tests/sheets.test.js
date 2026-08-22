@@ -94,6 +94,22 @@ check('numeric columns keep a numeric format', (() => {
   }));
 })(), 'formatting a number as text would break sorting and arithmetic in the sheet');
 
+section('Reading one row without reading the tab');
+// rowsWhere is a second way to read the same data, taken whenever the tab is
+// not already loaded. Two paths to one answer is a place for them to drift, so
+// the contract is that they cannot.
+check('rowsWhere returns exactly what where returns', (() => {
+  seedConfig_(); seedPolicy_(); Ledger.genesis();
+  return ['Applications', 'Preferences', 'Students'].every(tab => {
+    const col = tab === 'Students' ? 'studentId' : 'appId';
+    const sample = Db.readAll(tab)[3];
+    if (!sample) return true;
+    const filter = {}; filter[col] = sample[col];
+    return JSON.stringify(Db.where(tab, filter)) ===
+           JSON.stringify(Db.rowsWhere(tab, col, sample[col]));
+  });
+})(), 'the targeted read must be indistinguishable from the full one');
+
 // ============================================================ the damage
 section('What the default format would have done');
 
