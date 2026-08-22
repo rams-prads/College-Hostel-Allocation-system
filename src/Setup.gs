@@ -53,10 +53,8 @@ function setupEverything() {
   out.push(newPol && newPol.length ? 'Policy rules added: ' + newPol.join(', ')
                                    : 'No new policy rules needed.');
 
-  // Text columns must be plain text or the spreadsheet silently rewrites their
-  // contents. See repairFormatting().
-  repairFormatting();
-  out.push('Text columns set to plain text.');
+  // repairValidation above already set every column's format and rule from the
+  // schema; there is no separate formatting pass to run.
 
   var led = repairLedger();
   if (led.repaired) out.push('Audit ledger: ' + led.message);
@@ -224,19 +222,69 @@ function migrateSchema() {
 }
 
 /**
- * Re-apply the schema's data validation and formatting to sheets that already
- * exist.
+ * Bring an existing sheet's per-column rules back in line with the schema.
  *
- * A sheet carries the dropdown it was BUILT with. Adding a value to an ENUM in
- * the schema does nothing for an installation created before it: the old list is
- * still on the sheet, still set to reject anything outside it, and the next write
- * of the new value throws - which is what "category must be one of: reservation,
- * eligibility, weight, capacity, roommate" was.
+ * A sheet carries the rules it was BUILT with, and there are two ways for those
+ * to fall out of step - both of which have now happened:
  *
- * Worse, the throw surfaces at the next read rather than at the write, because
- * Apps Script defers the flush, so the stack points at whatever happened to run
- * afterwards. Refreshing the rules is the fix; running it before anything writes
- * is what makes the fix land.
+ *   1. A value is added to an ENUM. The old dropdown still refuses it, and the
+ *      write fails with "category must be one of: ..." naming the old list.
+ *   2. A column STOPS being an ENUM. Nothing adds a rule, so nothing thinks to
+ *      remove the old one either, and a column that is now free text still
+ *      rejects everything outside a list that no longer exists. That is what
+ *      "programme must be one of: BTech, MTech, MBA, LLB, MCA, BBA, BCA" was,
+ *      months after those programmes stopped being the ones offered.
+ *
+ * So this sets the rule a column should have AND clears the rule it should not,
+ * from the schema, every time. Applying only the first half is what let the
+ * second fault survive the fix for the first.
+ */
+function refreshColumnRules_(sh, tab) {
+  var rows;
+  try {
+    rows = Math.max(sh.getMaxRows() - 1, 1);
+  } catch (e) {
+    // Not a real sheet (the offline harness). There are no rules to refresh.
+    return 0;
+  }
+  var touched = 0;
+
+  SCHEMA[tab].cols.forEach(function (col, i) {
+    var range = sh.getRange(2, i + 1, rows, 1);
+    try {
+      if (col.type === T.ENUM && col.values) {
+        range.setDataValidation(
+          SpreadsheetApp.newDataValidation()
+            .requireValueInList(col.values, true)
+            .setAllowInvalid(false)
+            .setHelpText(col.name + ' must be one of: ' + col.values.join(', '))
+            .build()
+        );
+      } else if (col.type === T.BOOL) {
+        range.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+      } else {
+        // No rule belongs here. Clearing is the half that was missing.
+        range.setDataValidation(null);
+      }
+
+      if (col.type === T.DATE)      range.setNumberFormat('yyyy-mm-dd hh:mm');
+      else if (col.type === T.NUM)  range.setNumberFormat('0.00##');
+      else if (col.type === T.INT)  range.setNumberFormat('0');
+      else if (col.type === T.STR || col.type === T.JSON) range.setNumberFormat('@');
+
+      touched++;
+    } catch (e) { /* one column must not stop the rest */ }
+  });
+
+  return touched;
+}
+
+/**
+ * Re-apply the schema's validation and formatting to every sheet that exists.
+ *
+ * Run before anything writes: a sheet that still refuses a value the schema now
+ * allows will reject the write, and the error it produces names the column
+ * rather than the cause.
  */
 function repairValidation() {
   var ss = Db.ss();
@@ -245,73 +293,13 @@ function repairValidation() {
   SHEET_ORDER.forEach(function (tab) {
     var sh = ss.getSheetByName(tab);
     if (!sh) return;
-    var rows = Math.max(sh.getMaxRows() - 1, 1);
-    var touched = 0;
-
-    SCHEMA[tab].cols.forEach(function (col, i) {
-      if (col.type !== T.ENUM || !col.values) return;
-      try {
-        sh.getRange(2, i + 1, rows, 1).setDataValidation(
-          SpreadsheetApp.newDataValidation()
-            .requireValueInList(col.values, true)
-            .setAllowInvalid(false)
-            .setHelpText(col.name + ' must be one of: ' + col.values.join(', '))
-            .build()
-        );
-        touched++;
-      } catch (e) { /* one column must not stop the rest */ }
-    });
-
-    if (touched) refreshed.push(tab + '(' + touched + ')');
+    var n = refreshColumnRules_(sh, tab);
+    if (n) refreshed.push(tab + '(' + n + ')');
   });
 
   Db.invalidate();
   return { refreshed: refreshed,
-           message: 'Dropdowns refreshed: ' + (refreshed.join(', ') || 'none') };
-}
-
-/**
- * Force every text column in every sheet to plain-text format.
- *
- * Formatting is not cosmetic here: it decides whether a string survives a round
- * trip. Safe to run at any time, and run as part of setupEverything() so a sheet
- * built before this was understood is corrected without anyone having to know.
- *
- * It cannot bring back a leading zero already lost - that digit is gone from the
- * cell - but it stops the next write from losing another.
- */
-function repairFormatting() {
-  var ss = Db.ss();
-  var fixed = [];
-
-  var skipped = [];
-
-  SHEET_ORDER.forEach(function (tab) {
-    // One sheet that cannot be reformatted must not abort the rest, and must not
-    // abort a ledger repair that called this on its way through.
-    try {
-      var sh = ss.getSheetByName(tab);
-      if (!sh) return;
-      var cols = SCHEMA[tab].cols;
-      var rows = Math.max(sh.getMaxRows() - 1, 1);
-      var n = 0;
-      cols.forEach(function (col, i) {
-        if (col.type !== T.STR && col.type !== T.JSON) return;
-        sh.getRange(2, i + 1, rows, 1).setNumberFormat('@');
-        n++;
-      });
-      if (n) fixed.push(tab + '(' + n + ')');
-    } catch (e) {
-      skipped.push(tab);
-    }
-  });
-
-  Db.invalidate();
-  return {
-    fixed: fixed, skipped: skipped,
-    message: 'Text columns set to plain text: ' + (fixed.join(', ') || 'none') +
-             (skipped.length ? '. Could not reformat: ' + skipped.join(', ') : '')
-  };
+           message: 'Column rules refreshed: ' + (refreshed.join(', ') || 'none') };
 }
 
 /**
@@ -319,13 +307,14 @@ function repairFormatting() {
  *
  * This is a RESTORATION, not a rewrite, and the difference matters for a record
  * whose whole purpose is to be tamper-evident. The genesis row's previous-hash
- * is a known constant - 64 zeros - which Sheets stored as the number 0. Its own
- * hash was computed over the correct value before the write, so putting the
- * constant back must reproduce the hash that is already stored.
+ * is a known constant - 64 zeros - which a sheet on the default number format
+ * stored as the number 0. Its own hash was computed over the correct value
+ * before the write, so putting the constant back must reproduce the hash that
+ * is already on the row.
  *
- * That check is the safety: if the recomputed hash does not match what is on the
- * row, the row was altered by something other than this formatting fault and the
- * repair is refused. Nothing else in the chain is touched, ever.
+ * That check is the safety: if the recomputed hash does not match, the row was
+ * altered by something other than this formatting fault and the repair is
+ * refused. Nothing else in the chain is touched, ever.
  */
 function repairLedger() {
   var v = Ledger.verify();
@@ -357,7 +346,7 @@ function repairLedger() {
     };
   }
 
-  repairFormatting();
+  repairValidation();
   Db.update('AuditLog', first.seq, { prevHash: zeros });
   Db.invalidate('AuditLog');
 
@@ -408,7 +397,12 @@ function ensureSeedTabs_(tabs) {
     tabs.forEach(function (tab) {
       var sh = ss.getSheetByName(tab);
       if (!sh) { rebuildTab_(tab); rebuilt.push(tab); return; }
-      if (headersDrifted_(sh, tab)) { rebuildTab_(tab); rebuilt.push(tab); }
+      if (headersDrifted_(sh, tab)) { rebuildTab_(tab); rebuilt.push(tab); return; }
+
+      // Headers can match while the per-column rules do not: changing a column
+      // from a dropdown to free text leaves the old dropdown in place, and it
+      // goes on refusing values the schema now allows.
+      refreshColumnRules_(sh, tab);
     });
   } catch (e) {
     // No real spreadsheet (the offline harness). Nothing to align.
@@ -454,47 +448,11 @@ function buildSheet_(ss, tab, position) {
   sh.getRange(1, 1).setNote(spec.desc + '\n\nPrimary key: ' + (spec.pk || '(none)'));
 
   // Per-column validation and formatting.
-  cols.forEach(function (col, i) {
-    var c = i + 1;
-    var body = sh.getRange(2, c, Math.max(sh.getMaxRows() - 1, 1), 1);
-
-    if (col.type === T.ENUM && col.values) {
-      body.setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInList(col.values, true)
-          .setAllowInvalid(false)
-          .setHelpText(col.name + ' must be one of: ' + col.values.join(', '))
-          .build()
-      );
-    } else if (col.type === T.BOOL) {
-      body.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
-    } else if (col.type === T.DATE) {
-      body.setNumberFormat('yyyy-mm-dd hh:mm');
-    } else if (col.type === T.NUM) {
-      body.setNumberFormat('0.00##');
-    } else if (col.type === T.INT) {
-      body.setNumberFormat('0');
-    } else {
-      // Plain text, and NOT optional.
-      //
-      // With the default "Automatic" format, Sheets reads a numeric-looking
-      // string as a number and the original is gone. The ledger's genesis row
-      // stores 64 zeros as its previous hash; that became the number 0, so the
-      // chain failed to verify at row 0 on every real deployment while every
-      // offline test passed, because the test store keeps JavaScript values
-      // verbatim. It also silently ate the leading zero from enrolment numbers
-      // (04101000126) and from an Aadhaar's last four digits (0124).
-      body.setNumberFormat('@');
-    }
-
-    sh.setColumnWidth(c, columnWidth_(col));
-  });
-
-  // The ledger is machine-written only - make that visually obvious.
-  if (tab === 'AuditLog') {
-    sh.getRange(1, 1, 1, cols.length).setBackground('#7f1d1d');
-    sh.getRange(1, 1).setNote(spec.desc + '\n\nDO NOT EDIT BY HAND. Any manual change breaks the hash chain and will be detected by Ledger.verify().');
-  }
+  // Validation and number format come from one place, shared with the repair
+  // path. Two implementations of "what rule does this column have" is how a
+  // sheet ends up carrying a rule the schema stopped asking for.
+  refreshColumnRules_(sh, tab);
+  cols.forEach(function (col, i) { sh.setColumnWidth(i + 1, columnWidth_(col)); });
 
   return sh;
 }

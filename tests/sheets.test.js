@@ -26,6 +26,7 @@ function asStoredBySheets(value, numberFormat) {
 /** Just enough SpreadsheetApp for buildSheet_ to run and be observed. */
 function fakeSpreadsheet() {
   const formats = {};       // tab -> { columnIndex: format }
+  const rules = {};         // tab -> { columnIndex: validation or null }
   const sheets = {};
 
   function range(tab, col) {
@@ -37,7 +38,10 @@ function fakeSpreadsheet() {
       setFontColor() { return this; },
       setVerticalAlignment() { return this; },
       setNote() { return this; },
-      setDataValidation() { return this; },
+      // Recorded, including null: removing a rule is as much a decision as
+      // setting one, and the fault this exists to catch is a rule nobody
+      // removed.
+      setDataValidation(v) { rules[tab][col] = v; return this; },
       setNumberFormat(f) { formats[tab][col] = f; return this; }
     };
   }
@@ -45,6 +49,7 @@ function fakeSpreadsheet() {
   const ss = {
     insertSheet(name) {
       formats[name] = {};
+      rules[name] = {};
       sheets[name] = {
         getRange: (r, c) => range(name, c),
         setFrozenRows() {}, setRowHeight() {}, setColumnWidth() {},
@@ -56,7 +61,7 @@ function fakeSpreadsheet() {
     getSheets: () => Object.keys(sheets).map(k => sheets[k]),
     deleteSheet() {}
   };
-  return { ss, formats };
+  return { ss, formats, rules };
 }
 
 global.SpreadsheetApp = Object.assign(global.SpreadsheetApp || {}, {
@@ -72,7 +77,7 @@ global.SpreadsheetApp = Object.assign(global.SpreadsheetApp || {}, {
 // ============================================================ formatting
 section('Every text column is stored as text');
 
-const { ss, formats } = fakeSpreadsheet();
+const { ss, formats, rules } = fakeSpreadsheet();
 SHEET_ORDER.forEach((tab, i) => buildSheet_(ss, tab, i));
 
 check('every tab was built', Object.keys(formats).length === SHEET_ORDER.length);
@@ -109,6 +114,46 @@ check('rowsWhere returns exactly what where returns', (() => {
            JSON.stringify(Db.rowsWhere(tab, col, sample[col]));
   });
 })(), 'the targeted read must be indistinguishable from the full one');
+
+section('A column carries the rule the schema asks for, and no other');
+
+// Two ways a sheet falls out of step, and only the first was ever handled:
+//   adding a value to an ENUM leaves the old dropdown refusing it;
+//   a column that STOPS being an ENUM keeps a dropdown nobody removes.
+// The second is what "programme must be one of: BTech, MTech, MBA, LLB, MCA,
+// BBA, BCA" was - a list of programmes the university no longer offers, still
+// being enforced by the sheet months after the schema dropped it.
+const staleRules = [];
+SHEET_ORDER.forEach(tab => {
+  SCHEMA[tab].cols.forEach((col, i) => {
+    const has = rules[tab][i + 1];
+    const shouldHave = (col.type === T.ENUM && col.values) || col.type === T.BOOL;
+    if (shouldHave && !has) staleRules.push(tab + '.' + col.name + ' (missing)');
+    if (!shouldHave && has) staleRules.push(tab + '.' + col.name + ' (should have none)');
+  });
+});
+check('no column keeps a rule it should not have', staleRules.length === 0,
+  staleRules.slice(0, 5).join(', '));
+
+check('programme in particular is free text now', (() => {
+  const i = SCHEMA.Students.cols.findIndex(c => c.name === 'programme');
+  return SCHEMA.Students.cols[i].type === T.STR && !rules.Students[i + 1];
+})(), 'the course list lives in Catalogue.gs, and a dropdown would be a second copy');
+
+check('an enum column still has its dropdown', (() => {
+  const i = SCHEMA.Students.cols.findIndex(c => c.name === 'category');
+  return !!rules.Students[i + 1];
+})(), 'clearing the ones that should go must not clear the ones that should stay');
+
+check('the repair path and the build path use the same helper', (() => {
+  const src = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'src', 'Setup.gs'), 'utf8');
+  // buildSheet_ must not carry its own copy of the rules.
+  const build = src.slice(src.indexOf('function buildSheet_'),
+                          src.indexOf('function columnWidth_'));
+  return /refreshColumnRules_\(sh, tab\)/.test(build) &&
+         !/requireValueInList/.test(build);
+})(), 'two implementations of "what rule does this column have" is how they diverge');
 
 // ============================================================ the damage
 section('What the default format would have done');
