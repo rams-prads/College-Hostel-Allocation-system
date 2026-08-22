@@ -248,11 +248,22 @@ var Db = (function () {
     return s;
   }
 
-  /** Config value by key, with a fallback. */
+  /**
+   * Config value by key, with a fallback.
+   *
+   * An EMPTY cell falls back too. Returning '' for a key someone blanked meant
+   * Number('') or Number(undefined) reached arithmetic and produced NaN, and a
+   * NaN date is written to the sheet as an invalid value that nothing downstream
+   * can read back.
+   */
   function cfg(key, fallback) {
     var rows = readAll('Config');
     for (var i = 0; i < rows.length; i++) {
-      if (rows[i].key === key) return rows[i].value;
+      if (rows[i].key === key) {
+        var v = rows[i].value;
+        if (v === '' || v === null || v === undefined) return fallback;
+        return v;
+      }
     }
     return fallback;
   }

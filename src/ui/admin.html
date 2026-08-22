@@ -573,6 +573,12 @@
   }
 
   function paintGrievances(d) {
+    if (!d || !d.stats) {
+      el('grievCard').innerHTML = card('Grievances',
+        banner('warn', 'The grievance inbox could not be loaded. Everything else on ' +
+                       'this page is unaffected.'));
+      return;
+    }
     var st = d.stats;
     if (!st.total) {
       el('grievCard').innerHTML = card('Grievances',
@@ -613,6 +619,7 @@
   }
 
   function paintSwaps(d) {
+    if (!d) { el('swapCard').innerHTML = ''; return; }
     if (!d.total) {
       el('swapCard').innerHTML = card('Room swaps',
         '<p class="muted small" style="margin:0">No swap requests yet.</p>');

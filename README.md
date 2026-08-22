@@ -74,6 +74,7 @@ node tests/phase7.test.js     # 77 checks: self-registration and first-year rank
 node tests/ui.test.js         # 89 checks: every page renders, links escape the iframe
 node tests/phase8.test.js     # 107 checks: identity verification and upload hardening
 node tests/phase9.test.js     # 59 checks: email-code sign-in, session tokens, dispatcher
+node tests/sheets.test.js     # 22 checks: spreadsheet round-trip, ledger repair
 node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
 ```
 

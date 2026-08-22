@@ -138,8 +138,14 @@ check('swapping the address is refused',
   'the signature covers the address, which is the whole point');
 check('extending the expiry is refused',
   SignIn.emailFromToken(parts[0] + '~' + (Number(parts[1]) + 8.64e7) + '~' + parts[2]) === '');
-check('altering the signature is refused',
-  SignIn.emailFromToken(parts[0] + '~' + parts[1] + '~' + parts[2].replace(/.$/, '0')) === '');
+check('altering the signature is refused', (() => {
+  // Must differ from what is there. Substituting a fixed digit was a coin flip:
+  // when the signature already ended in it, the test altered nothing and the
+  // failure was blamed on the code.
+  const last = parts[2].slice(-1);
+  const other = last === 'a' ? 'b' : 'a';
+  return SignIn.emailFromToken(parts[0] + '~' + parts[1] + '~' + parts[2].slice(0, -1) + other) === '';
+})());
 check('truncating the signature is refused',
   SignIn.emailFromToken(parts[0] + '~' + parts[1] + '~' + parts[2].slice(0, 8)) === '');
 check('an empty token is refused', SignIn.emailFromToken('') === '');

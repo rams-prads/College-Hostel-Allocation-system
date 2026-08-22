@@ -110,5 +110,16 @@ var Ledger = (function () {
     return { intact: true, length: rows.length, brokenAt: -1, reason: 'All ' + rows.length + ' entries verified' };
   }
 
-  return { append: append, verify: verify, genesis: genesis, sha256: sha256 };
+  /**
+   * The hash a stored row should carry, given a previous hash. Exposed so a
+   * repair can prove it is restoring a value rather than inventing one.
+   */
+  function hashOf(row, prevHash) {
+    var payloadJson = typeof row.payloadJson === 'string'
+      ? row.payloadJson : JSON.stringify(row.payloadJson);
+    return sha256(canonical(row.seq, isoTs(new Date(row.ts)), row.actor, row.action,
+                            payloadJson, prevHash));
+  }
+
+  return { append: append, verify: verify, genesis: genesis, sha256: sha256, hashOf: hashOf };
 })();

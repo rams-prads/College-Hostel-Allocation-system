@@ -51,7 +51,11 @@ var Grievance = (function () {
     var app = Db.byId('Applications', appId);
     if (!app) throw new Error('No such application.');
 
+    // A non-numeric or blank setting produced NaN here, and NaN days later
+    // becomes an Invalid Date - which is written to the sheet as a value nothing
+    // can read back, and which breaks the whole response when the inbox is read.
     var slaDays = Number(Db.cfg('GRIEVANCE_SLA_DAYS', 7));
+    if (!isFinite(slaDays) || slaDays <= 0) slaDays = 7;
     var ticketId = Db.nextId('GRV');
     var now = new Date();
 
@@ -438,9 +442,25 @@ var Grievance = (function () {
           text: g.text,
           headline: triageData ? triageData.headline : '',
           anomalies: triageData && triageData.anomalies ? triageData.anomalies : [],
-          createdAt: g.createdAt, slaDueAt: g.slaDueAt
+          // Formatted here rather than handed over as Date objects. Every other
+          // endpoint in the project returns dates as strings, and a Date that
+          // failed to parse serialises as null - which took the entire payload
+          // with it and left the admin dashboard with nothing to render.
+          createdAt: fmtWhen_(g.createdAt), slaDueAt: fmtWhen_(g.slaDueAt)
         };
       });
+  }
+
+  /** A date the client can display, or '' - never an unparseable object. */
+  function fmtWhen_(d) {
+    if (!d) return '';
+    var dt = (d instanceof Date) ? d : new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    try {
+      return Utilities.formatDate(dt, 'Asia/Kolkata', 'd MMM yyyy');
+    } catch (e) {
+      return '';
+    }
   }
 
   function stats() {

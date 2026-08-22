@@ -33,6 +33,15 @@ function setupEverything() {
                                 : 'All tabs already existed');
   var migrated = migrateSchema();
   if (migrated.added.length) out.push('Brought up to date: ' + migrated.added.join(' | '));
+
+  // Text columns must be plain text or the spreadsheet silently rewrites their
+  // contents. See repairFormatting().
+  repairFormatting();
+  out.push('Text columns set to plain text.');
+
+  var led = repairLedger();
+  if (led.repaired) out.push('Audit ledger: ' + led.message);
+  else if (!Ledger.verify().intact) out.push('AUDIT LEDGER: ' + led.message);
   if (migrated.unsafe.length) {
     out.push('COULD NOT MIGRATE: ' + migrated.unsafe.join(', ') +
              ' - run resetDatabase() if you do not need the data in them.');
@@ -195,6 +204,106 @@ function migrateSchema() {
   return { created: created, added: added, unsafe: unsafe, message: msg };
 }
 
+/**
+ * Force every text column in every sheet to plain-text format.
+ *
+ * Formatting is not cosmetic here: it decides whether a string survives a round
+ * trip. Safe to run at any time, and run as part of setupEverything() so a sheet
+ * built before this was understood is corrected without anyone having to know.
+ *
+ * It cannot bring back a leading zero already lost - that digit is gone from the
+ * cell - but it stops the next write from losing another.
+ */
+function repairFormatting() {
+  var ss = Db.ss();
+  var fixed = [];
+
+  var skipped = [];
+
+  SHEET_ORDER.forEach(function (tab) {
+    // One sheet that cannot be reformatted must not abort the rest, and must not
+    // abort a ledger repair that called this on its way through.
+    try {
+      var sh = ss.getSheetByName(tab);
+      if (!sh) return;
+      var cols = SCHEMA[tab].cols;
+      var rows = Math.max(sh.getMaxRows() - 1, 1);
+      var n = 0;
+      cols.forEach(function (col, i) {
+        if (col.type !== T.STR && col.type !== T.JSON) return;
+        sh.getRange(2, i + 1, rows, 1).setNumberFormat('@');
+        n++;
+      });
+      if (n) fixed.push(tab + '(' + n + ')');
+    } catch (e) {
+      skipped.push(tab);
+    }
+  });
+
+  Db.invalidate();
+  return {
+    fixed: fixed, skipped: skipped,
+    message: 'Text columns set to plain text: ' + (fixed.join(', ') || 'none') +
+             (skipped.length ? '. Could not reformat: ' + skipped.join(', ') : '')
+  };
+}
+
+/**
+ * Restore the ledger's genesis link if the spreadsheet mangled it.
+ *
+ * This is a RESTORATION, not a rewrite, and the difference matters for a record
+ * whose whole purpose is to be tamper-evident. The genesis row's previous-hash
+ * is a known constant - 64 zeros - which Sheets stored as the number 0. Its own
+ * hash was computed over the correct value before the write, so putting the
+ * constant back must reproduce the hash that is already stored.
+ *
+ * That check is the safety: if the recomputed hash does not match what is on the
+ * row, the row was altered by something other than this formatting fault and the
+ * repair is refused. Nothing else in the chain is touched, ever.
+ */
+function repairLedger() {
+  var v = Ledger.verify();
+  if (v.intact) return { repaired: false, message: 'Chain already verifies. Nothing to do.' };
+
+  var rows = Db.readAll('AuditLog', { fresh: true });
+  if (!rows.length) return { repaired: false, message: 'The audit log is empty.' };
+
+  var first = rows[0];
+  var zeros = '';
+  while (zeros.length < 64) zeros += '0';
+
+  if (String(first.prevHash) === zeros) {
+    return {
+      repaired: false,
+      message: 'The break is not the genesis link, so this is not the formatting fault. ' +
+               v.reason + ' Investigate before doing anything else - this is what ' +
+               'tamper detection is for.'
+    };
+  }
+
+  var expected = Ledger.hashOf(first, zeros);
+  if (expected !== String(first.hash)) {
+    return {
+      repaired: false,
+      message: 'Refusing to touch the ledger: restoring the genesis link does not reproduce ' +
+               'the hash stored on row ' + first.seq + ', so that row was changed by ' +
+               'something other than the spreadsheet reformatting it. ' + v.reason
+    };
+  }
+
+  repairFormatting();
+  Db.update('AuditLog', first.seq, { prevHash: zeros });
+  Db.invalidate('AuditLog');
+
+  var after = Ledger.verify();
+  return {
+    repaired: after.intact,
+    message: after.intact
+      ? 'Genesis link restored and verified. ' + after.reason
+      : 'Genesis link restored but the chain still does not verify: ' + after.reason
+  };
+}
+
 /** Does an existing sheet's header row still match the schema? */
 function headersDrifted_(sh, tab) {
   var expected = SCHEMA[tab].cols.map(function (c) { return c.name; });
@@ -251,6 +360,17 @@ function buildSheet_(ss, tab, position) {
       body.setNumberFormat('0.00##');
     } else if (col.type === T.INT) {
       body.setNumberFormat('0');
+    } else {
+      // Plain text, and NOT optional.
+      //
+      // With the default "Automatic" format, Sheets reads a numeric-looking
+      // string as a number and the original is gone. The ledger's genesis row
+      // stores 64 zeros as its previous hash; that became the number 0, so the
+      // chain failed to verify at row 0 on every real deployment while every
+      // offline test passed, because the test store keeps JavaScript values
+      // verbatim. It also silently ate the leading zero from enrolment numbers
+      // (04101000126) and from an Aadhaar's last four digits (0124).
+      body.setNumberFormat('@');
     }
 
     sh.setColumnWidth(c, columnWidth_(col));
