@@ -184,6 +184,10 @@ function submitCode() {
 
   srv().withSuccessHandler(function (r) {
       saveToken(r.token);
+      // The page that showed the panel knows how to draw itself for a signed-in
+      // visitor; let it, rather than throwing the document away and starting
+      // again. Only a page that offers no way back falls through to navigating.
+      if (typeof onSignedIn === 'function') { onSignedIn(); return; }
       reloadTop();
     })
     .withFailureHandler(function (e) {
@@ -196,6 +200,31 @@ function submitCode() {
 function signOut() {
   saveToken(null);
   reloadTop();
+}
+
+var FLASH_KEY = 'ggsipu.hostel.flash';
+
+/**
+ * Leave a message for the page we are about to navigate to.
+ *
+ * Submitting the application form does move the visitor to their dashboard -
+ * that is the right destination, not a refresh - but they arrived to a page
+ * that said nothing about what had just happened. The query string cannot carry
+ * it: the frame's URL is not the address bar's.
+ */
+function flashOnNextPage(kind, text) {
+  try { window.localStorage.setItem(FLASH_KEY, JSON.stringify({ kind: kind, text: text })); }
+  catch (e) { /* the navigation still happens; only the note is lost */ }
+}
+
+/** Take the message left by the previous page, once. */
+function takeFlash() {
+  try {
+    var raw = window.localStorage.getItem(FLASH_KEY);
+    if (!raw) return null;
+    window.localStorage.removeItem(FLASH_KEY);
+    return JSON.parse(raw);
+  } catch (e) { return null; }
 }
 
 /**

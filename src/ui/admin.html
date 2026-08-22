@@ -11,11 +11,25 @@
 <div class="wrap" id="root"></div>
 
 <script>
-  var D = null, KNOBS = [], PENDING = {};
+  var D = null, KNOBS = [], PENDING = {}, PENDING_NOTE = null;
   loadToken();
   el('root').innerHTML = loadingState('Loading dashboard');
 
-  function load() {
+  /** Called by the shared sign-in panel once a session exists. */
+  function onSignedIn() {
+    el('root').innerHTML = loadingState('Loading dashboard');
+    load();
+  }
+
+  /**
+   * Re-fetch and redraw.
+   *
+   * `note` survives the redraw. Writing a confirmation and then calling load()
+   * put the message into a #msg that the redraw immediately replaced, so the
+   * admin pressed a button, waited, and saw nothing happen.
+   */
+  function load(note) {
+    PENDING_NOTE = note || null;
     srv().withSuccessHandler(render).withFailureHandler(function (e) {
       // An unsigned visitor and a signed-in non-administrator both land here and
       // need different things: one needs a way in, the other needs telling.
@@ -65,6 +79,12 @@
       sect('Operations'),
       operationsCard(d)
     ].join('');
+
+    if (PENDING_NOTE) {
+      el('msg').innerHTML = banner(PENDING_NOTE.kind, PENDING_NOTE.text);
+      PENDING_NOTE = null;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 
     loadSimulator(); loadGrievances(); loadSwaps(); loadIdentity(); loadScans();
   }
@@ -144,10 +164,10 @@
         'decision, not a person\u2019s.')) return;
     el('scanMsg').innerHTML = loadingState('Clearing');
     srv().withSuccessHandler(function (r) {
-        el('scanMsg').innerHTML = banner('good',
-          'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
-          ' across ' + r.applications + ' application' + (r.applications === 1 ? '' : 's') + '.');
-        loadScans(); load();
+        load({ kind: 'good',
+               text: 'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
+                     ' across ' + r.applications + ' application' +
+                     (r.applications === 1 ? '' : 's') + '. Conflicts were left alone.' });
       })
       .withFailureHandler(function (e) { el('scanMsg').innerHTML = banner('err', e.message); })
       .apiAdminAutoClear();
@@ -645,7 +665,8 @@
     srv().withSuccessHandler(function (r) {
       done('good', 'Policy saved and rooms reallocated: ' + r.metrics.allocated +
         ' allotted, ' + r.metrics.waitlisted + ' on the waiting list.');
-      PENDING = {}; load();
+      PENDING = {};
+      load({ kind: 'good', text: 'Policy committed and the allocation re-run against it.' });
     }).withFailureHandler(function (e) { done('err', e.message); })
       .apiAdminCommitSimulation(changes, null);
   }
@@ -767,10 +788,10 @@
     if (!confirm('Run the allocation and save the result? This replaces the previous one.')) return;
     busy('Allocating rooms for all applicants…');
     srv().withSuccessHandler(function (r) {
-      done('good', 'Allocation complete: ' + r.metrics.summary.allocated + ' rooms allotted, ' +
-        r.metrics.summary.waitlisted + ' on the waiting list, ' + r.converted +
-        ' reserved places reissued.');
-      load();
+      load({ kind: 'good',
+             text: 'Allocation complete: ' + r.metrics.summary.allocated +
+                   ' rooms allotted, ' + r.metrics.summary.waitlisted +
+                   ' on the waiting list, ' + r.converted + ' reserved places reissued.' });
     }).withFailureHandler(function (e) { done('err', e.message); }).apiAdminRunAllocation({});
   }
 
@@ -786,9 +807,10 @@
   function letters() {
     busy('Producing allotment letters…');
     srv().withSuccessHandler(function (r) {
-      done(r.remaining ? 'info' : 'good',
-        'Produced ' + r.generated + ' of ' + r.total + ' letters.' +
-        (r.remaining ? ' ' + r.remaining + ' to go — press again to continue.' : ' All done.'));
+      load({ kind: r.remaining ? 'info' : 'good',
+             text: 'Produced ' + r.generated + ' of ' + r.total + ' letters.' +
+                   (r.remaining ? ' ' + r.remaining + ' to go — press again to continue.'
+                                : ' All done.') });
     }).withFailureHandler(function (e) { done('err', e.message); })
       .apiAdminGenerateLetters(null, 25);
   }

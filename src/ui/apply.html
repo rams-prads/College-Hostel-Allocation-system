@@ -64,6 +64,15 @@
     el('root').innerHTML = banner('err', e.message);
   }).apiGetApplyForm();
 
+  /** Called by the shared sign-in panel once a session exists. */
+  function onSignedIn() {
+    el('root').innerHTML = loadingState('Loading the application form');
+    step = 0;
+    srv().withSuccessHandler(boot)
+      .withFailureHandler(function (e) { el('root').innerHTML = banner('err', e.message); })
+      .apiGetApplyForm();
+  }
+
   function boot(f) {
     FORM = f;
     paintChrome({
@@ -463,7 +472,13 @@
 
   function saveApplication(submit) {
     srv()
-      .withSuccessHandler(function () { reloadTop(); })
+      .withSuccessHandler(function () {
+        if (submit) {
+          flashOnNextPage('good', 'Your application has been submitted. ' +
+            'Upload the documents listed below so the hostel office can verify you.');
+        }
+        reloadTop();
+      })
       .withFailureHandler(fail)
       .apiSaveApplication({
         needsAccessible: needsAccessible,

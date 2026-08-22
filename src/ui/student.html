@@ -21,6 +21,35 @@
     el('root').innerHTML = banner('err', 'Could not load your application: ' + e.message);
   }).apiGetStudentView(null, DEMO_TOKEN);
 
+  /**
+   * Re-fetch and re-draw the page in place after something changes.
+   *
+   * Reloading the whole document to show the result of an action throws away
+   * the page, the scroll position and a second of the user's time to display
+   * information the server just sent back. Everything here is drawn from one
+   * view object, so fetching it again and redrawing is both cheaper and less
+   * jarring.
+   *
+   * @param {string=} note  a confirmation to show once the new page is up
+   */
+  /** Called by the shared sign-in panel once a session exists. */
+  function onSignedIn() {
+    el('root').innerHTML = loadingState('Loading your application');
+    refreshView();
+  }
+
+  function refreshView(note) {
+    srv()
+      .withSuccessHandler(function (v) {
+        render(v);
+        if (note && el('msg')) el('msg').innerHTML = banner('good', note);
+      })
+      .withFailureHandler(function (e) {
+        showFailure('That worked, but the page could not be refreshed: ' + e.message);
+      })
+      .apiGetStudentView(null, DEMO_TOKEN);
+  }
+
   function render(v) {
     VIEW = v;
 
@@ -58,6 +87,12 @@
     }
 
     var html = [];
+    // A slot that survives a redraw, so a confirmation written after an action
+    // has somewhere to land. showFailure() targets it too.
+    html.push('<div id="msg"></div>');
+
+    // Anything the previous page wanted this one to say.
+    var flash = takeFlash();
     if (v.viewingAs) {
       html.push(banner('info', 'You are viewing this student’s portal as an administrator. ' +
         'This is exactly what they see.'));
@@ -85,6 +120,8 @@
     html.push(footNote(v));
 
     el('root').innerHTML = html.join('');
+    if (flash && el('msg')) el('msg').innerHTML = banner(flash.kind, flash.text);
+
     // Swaps and grievances are write paths behind a session a preview does not
     // have. Calling them would render two error boxes on an otherwise correct
     // page and teach the viewer nothing.
@@ -301,6 +338,28 @@
     if (input) input.click();
   }
 
+  function docLabel(docType) {
+    var d = (VIEW.documents || []).filter(function (x) { return x.docType === docType; })[0];
+    return d ? d.label : 'Document';
+  }
+
+  /**
+   * What reading the document concluded, said plainly and immediately.
+   *
+   * The applicant learns here whether their address proof agrees with what they
+   * typed, rather than finding out weeks later in a rejection.
+   */
+  function scanNote(r) {
+    if (!r || !r.scanVerdict) return '';
+    return {
+      MATCH: ' It matches the details you gave.',
+      MINOR: ' It matches closely enough that nothing about your application changes.',
+      CONFLICT: ' It does not match the address you gave, so the hostel office will ' +
+                'check it before your application proceeds.',
+      UNREADABLE: ' It could not be read automatically, so someone will check it by hand.'
+    }[r.scanVerdict] || '';
+  }
+
   function uploadDoc(docType, input) {
     var file = input && input.files && input.files[0];
     var status = el('u-' + docType);
@@ -334,7 +393,12 @@
       // only the payload.
       var b64 = String(reader.result).split(',')[1] || '';
       srv()
-        .withSuccessHandler(function () { reloadTop(); })
+        .withSuccessHandler(function (r) {
+          // The row this button lives in is about to be redrawn, so the
+          // confirmation goes where it will survive.
+          refreshView('"' + (r && r.fileName ? docLabel(docType) : docLabel(docType)) +
+                      '" uploaded.' + scanNote(r));
+        })
         .withFailureHandler(function (e) { say(e.message, true); input.value = ''; })
         .apiUploadDocument({
           docType: docType,
@@ -435,7 +499,7 @@
         // Clear the field before anything else. There is no reason for the
         // number to sit in a form control after it has been submitted.
         input.value = '';
-        reloadTop();
+        refreshView('Aadhaar number submitted. Only the last four digits are stored.');
       })
       .withFailureHandler(function (e) {
         if (btn) { btn.disabled = false; btn.textContent = 'Submit for verification'; }
@@ -527,7 +591,8 @@
     el('swapMsg').innerHTML = banner('info', 'Checking hostel rules and applying…');
     srv()
       .withSuccessHandler(function (r) {
-        if (r.ok) reloadTop(); else swapErr(r.message);
+        if (r.ok) refreshView('Swap agreed. Your new room is shown below.');
+        else swapErr(r.message);
       })
       .withFailureHandler(function (e) { swapErr(e.message); })
       .apiAcceptSwap(reqId);

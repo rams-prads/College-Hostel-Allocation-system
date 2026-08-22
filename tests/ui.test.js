@@ -385,6 +385,43 @@ check('a slow call eventually says so', (() => {
   return screen.indexOf('taking longer') > 0;
 })(), 'a spinner with no deadline is indistinguishable from a hang');
 
+section('Nothing makes the user reload the page');
+
+// Reloading the document to show the result of an action throws away the page,
+// the scroll position and a second of the user's time to display information the
+// server has already sent back. Worse, the reload wiped the confirmation that
+// had just been written, so the button appeared to do nothing at all.
+check('the student portal redraws in place after an action', (() => {
+  const src = codeOf('student.html');
+  return /function refreshView/.test(src) && !/reloadTop\(\)/.test(src);
+})(), 'upload, identity and swap all used to reload the whole document');
+
+check('a confirmation survives the redraw it triggers', (() => {
+  const student = codeOf('student.html');
+  const admin = codeOf('admin.html');
+  // Both pages rebuild #root, so a note written before the rebuild has to be
+  // carried through it rather than written and immediately discarded.
+  return /refreshView\(['"]/.test(student) &&
+         /PENDING_NOTE/.test(admin) &&
+         /el\('msg'\)\.innerHTML = banner\(PENDING_NOTE/.test(admin);
+})());
+
+check('the student page has somewhere for a message to land',
+  /id="msg"/.test(codeOf('student.html')),
+  'a note written into an element that does not exist is silently lost');
+
+check('every page can draw itself after sign-in without navigating', (() => {
+  return ['student.html', 'apply.html', 'admin.html']
+    .every(f => /function onSignedIn/.test(codeOf(f)));
+})(), 'the shared panel calls this instead of throwing the document away');
+
+check('the admin dashboard keeps its confirmations', (() => {
+  const src = codeOf('admin.html');
+  // These three change state, so each must redraw AND say what happened.
+  return /load\(\{ kind: 'good',\s*\n?\s*text: 'Allocation complete/.test(src) ||
+         /load\(\{ kind: 'good',[\s\S]{0,80}Allocation complete/.test(src);
+})());
+
 section('Navigating out of the sandbox frame');
 
 // The app runs in an iframe on googleusercontent.com while the address bar is on
