@@ -99,7 +99,8 @@ var Documents = (function () {
           docType: r.docType,
           status: 'REQUIRED',
           driveFileId: '', fileName: '',
-          uploadedAt: '', verifiedBy: '', verifiedAt: '', note: ''
+          uploadedAt: '', verifiedBy: '', verifiedAt: '', note: '',
+          mimeType: '', sizeBytes: 0, contentHash: ''
         };
       });
 
@@ -145,13 +146,20 @@ var Documents = (function () {
     return 'PENDING';
   }
 
-  /** Record an upload against one document slot. */
-  function recordUpload(appId, docType, fileId, fileName) {
+  /**
+   * Record an upload against one document slot.
+   * @param {Object=} meta {mimeType, sizeBytes, contentHash}
+   */
+  function recordUpload(appId, docType, fileId, fileName, meta) {
     var row = Db.findOne('Documents', { appId: appId, docType: docType });
     if (!row) throw new Error('Documents: no ' + docType + ' slot for ' + appId);
+    meta = meta || {};
     Db.update('Documents', row.docId, {
       status: 'UPLOADED', driveFileId: fileId || '',
-      fileName: fileName || '', uploadedAt: new Date()
+      fileName: fileName || '', uploadedAt: new Date(),
+      mimeType: meta.mimeType || '',
+      sizeBytes: Number(meta.sizeBytes) || 0,
+      contentHash: meta.contentHash || ''
     });
     return row.docId;
   }

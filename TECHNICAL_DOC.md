@@ -402,7 +402,15 @@ runs it with the deployer's permissions. Every guard is therefore server-side.
 |---|---|
 | Call an admin function directly | `Auth.requireAdmin()` at the top of every one |
 | Pass another student's `appId` | `apiGetStudentView` refuses unless admin; there is a test for exactly this |
-| Post a wrong-gender hostel preference | Rejected server-side; the client is never trusted |
+| Post a wrong-gender or wrong-campus preference | Rejected server-side; the client is never trusted |
+| Upload an HTML or executable "certificate" | MIME allow-list; the stored type comes from the table, not the browser. An HTML file served from Drive would execute in the uploader's origin |
+| Smuggle a path or a second extension in a filename | The stored name is generated from the document type and application id; the supplied name is discarded |
+| Exhaust the Drive quota with repeated uploads | Per-applicant rate limit in `CacheService`, fails open so a cache miss cannot lock a student out |
+| Walk the 12-digit space against the identity endpoint | Rate limited *before* any record lookup, so an unregistered account is capped too |
+| Steal the spreadsheet and recover Aadhaar numbers | Only an HMAC reference and the last four digits are stored; the key lives in Script Properties, outside the sheet. A plain digest would be walkable — 10¹² is small |
+| Time the identity endpoint to recover a reference | Constant-time comparison |
+| Submit one person's document under two applications | SHA-256 over file contents; a collision across applications is a blocking finding |
+| Change a verified identity afterwards | A verified record is locked to the student; only an admin can reopen it |
 | Claim a shorter home distance | Distance recomputed from the registry pincode, never accepted from the client |
 | Edit preferences after results | Allotted applications lock |
 | Forge an allotment letter | HMAC over the reference; verification fails |
@@ -414,9 +422,22 @@ default.
 
 ---
 
+### Aadhaar: what is and is not claimed
+
+Online Aadhaar e-KYC requires a UIDAI **AUA/KUA licence**, which a university department cannot
+obtain. This system therefore does **not** authenticate against UIDAI, and does not pretend to.
+
+What it does is everything achievable offline, done properly: **Verhoeff check-digit validation**
+(catches every single-digit error and every adjacent transposition), uniqueness against every other
+record, cross-checks over the whole application, and a recorded human decision. The number itself is
+hashed and discarded — see `src/Identity.gs`, whose header documents the reasoning, and
+`tests/phase8.test.js`, which asserts the number appears nowhere by searching every stored byte.
+
+---
+
 ## 13. Testing
 
-530 assertions across eight suites, all runnable offline:
+775 assertions across eleven suites, all runnable offline:
 
 | Suite | Checks | Covers |
 |---|---|---|
@@ -477,9 +498,9 @@ Stated plainly, because a reviewer will find them anyway.
 
 ```
 src/
-  Schema.gs        19-tab contract — single source of truth
+  Schema.gs        20-tab contract — single source of truth
   Db.gs            batched typed access; nothing else calls getRange()
-  Setup.gs         one-click createDatabase()
+  Setup.gs         createDatabase(), plus additive migrateSchema()
   Policy.gs        policy load, simulation overlay, snapshot hashing
   Util.gs          seeded PRNG, largest-remainder apportionment
   Geo.gs           offline pincode → distance, no paid API
@@ -492,6 +513,7 @@ src/
   Swap.gs          mutual swap validation and execution
   Grievance.gs     auto-triage that audits the run
   Documents.gs     per-applicant document requirements
+  Identity.gs      Verhoeff validation, keyed-hash vault, cross-check screening
   Letters.gs       HTML→PDF letters with signed QR
   QrCode.gs        QR encoder and PNG writer
   Notify.gs        Gmail templates, batched and quota-aware

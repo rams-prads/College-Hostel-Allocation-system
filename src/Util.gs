@@ -133,7 +133,25 @@ var Util = (function () {
     return clamp((x - min) / (max - min), 0, 1);
   }
 
+  /**
+   * SHA-256 as lowercase hex, over a string or a byte array.
+   *
+   * Apps Script returns SIGNED bytes, so every byte must be masked back to 0..255
+   * before it is formatted. Skipping the mask yields hex like "-3a" for half the
+   * input and produces a hash that is stable but wrong - which is worse than one
+   * that visibly fails, because the collision check would silently never match.
+   */
+  function sha256Hex(input) {
+    var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input);
+    var out = '';
+    for (var i = 0; i < bytes.length; i++) {
+      out += ('0' + (bytes[i] & 0xff).toString(16)).slice(-2);
+    }
+    return out;
+  }
+
   return {
+    sha256Hex: sha256Hex,
     rng: rng,
     hashUnit: hashUnit,
     weighted: weighted,

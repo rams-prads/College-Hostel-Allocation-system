@@ -112,29 +112,121 @@ function apiAdminPreviewAllocation(opts) {
   return { runId: result.runId, metrics: result.metrics, converted: result.converted };
 }
 
-/** The document verification queue. */
+/**
+ * The document verification queue.
+ *
+ * Ordered by risk, not by arrival. Four hundred applications reviewed in upload
+ * order means the one with a reused document gets the same thirty seconds as the
+ * four hundred clean ones. Each entry carries the automated findings, so the
+ * verifier opens the scan already knowing what to look for.
+ */
 function apiAdminDocQueue(limit) {
   Auth.requireAdmin();
   limit = limit || 40;
   var stu = Db.indexBy('Students', 'studentId');
   var apps = Db.indexBy('Applications', 'appId');
+  var screened = {};
 
-  return Db.readAll('Documents')
+  var rows = Db.readAll('Documents')
     .filter(function (d) { return d.status === 'UPLOADED'; })
-    .slice(0, limit)
     .map(function (d) {
       var app = apps[d.appId];
       var student = app ? stu[app.studentId] : null;
+      if (screened[d.appId] === undefined) {
+        try { screened[d.appId] = Identity.screen(d.appId); }
+        catch (e) { screened[d.appId] = { score: 0, level: 'UNKNOWN', findings: [] }; }
+      }
+      var risk = screened[d.appId];
+      var idRow = student ? Db.byId('Identity', student.studentId) : null;
+
       return {
         docId: d.docId, appId: d.appId, docType: d.docType,
         label: (DOC_TYPES[d.docType] || {}).label || d.docType,
         fileName: d.fileName, driveFileId: d.driveFileId,
+        mimeType: d.mimeType || '',
+        sizeKb: d.sizeBytes ? Math.round(Number(d.sizeBytes) / 1024) : 0,
         studentName: student ? student.name : '(unknown)',
         enrollmentNo: student ? student.enrollmentNo : '',
         category: student ? student.category : '',
+        campus: student ? student.campus : '',
+        // Only ever the masked form. The queue is a screen a verifier may share.
+        aadhaarMasked: idRow ? Identity.mask(idRow.aadhaarLast4) : '',
+        identityStatus: idRow ? idRow.status : 'REQUIRED',
+        riskScore: risk.score,
+        riskLevel: risk.level,
+        findings: risk.findings,
         uploadedAt: fmtDate_(d.uploadedAt)
       };
     });
+
+  rows.sort(function (a, b) { return b.riskScore - a.riskScore; });
+  return rows.slice(0, limit);
+}
+
+/**
+ * The identity verification queue - applicants who have declared an Aadhaar
+ * number and are waiting on a human to match it to their address proof.
+ */
+function apiAdminIdentityQueue(limit) {
+  Auth.requireAdmin();
+  limit = limit || 40;
+  var stu = Db.indexBy('Students', 'studentId');
+  var appByStudent = {};
+  Db.readAll('Applications').forEach(function (a) { appByStudent[a.studentId] = a; });
+
+  var rows = Db.readAll('Identity')
+    .filter(function (r) { return r.status === 'SUBMITTED'; })
+    .map(function (r) {
+      var student = stu[r.studentId] || {};
+      var app = appByStudent[r.studentId];
+      var risk = { score: Number(r.riskScore) || 0, level: 'LOW', findings: r.findingsJson || [] };
+      if (app) {
+        try { risk = Identity.screen(app.appId); } catch (e) { /* keep the stored one */ }
+      }
+      return {
+        studentId: r.studentId,
+        appId: app ? app.appId : '',
+        studentName: student.name || '(unknown)',
+        enrollmentNo: student.enrollmentNo || '',
+        programme: student.programme || '',
+        year: student.year || '',
+        campus: student.campus || '',
+        category: student.category || '',
+        aadhaarMasked: Identity.mask(r.aadhaarLast4),
+        docFolderUrl: app ? app.docFolderUrl : '',
+        riskScore: risk.score,
+        riskLevel: risk.level,
+        findings: risk.findings,
+        submittedAt: fmtDate_(r.submittedAt)
+      };
+    });
+
+  rows.sort(function (a, b) { return b.riskScore - a.riskScore; });
+  return rows.slice(0, limit);
+}
+
+/**
+ * Approve or reject one identity.
+ *
+ * A rejection must say why. An applicant told only "rejected" cannot fix
+ * anything, and the grievance that follows costs the office more than the note
+ * would have.
+ */
+function apiAdminDecideIdentity(studentId, approve, note) {
+  var s = Auth.requireAdmin();
+  if (!approve && !String(note || '').trim()) {
+    throw new Error('Give a reason when rejecting an identity - the student is told ' +
+                    'what it says and has to be able to act on it.');
+  }
+  var result = Identity.decide(studentId, !!approve, s.email, note || '');
+
+  var app = Db.readAll('Applications').filter(function (a) {
+    return a.studentId === studentId;
+  })[0];
+  if (app) {
+    try { Identity.rescreen(app.appId); } catch (e) { /* advisory */ }
+  }
+  return result;
 }
 
 /** Approve or reject one document. */

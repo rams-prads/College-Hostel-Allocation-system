@@ -337,6 +337,27 @@
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
   @media (max-width:620px){.row2{grid-template-columns:1fr}}
 
+  /* Verification queue. Each applicant is a block, not a table row - the
+     findings need room to be read, and a verifier skimming a table will not
+     read them at all. */
+  .vrow{border:1px solid var(--border);border-radius:var(--r);padding:14px 15px;margin-bottom:11px}
+  .vhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .vname{font-weight:650;font-size:15px}
+  .vmeta{display:flex;flex-wrap:wrap;gap:14px;margin-top:8px;font-size:12.5px;color:var(--muted)}
+  .vmeta strong{color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  .findings{margin:11px 0 0;padding:0;list-style:none}
+  .findings li{
+    position:relative;padding:6px 0 6px 22px;font-size:13px;line-height:1.5;
+    border-top:1px solid var(--border)
+  }
+  .findings li:before{position:absolute;left:2px;top:6px;font-size:12px}
+  .findings li.block{color:var(--bad)}
+  .findings li.block:before{content:"\26D4"}
+  .findings li.review{color:var(--text)}
+  .findings li.review:before{content:"\26A0"}
+  .findings li.info{color:var(--muted)}
+  .findings li.info:before{content:"\2139"}
+
   .seg{display:flex;gap:6px;flex-wrap:wrap}
   .seg button{
     padding:8px 14px;font:inherit;font-size:13.5px;font-weight:550;cursor:pointer;

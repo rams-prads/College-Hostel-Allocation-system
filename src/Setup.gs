@@ -53,6 +53,59 @@ function createDatabase(opts) {
   return { created: created, skipped: skipped, drifted: drifted, message: msg };
 }
 
+/**
+ * Bring existing sheets up to the current schema WITHOUT destroying data.
+ *
+ * Only ever appends columns. If a sheet's headers are a prefix of the schema's,
+ * the missing ones are written and every existing row keeps its meaning, because
+ * nothing shifted. Anything else - a rename, a reorder, a deletion - cannot be
+ * repaired safely by a script and is reported for a human to decide.
+ *
+ * This exists because the alternative is resetDatabase(), and a student who has
+ * already submitted a form should not lose it because a column was added.
+ */
+function migrateSchema() {
+  var ss = Db.ss();
+  var added = [], created = [], unsafe = [];
+
+  SHEET_ORDER.forEach(function (tab, i) {
+    var sh = ss.getSheetByName(tab);
+    if (!sh) { buildSheet_(ss, tab, i); created.push(tab); return; }
+
+    var expected = SCHEMA[tab].cols.map(function (c) { return c.name; });
+    var width = Math.max(sh.getLastColumn(), 1);
+    var actual = sh.getRange(1, 1, 1, width).getValues()[0]
+      .map(function (v) { return String(v || ''); });
+    while (actual.length && actual[actual.length - 1] === '') actual.pop();
+
+    if (actual.length > expected.length) { unsafe.push(tab + ' (extra columns)'); return; }
+
+    var diverges = actual.some(function (name, c) { return name !== expected[c]; });
+    if (diverges) { unsafe.push(tab + ' (columns renamed or reordered)'); return; }
+    if (actual.length === expected.length) return;
+
+    var missing = expected.slice(actual.length);
+    var hdr = sh.getRange(1, actual.length + 1, 1, missing.length);
+    hdr.setValues([missing]);
+    hdr.setFontWeight('bold').setBackground('#1f3864').setFontColor('#ffffff')
+       .setVerticalAlignment('middle');
+    added.push(tab + ': +' + missing.join(', '));
+  });
+
+  Db.invalidate();
+  var msg = [
+    'Created: ' + (created.length ? created.join(', ') : 'none'),
+    'Columns added: ' + (added.length ? added.join(' | ') : 'none'),
+    'Needs a manual decision: ' + (unsafe.length ? unsafe.join(', ') : 'none')
+  ].join('\n');
+  if (unsafe.length) {
+    msg += '\n\nThese sheets cannot be migrated automatically without risking data. ' +
+           'Rebuild them with resetDatabase() (destroys all data) or fix the headers by hand.';
+  }
+  Logger.log(msg);
+  return { created: created, added: added, unsafe: unsafe, message: msg };
+}
+
 /** Does an existing sheet's header row still match the schema? */
 function headersDrifted_(sh, tab) {
   var expected = SCHEMA[tab].cols.map(function (c) { return c.name; });
@@ -190,7 +243,20 @@ function seedPolicy_() {
     ['POL-RM-CLEAN',  'roommate', 'W_CLEAN',       0.20, 'Cleanliness expectation'],
     ['POL-RM-SOCIAL', 'roommate', 'W_SOCIAL',      0.15, 'Sociability'],
     ['POL-RM-FOOD',   'roommate', 'W_FOOD',        0.10, 'Food preference'],
-    ['POL-RM-LANG',   'roommate', 'W_LANG',        0.10, 'Shared language - a mild bonus, never a hard rule']
+    ['POL-RM-LANG',   'roommate', 'W_LANG',        0.10, 'Shared language - a mild bonus, never a hard rule'],
+
+    // Identity verification. The enrolment pattern is policy, not code: we have
+    // no authoritative published spec for GGSIPU enrolment numbers, and a
+    // hard-coded guess would reject real students - the worst way for a
+    // verification step to fail. Tighten it here once the office confirms it.
+    ['POL-ID-PATTERN', 'identity', 'ENROLMENT_PATTERN', '^\\d{11}$',
+     'Regex an enrolment number must match. Edit here, no code change needed.'],
+    ['POL-ID-YEARPOS', 'identity', 'ENROLMENT_YEAR_POS', 9,
+     'Zero-based index of the 2-digit admission year inside the enrolment number. -1 disables the check.'],
+    ['POL-ID-MAXMB',   'identity', 'MAX_UPLOAD_MB',     8,
+     'Largest document a student may upload'],
+    ['POL-ID-RATE',    'identity', 'MAX_UPLOADS_PER_HOUR', 20,
+     'Upload attempts allowed per applicant per hour']
   ];
 
   Db.appendMany('Policy', rows.map(function (r) {

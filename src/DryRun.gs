@@ -119,6 +119,34 @@ var DryRun = (function () {
       return 'no violations';
     }, true);
 
+    step('Campus partition holds', function () {
+      var rooms = Db.indexBy('Rooms', 'roomId');
+      var hostels = Db.indexBy('Hostels', 'hostelId');
+      var bad = preview.allocations.filter(function (a) {
+        return a.candidate.campus &&
+               hostels[rooms[a.roomId].hostelId].campus !== a.candidate.campus;
+      }).length;
+      if (bad) throw new Error(bad + ' students placed at a campus they do not attend');
+      return 'no violations';
+    }, true);
+
+    step('Identity vault is keyed', function () {
+      // The check that matters is not that the vault works - it is that the key
+      // is not sitting in the spreadsheet next to the hashes it protects.
+      var key = PropertiesService.getScriptProperties().getProperty('IDENTITY_VAULT_KEY');
+      if (!key) return 'no identities submitted yet';
+      var rows = Db.readAll('Identity');
+      var leaked = rows.filter(function (r) {
+        return String(r.aadhaarRef || '').length && String(r.aadhaarRef).length !== 64;
+      }).length;
+      if (leaked) throw new Error(leaked + ' identity rows hold something other than a hash');
+      var last4Only = rows.every(function (r) {
+        return String(r.aadhaarLast4 || '').length <= 4;
+      });
+      if (!last4Only) throw new Error('an identity row holds more than four digits');
+      return rows.length + ' identities, hashes only';
+    }, true);
+
     step('Accessibility honoured', function () {
       var rooms = Db.indexBy('Rooms', 'roomId');
       var need = preview.allocations.filter(function (a) { return a.candidate.needsAccessible; });

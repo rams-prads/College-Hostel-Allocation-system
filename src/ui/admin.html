@@ -47,6 +47,8 @@
       lookupCard(),
       sect('Policy'),
       '<div id="simCard"></div>',
+      sect('Verification', 'ordered by risk, not by arrival'),
+      '<div id="idCard"></div>',
       sect('Requests'),
       '<div id="grievCard"></div>',
       '<div id="swapCard"></div>',
@@ -54,7 +56,87 @@
       operationsCard(d)
     ].join('');
 
-    loadSimulator(); loadGrievances(); loadSwaps();
+    loadSimulator(); loadGrievances(); loadSwaps(); loadIdentity();
+  }
+
+  /* ---------------------------------------------------- verification */
+  function loadIdentity() {
+    google.script.run.withSuccessHandler(paintIdentity)
+      .withFailureHandler(function () { el('idCard').innerHTML = ''; })
+      .apiAdminIdentityQueue(40);
+  }
+
+  function paintIdentity(rows) {
+    if (!rows || !rows.length) {
+      el('idCard').innerHTML = card('Identity verification',
+        emptyState('&#9989;', 'Nothing waiting',
+          'No applicant is currently waiting on an identity check.'));
+      return;
+    }
+
+    var body = rows.map(function (r) {
+      var kind = { HIGH:'bad', MEDIUM:'warn', LOW:'ok' }[r.riskLevel] || '';
+      var findings = (r.findings || []).length
+        ? '<ul class="findings">' + r.findings.map(function (f) {
+            return '<li class="' + esc(String(f.severity).toLowerCase()) + '">' +
+                   esc(f.text) + '</li>';
+          }).join('') + '</ul>'
+        : '<p class="small muted" style="margin:6px 0 0">' +
+          'Nothing inconsistent was found automatically.</p>';
+
+      return '<div class="vrow">' +
+        '<div class="vhead">' +
+          '<div><div class="vname">' + esc(r.studentName) + '</div>' +
+          '<div class="small muted">' + esc(r.enrollmentNo) + ' &middot; ' +
+          esc(r.programme) + ' year ' + esc(r.year) + ' &middot; ' +
+          esc(label('campus', r.campus)) + ' &middot; ' +
+          esc(label('category', r.category)) + '</div></div>' +
+          pill(kind, r.riskLevel === 'LOW' ? 'Low risk' : (r.riskLevel === 'HIGH'
+            ? 'Needs attention' : 'Check carefully')) +
+        '</div>' +
+        '<div class="vmeta"><span>Aadhaar <strong>' + esc(r.aadhaarMasked) + '</strong></span>' +
+        '<span>Declared ' + esc(r.submittedAt) + '</span>' +
+        (r.docFolderUrl ? '<a href="' + esc(r.docFolderUrl) +
+          '" target="_blank" rel="noopener noreferrer">Open documents</a>' : '') +
+        '</div>' +
+        findings +
+        '<div class="btn-row" style="margin-top:11px">' +
+          '<button class="btn sm" onclick="decideIdentity(&quot;' + esc(r.studentId) +
+            '&quot;,true)">Verify</button>' +
+          '<button class="btn ghost sm" onclick="decideIdentity(&quot;' + esc(r.studentId) +
+            '&quot;,false)">Reject</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    el('idCard').innerHTML = card('Identity verification',
+      '<p class="small muted" style="margin:0 0 14px">' + rows.length + ' waiting. Each ' +
+      'Aadhaar number was checked for a valid checksum and against every other record ' +
+      'before it reached you; only the last four digits are ever stored. Match those ' +
+      'four against the card in the address proof, then decide.</p>' + body);
+  }
+
+  function decideIdentity(studentId, approve) {
+    var note = '';
+    if (!approve) {
+      note = window.prompt('Why is this being rejected? The student is shown this text.');
+      if (note === null) return;
+      if (!String(note).trim()) {
+        el('msg').innerHTML = banner('err', 'A rejection needs a reason.');
+        return;
+      }
+    } else {
+      note = 'Matched against the uploaded documents.';
+    }
+
+    el('idCard').innerHTML = loadingState('Recording the decision');
+    google.script.run
+      .withSuccessHandler(function () { loadIdentity(); })
+      .withFailureHandler(function (e) {
+        el('msg').innerHTML = banner('err', e.message);
+        loadIdentity();
+      })
+      .apiAdminDecideIdentity(studentId, approve, note);
   }
 
   function sect(title, note) {

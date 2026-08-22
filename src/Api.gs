@@ -83,6 +83,7 @@ function apiGetStudentView(asAppId) {
                campus: h ? h.campus : '', roomType: p.roomType };
     });
   view.documents = Documents.statusFor(app.appId, st);
+  view.identity = Identity.statusFor(st.studentId);
 
   var alloc = Db.findOne('Allocations', { appId: app.appId });
   if (alloc && alloc.status === 'ACTIVE') {
@@ -450,6 +451,23 @@ function apiWithdrawApplication() {
 // ============================================================ documents
 
 /**
+ * File types a document may be. An allow-list, never a block-list.
+ *
+ * The previous version created a Drive file with whatever MIME type the browser
+ * claimed. An uploaded text/html file served from Drive executes in the
+ * uploader's origin, so a student could have stored a script and handed the link
+ * to a verifier. Only formats a scanned certificate can legitimately be are
+ * accepted, and the type is taken from this table rather than from the client.
+ */
+var ALLOWED_UPLOAD_TYPES = {
+  'application/pdf': '.pdf',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/heic': '.heic',
+  'image/webp': '.webp'
+};
+
+/**
  * Upload one document to Drive and attach it to the application.
  * @param {{docType, fileName, mimeType, bytes}} payload  bytes = base64
  */
@@ -458,17 +476,93 @@ function apiUploadDocument(payload) {
   if (!s.application) throw new Error('Submit your application before uploading documents.');
   Auth.requireOwner(s.application.appId);
 
+  payload = payload || {};
+
+  // Uploads cost Drive quota and cannot be undone cheaply, so they are capped
+  // per applicant per hour before any work is done.
+  var perHour = Number(Policy.value('identity', 'MAX_UPLOADS_PER_HOUR', 20));
+  Auth.rateLimit('upload', s.email, perHour, 3600);
+
+  // The slot must be one this applicant was actually asked for. Without this a
+  // student could create document rows for types that do not apply to them.
+  var slot = Db.findOne('Documents', { appId: s.application.appId, docType: payload.docType });
+  if (!slot) throw new Error('That document is not required for your application.');
+
+  var mime = String(payload.mimeType || '').toLowerCase().split(';')[0].trim();
+  if (!ALLOWED_UPLOAD_TYPES[mime]) {
+    throw new Error('Upload a PDF or a photo (JPG, PNG, HEIC or WEBP). ' +
+                    'Other file types are not accepted.');
+  }
+
+  var bytes;
+  try {
+    bytes = Utilities.base64Decode(payload.bytes || '');
+  } catch (e) {
+    throw new Error('That file could not be read. Please try uploading it again.');
+  }
+  if (!bytes || !bytes.length) throw new Error('That file appears to be empty.');
+
+  var maxMb = Number(Policy.value('identity', 'MAX_UPLOAD_MB', 8));
+  if (bytes.length > maxMb * 1024 * 1024) {
+    throw new Error('That file is larger than ' + maxMb + ' MB. Please upload a smaller ' +
+                    'scan or photo.');
+  }
+
+  // The stored name is generated, not accepted. A client-supplied filename can
+  // carry path separators, control characters or a second extension, none of
+  // which belong in a Drive folder a verifier will open.
+  var safeName = payload.docType + '-' + s.application.appId + ALLOWED_UPLOAD_TYPES[mime];
+
   var folder = documentsFolder_(s.application.appId);
-  var blob = Utilities.newBlob(
-    Utilities.base64Decode(payload.bytes), payload.mimeType, payload.fileName);
+  var blob = Utilities.newBlob(bytes, mime, safeName);
   var file = folder.createFile(blob);
 
-  Documents.recordUpload(s.application.appId, payload.docType, file.getId(), payload.fileName);
+  // Hash the CONTENT, so the same scan submitted by two applicants is detectable
+  // however it was renamed.
+  var hash = Util.sha256Hex(bytes);
+
+  Documents.recordUpload(s.application.appId, payload.docType, file.getId(), safeName, {
+    mimeType: mime, sizeBytes: bytes.length, contentHash: hash
+  });
   Db.update('Applications', s.application.appId, {
     docStatus: Documents.rollUp(s.application.appId, s.student),
     docFolderUrl: folder.getUrl()
   });
-  return { ok: true, fileName: payload.fileName };
+
+  // Re-screen now, so the verifier sees the consequences of this upload rather
+  // than a stale assessment made before it arrived.
+  try { Identity.rescreen(s.application.appId); } catch (e) { /* screening is advisory */ }
+
+  return { ok: true, fileName: safeName };
+}
+
+// ============================================================ identity
+
+/**
+ * Submit an Aadhaar number for verification against the applicant's documents.
+ *
+ * The number is validated, hashed and discarded inside this call. Nothing that
+ * could reconstruct it is stored or returned - the response carries only the
+ * masked form the student already knows.
+ */
+function apiSubmitIdentity(aadhaar) {
+  var s = Auth.session();
+  if (!s.email) throw new Error('Please sign in first.');
+
+  // Limit FIRST, before any lookup. A 12-digit space is small enough to walk if
+  // the endpoint is unmetered, and this endpoint is a valid-number oracle: it
+  // answers "is this a real Aadhaar number" for anyone who asks. Checking the
+  // student record first would leave that oracle open to any signed-in account
+  // that has not registered.
+  Auth.rateLimit('identity', s.email, 8, 3600);
+
+  if (!s.student) throw new Error('Register your student details before verifying your identity.');
+
+  var result = Identity.submit(s.student.studentId, aadhaar);
+  if (s.application) {
+    try { Identity.rescreen(s.application.appId); } catch (e) { /* advisory */ }
+  }
+  return result;
 }
 
 function documentsFolder_(appId) {

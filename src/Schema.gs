@@ -309,7 +309,35 @@ var SCHEMA = {
       { name: 'uploadedAt', type: T.DATE },
       { name: 'verifiedBy', type: T.STR },
       { name: 'verifiedAt', type: T.DATE },
-      { name: 'note',       type: T.STR }
+      { name: 'note',       type: T.STR },
+      // Appended, never inserted. Db reads by column position, so adding a
+      // column anywhere but the end would misread every existing row.
+      { name: 'mimeType',   type: T.STR },
+      { name: 'sizeBytes',  type: T.INT },
+      // SHA-256 of the uploaded bytes. Two applications holding a byte-identical
+      // document is one of the few decisive fraud signals available offline.
+      { name: 'contentHash', type: T.STR }
+    ]
+  },
+
+  Identity: {
+    desc: 'Identity verification. Aadhaar numbers are NOT stored - only a keyed ' +
+          'HMAC reference and the last four digits. See Identity.gs.',
+    pk: 'studentId',
+    cols: [
+      { name: 'studentId',     type: T.STR },
+      // HMAC-SHA256 under a key held in Script Properties, never in this sheet.
+      // Irreversible, and un-guessable without the key even given the whole file.
+      { name: 'aadhaarRef',    type: T.STR },
+      { name: 'aadhaarLast4',  type: T.STR },
+      { name: 'enrolmentNorm', type: T.STR },
+      { name: 'status',        type: T.ENUM, values: ['REQUIRED', 'SUBMITTED', 'VERIFIED', 'REJECTED'] },
+      { name: 'riskScore',     type: T.INT },
+      { name: 'findingsJson',  type: T.JSON },
+      { name: 'submittedAt',   type: T.DATE },
+      { name: 'verifiedBy',    type: T.STR },
+      { name: 'verifiedAt',    type: T.DATE },
+      { name: 'note',          type: T.STR }
     ]
   },
 
@@ -335,7 +363,7 @@ var SHEET_ORDER = [
   'Students', 'Applications', 'Preferences', 'Lifestyle',
   'Hostels', 'Rooms', 'Beds',
   'Runs', 'Allocations', 'Waitlist',
-  'Transfers', 'Grievances', 'Documents',
+  'Transfers', 'Grievances', 'Documents', 'Identity',
   'AuditLog', 'PincodeGeo', 'Notifications'
 ];
 

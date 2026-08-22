@@ -70,6 +70,7 @@ function freshDom() {
     scrollTo() {}, location: { href: '' }
   };
   global.confirm = () => true;
+  global.prompt = () => 'a reason';
   global.setTimeout = (fn) => { try { fn(); } catch (e) {} return 0; };
   global.clearTimeout = () => {};
   return nodes;
@@ -221,6 +222,34 @@ check('only the student\'s own campus appears in the options', (() => {
   return r.screen.indexOf(mine) > 0 && r.screen.split(other).length - 1 === 0;
 })(), 'offering an option that can never be granted is worse than offering none');
 
+section('Identity verification - the student side');
+r = renderPage('student.html', studentEmail);
+check('the identity card is present', r.screen.indexOf('Identity verification') > 0);
+check('an unverified student is offered the field',
+  r.screen.indexOf('aadhaarInput') > 0);
+check('the storage promise is stated where the number is asked for',
+  r.screen.indexOf('never saved') > 0,
+  'a student handing over an Aadhaar number is owed this before they type it');
+
+// A submitted identity, so the admin queue below has something real in it.
+const idStudent = Db.readAll('Students').find(s => s.email !== studentEmail);
+const IDNUM = (function () {
+  const p = '45678901234';
+  return p + Identity.verhoeffDigit(p);
+})();
+global.Session = { getActiveUser: () => ({ getEmail: () => idStudent.email }) };
+Identity.submit(idStudent.studentId, IDNUM);
+
+r = renderPage('student.html', idStudent.email);
+check('a submitted identity shows the masked number',
+  r.screen.indexOf('XXXX XXXX ' + IDNUM.slice(-4)) > 0);
+check('and the field is withdrawn once it is submitted',
+  r.screen.indexOf('aadhaarInput') < 0,
+  'an input that can no longer be used should not be on screen');
+check('the full number never reaches the page',
+  r.screen.indexOf(IDNUM.slice(0, 8)) < 0,
+  'the rendered HTML is the last place it could leak');
+
 section('Admin dashboard');
 r = renderPage('admin.html', 'admin@ipu.ac.in');
 check('script runs without throwing', !r.threw, r.threw || '');
@@ -230,6 +259,19 @@ check('the dashboard body rendered', r.screen.length > 1500, r.screen.length + '
 check('summary tiles are present', r.screen.indexOf('Rooms allotted') > 0);
 check('ledger status is present', r.screen.indexOf('Audit ledger') > 0);
 check('occupancy table is present', r.screen.indexOf('Occupancy') > 0);
+
+section('Identity verification - the admin side');
+r = renderPage('admin.html', 'admin@ipu.ac.in');
+check('the verification section is on the dashboard',
+  r.screen.indexOf('Identity verification') > 0);
+check('the waiting applicant is listed', r.screen.indexOf(idStudent.name) > 0);
+check('their number is shown masked',
+  r.screen.indexOf('XXXX XXXX ' + IDNUM.slice(-4)) > 0);
+check('the full number is not in the admin page either',
+  r.screen.indexOf(IDNUM.slice(0, 8)) < 0,
+  'an admin screen is the one most likely to be shared or photographed');
+check('verify and reject are both offered',
+  r.screen.indexOf('&gt;Verify&lt;') > 0 || r.screen.indexOf('>Verify<') > 0);
 
 section('Verification page');
 r = renderPage('verify.html', '');

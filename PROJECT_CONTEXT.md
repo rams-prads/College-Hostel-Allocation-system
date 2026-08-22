@@ -99,6 +99,68 @@ can be answered with cryptographic evidence.
 `reasonCodes` as it runs, so the explanation is a byproduct of the algorithm and cannot drift out
 of sync with it.
 
+---
+
+## 4.5 Identity verification
+
+### What is NOT claimed
+
+The system does **not** authenticate an Aadhaar number against UIDAI. Online e-KYC and OTP
+authentication are available only to entities licensed by UIDAI as an **AUA or KUA**. A university
+department is not one, and there is no public API for this. Any project claiming live Aadhaar
+verification without that licence is either using a sandbox or is misrepresenting what it does.
+
+Judges ask about this. The honest answer is stronger than a fabricated integration.
+
+### What IS done, and why it is worth having
+
+| Layer | Mechanism | What it establishes |
+|---|---|---|
+| Form | **Verhoeff check digit** (ISO/IEC 7064-style, dihedral group D5) | The number is well formed. Catches *every* single-digit typo and *every* adjacent transposition, plus ~90% of invented numbers. |
+| Uniqueness | Keyed-hash comparison across all records | No two applicants are claiming one identity. |
+| Enrolment | Policy-configurable pattern + admission-year consistency | The enrolment number is the right shape and agrees with the declared year of study. |
+| Documents | SHA-256 of file **contents** | The same scan cannot be submitted by two applicants. |
+| Consistency | Automated cross-checks over the whole application | Claims that move the outcome — category, PwD, distance — have something behind them. |
+| Decision | A named human, recorded in the hash-chained ledger | Someone is accountable, and the record cannot be quietly edited afterwards. |
+
+The identity assertion is therefore made by a person matching a document. That is what the hostel
+office does today. What changes is that the person now arrives at each case with the arithmetic
+already done and the queue ordered by risk rather than by arrival time.
+
+### How Aadhaar numbers are stored
+
+**They are not.**
+
+```
+   student types  ──▶  Verhoeff + form checks  ──▶  HMAC-SHA256(number, KEY)  ──▶  Identity.aadhaarRef
+                                                                                    Identity.aadhaarLast4
+        │                                                                                  ▲
+        └── the raw number is a local variable, discarded when the request ends ───────────┘
+                       never written · never logged · never in a ledger payload
+                                      · never returned to the browser
+```
+
+* **`KEY` lives in Script Properties**, not in the spreadsheet and not in this repository. Someone
+  who exfiltrates the entire sheet still cannot test a guessed number against the stored hashes.
+  A plain SHA-256 would be useless here — the whole 10¹² space is walkable in an afternoon.
+* **Only the last four digits** are stored, which is the form UIDAI itself permits for display.
+* **Comparison is constant-time**, because the reference is compared on a path a caller can trigger
+  repeatedly and an early exit would leak how much of a guess was right.
+* Both properties are asserted directly in `tests/phase8.test.js`, which searches every stored byte
+  of every tab for the digits it submitted.
+
+### Upload hardening
+
+`apiUploadDocument` previously created a Drive file with whatever MIME type the browser claimed. An
+uploaded `text/html` file served from Drive executes in the uploader's origin — a student could have
+stored a script and handed the link to a verifier.
+
+* MIME **allow-list** (PDF/JPEG/PNG/HEIC/WEBP); the stored type comes from the table, not the client
+* Filename is **generated**, never accepted — a client-supplied name can carry path separators or a
+  second extension
+* Size cap and per-applicant **rate limit**, both policy values
+* The slot must be one the applicant was actually asked for
+
 ### 4.2 Roommate compatibility matching
 
 A short lifestyle survey (sleep time, wake time, study style, cleanliness, sociability, food
@@ -189,6 +251,7 @@ This schema is the interface between the parallel work tracks.
 | `Applications` | one row per application | appId, studentId, **campus**, status, submittedAt, meritScore, distanceKm, eligibility, docStatus |
 | `Preferences` | ranked, long format | appId, rank, hostelId, roomType |
 | `Lifestyle` | roommate survey | appId, sleepTime, wakeTime, studyStyle, cleanliness, sociability, foodPref, language, guestsFrequency |
+| `Identity` | **identity verification** | studentId, aadhaarRef *(HMAC, never the number)*, aadhaarLast4, enrolmentNorm, status, riskScore, findingsJson |
 | `Hostels` | hostel master | hostelId, name, campus, gender, warden, contact |
 | `Rooms` | room inventory | roomId, hostelId, block, floor, roomNo, capacity, roomType, isAccessible |
 | `Beds` | **bed-level** inventory | bedId, roomId, bedNo, status, occupantAppId |
@@ -537,6 +600,8 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 - [ ] **Phase 0** — Missing fields? Fee category, quota codes, campus-specific rules?
 - [ ] **Phase 1** — Real hostel names, blocks, floor counts, room-type mix per campus?
+- [x] **Identity** — Online Aadhaar e-KYC is NOT possible: it requires a UIDAI AUA/KUA licence, which a university department cannot obtain. Decided 22 Aug 2026 to build offline verification with real rigour instead - checksum validation, a keyed-hash vault, automated cross-checks, and a recorded human decision. See section 4.5.
+- [ ] **Identity** — Confirm the real GGSIPU enrolment-number format with the hostel office and tighten `POL-ID-PATTERN`. The default only asserts 11 digits, because rejecting a real student is a worse failure than accepting a malformed number for review.
 - [ ] **Phase 1** — Actual reservation percentages under GGSIPU rules?
 - [ ] **Phase 2** — Scoring weights: how should merit, distance, seniority and special need trade off?
 - [ ] **Phase 2** — Is there a minimum distance-from-home threshold for eligibility? A minimum CGPA?
@@ -557,6 +622,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 | Date | Change |
 |---|---|
+| 2026-08-22 | **Identity verification.** Aadhaar numbers are validated by Verhoeff check digit and then discarded - what is stored is an HMAC-SHA256 reference under a key held in Script Properties plus the last four digits, so exfiltrating the whole sheet still does not permit testing a guessed number. Cross-checks over the whole application (reused Aadhaar, reused enrolment number, byte-identical documents, unsupported category or PwD claim, PIN/state disagreement, borderline distance) produce findings that order the verification queue by risk rather than arrival. `apiUploadDocument` hardened: MIME allow-list, generated filenames, size cap, rate limit, slot check - it previously created a Drive file with whatever type the browser claimed. New `Identity` tab; `Documents` gains mimeType/sizeBytes/contentHash. `migrateSchema()` added so additive changes no longer cost a `resetDatabase()`. Fixed a latent bug in `Policy.load`, which coerced every value with `Number()` and would have turned any non-numeric rule into NaN. 775 checks. |
 | 2026-08-22 | **Campus corrected from a preference to a hard partition.** A student is admitted to one campus and can only be housed there, so the application form no longer offers a campus choice: it is declared once during registration and read from the record thereafter. Enforced in one chokepoint in the allocator, in application validation, and in swap validation — a swap was the one route by which two consenting students could have undone the constraint after allocation. Distance now measures to the student's own campus. Smoking removed from the roommate questionnaire, the schema and the compatibility score. `Students.campus` added, `Applications.campusPref` becomes `Applications.campus`, `Lifestyle.smokingTolerance` dropped — **the sheet must be rebuilt with `resetDatabase()` then `seedAll()`**; `createDatabase()` now detects and reports header drift instead of silently skipping a stale sheet. 680 checks. |
 | 2026-08-22 | Camera-free verification added: the code printed under the QR can be typed or pasted into the verification page. DryRun.gs added - a 24-point end-to-end self-test against the LIVE spreadsheet, since every failure so far has been in the gap the offline suites cannot reach. QR scanning remains an open defect, tracked in section 15b. |
 | 2026-08-22 | Self-registration added. A student not in the registry can now register and apply in one stepped form. Students gains 10 columns (guardian, address, medical, entrance rank, self-declared flag). Two real bugs fixed: Db.nextId handed out ids the seed generator had already used, silently aliasing an existing student; and a first-year was failed on the minimum-CGPA rule despite having no CGPA to be judged on. First-years are now ranked on entrance rank, normalised within their own cohort. 63 new checks; 648 total. |

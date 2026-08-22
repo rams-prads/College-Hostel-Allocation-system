@@ -16,8 +16,13 @@ const scriptProps = {};
 global.Utilities = {
   DigestAlgorithm: { SHA_256: 'SHA_256' },
   Charset: { UTF_8: 'UTF_8' },
-  computeDigest(alg, str) {
-    return Array.from(crypto.createHash('sha256').update(str, 'utf8').digest())
+  computeDigest(alg, input) {
+    // Apps Script accepts a string or a byte array; so must the stub, or the
+    // document-hashing path is never exercised offline.
+    const buf = Array.isArray(input)
+      ? Buffer.from(input.map(b => b & 0xff))
+      : Buffer.from(String(input), 'utf8');
+    return Array.from(crypto.createHash('sha256').update(buf).digest())
       .map(b => (b > 127 ? b - 256 : b));            // mimic Apps Script signed bytes
   },
   formatDate(d) { return new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z'); },
@@ -93,6 +98,18 @@ global.MailApp = {
 };
 
 global.LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) };
+
+// CacheService backs the rate limiter. A real Map, so a test can actually drive
+// a caller past the limit rather than only asserting the happy path.
+const _cache = new Map();
+global.CacheService = {
+  getScriptCache: () => ({
+    get: (k) => (_cache.has(k) ? _cache.get(k) : null),
+    put: (k, v) => { _cache.set(k, String(v)); },
+    remove: (k) => { _cache.delete(k); }
+  }),
+  _reset() { _cache.clear(); }
+};
 
 global.PropertiesService = {
   getScriptProperties: () => ({
@@ -198,7 +215,7 @@ global.Db = {
 };
 
 // ----------------------------------------------------------- load engine code
-['Util', 'Ledger', 'Geo', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'Auth', 'Registration', 'Api', 'QrCode', 'Letters', 'Notify', 'Simulator', 'Swap', 'Grievance', 'DemoScenario', 'DryRun', 'AdminApi'].forEach(loadSrc);
+['Util', 'Ledger', 'Geo', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'Auth', 'Identity', 'Registration', 'Api', 'QrCode', 'Letters', 'Notify', 'Simulator', 'Swap', 'Grievance', 'DemoScenario', 'DryRun', 'AdminApi'].forEach(loadSrc);
 
 // Setup.gs seeds Config/Policy; we call only its seed functions, not the
 // sheet-building parts, which need a real SpreadsheetApp.

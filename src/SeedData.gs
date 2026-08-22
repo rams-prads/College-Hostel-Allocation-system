@@ -255,7 +255,7 @@ function seedStudentsAndApplications_(seed, cohort) {
     students.push({
       studentId: studentId,
       name: name,
-      enrollmentNo: enrollmentNo_(d.programme, n),
+      enrollmentNo: enrollmentNo_(d.programme, d.campus, n, d.year),
       email: emailName + '@example.edu',
       phone: '9' + Util.pad(Util.intBetween(rand, 100000000, 999999999), 9).substring(0, 9),
       gender: d.gender,
@@ -436,9 +436,31 @@ function yearWeights_(maxYear) {
   return out;
 }
 
-function enrollmentNo_(programme, n) {
-  var codes = { BTech: '01', MTech: '02', MBA: '03', MCA: '04', LLB: '05', BBA: '06', BCA: '07' };
-  return Util.pad(n, 5) + codes[programme] + '26';
+/**
+ * An 11-digit enrolment number in the shape GGSIPU actually uses:
+ *
+ *     III PPP RRR YY
+ *      |   |   |   +-- last two digits of the year of ADMISSION
+ *      |   |   +------ roll number within the intake
+ *      |   +---------- programme code
+ *      +-------------- institute code (differs by campus)
+ *
+ * The admission year is derived from the year of study rather than stamped as a
+ * constant, so the number agrees with the rest of the record - a third-year
+ * student carries a number three intakes old. Identity.gs cross-checks exactly
+ * that, and seed data that could not pass its own consistency check would make
+ * the check untestable.
+ *
+ * Roll is n mod 1000, which is unique while the cohort stays under 1000.
+ */
+function enrollmentNo_(programme, campus, n, yearOfStudy) {
+  var institute = campus === 'EDC' ? '164' : '041';
+  var codes = { BTech: '010', MTech: '020', MBA: '030',
+                MCA: '040', LLB: '050', BBA: '060', BCA: '070' };
+  var academicYear = Number(Db.cfg('ACADEMIC_YEAR', '2026'));
+  var admitted = academicYear - Number(yearOfStudy) + 1;
+  return institute + (codes[programme] || '000') +
+         Util.pad(n % 1000, 3) + Util.pad(admitted % 100, 2);
 }
 
 /** Applications trickle in over a four-week window. */

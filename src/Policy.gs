@@ -14,14 +14,29 @@ var Policy = (function () {
   var _cache = null;
   var _override = null;      // in-memory only; never written to the sheet
 
+  /**
+   * Policy values are mostly numbers, but not all of them.
+   *
+   * Coercing everything with Number() turned the enrolment-number pattern into
+   * NaN, which stringifies to "NaN", compiles to the regex /NaN/, and quietly
+   * rejected every enrolment number in the university. A rule that is not a
+   * number is kept as written.
+   */
+  function coerce_(v) {
+    if (typeof v === 'number') return v;
+    var s = String(v).trim();
+    return (s !== '' && isFinite(s)) ? Number(s) : v;
+  }
+
   /** All active policy rows, grouped by category: {category: {key: value}}. */
   function load(fresh) {
     if (_cache && !fresh) return _cache;
-    var out = { reservation: {}, eligibility: {}, weight: {}, capacity: {}, roommate: {} };
+    var out = { reservation: {}, eligibility: {}, weight: {}, capacity: {},
+                roommate: {}, identity: {} };
     Db.readAll('Policy', { fresh: !!fresh }).forEach(function (r) {
       if (!r.active) return;
       if (!out[r.category]) out[r.category] = {};
-      out[r.category][r.key] = Number(r.value);
+      out[r.category][r.key] = coerce_(r.value);
     });
 
     // Simulation overlay. This is what makes a what-if run genuinely safe:
@@ -31,7 +46,7 @@ var Policy = (function () {
       Object.keys(_override).forEach(function (cat) {
         if (!out[cat]) out[cat] = {};
         Object.keys(_override[cat]).forEach(function (k) {
-          out[cat][k] = Number(_override[cat][k]);
+          out[cat][k] = coerce_(_override[cat][k]);
         });
       });
     }
@@ -50,7 +65,7 @@ var Policy = (function () {
     _override = {};
     (changes || []).forEach(function (c) {
       if (!_override[c.category]) _override[c.category] = {};
-      _override[c.category][c.key] = Number(c.value);
+      _override[c.category][c.key] = coerce_(c.value);
     });
     invalidate();
     return _override;

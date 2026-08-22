@@ -94,6 +94,43 @@ var Auth = (function () {
     return s;
   }
 
+  /**
+   * Fixed-window rate limit, keyed per caller per action.
+   *
+   * Anything that costs the server real work, or that an attacker would want to
+   * repeat - uploading files, submitting an identity for checking - needs a
+   * ceiling. Without one, a single account can exhaust the Drive quota or grind
+   * a guessed number against the identity vault.
+   *
+   * The counter lives in CacheService rather than Script Properties: it expires
+   * by itself, and a rate limiter that leaks storage is its own denial of
+   * service. A cache miss fails OPEN - losing the counter must never lock a
+   * legitimate student out of their own application.
+   *
+   * @param {string} action  namespace, e.g. 'upload'
+   * @param {string} who     caller identity, normally the email
+   * @param {number} limit   attempts allowed in the window
+   * @param {number} windowSeconds
+   */
+  function rateLimit(action, who, limit, windowSeconds) {
+    windowSeconds = windowSeconds || 3600;
+    var cache;
+    try { cache = CacheService.getScriptCache(); } catch (e) { return; }
+    if (!cache) return;
+
+    var bucket = Math.floor(Date.now() / (windowSeconds * 1000));
+    var key = 'rl.' + action + '.' + norm_(who) + '.' + bucket;
+
+    var n = 0;
+    try { n = parseInt(cache.get(key) || '0', 10) || 0; } catch (e) { return; }
+
+    if (n >= limit) {
+      throw new Error('Too many ' + action + ' attempts. Please wait a few minutes ' +
+                      'and try again.');
+    }
+    try { cache.put(key, String(n + 1), windowSeconds); } catch (e) { /* fail open */ }
+  }
+
   /** Throw unless the visitor owns this application. Prevents ID tampering. */
   function requireOwner(appId) {
     var s = session();
@@ -114,6 +151,7 @@ var Auth = (function () {
     requireAdmin: requireAdmin,
     requireOwner: requireOwner,
     canCommit: canCommit,
+    rateLimit: rateLimit,
     selfEnrolAdmin: selfEnrolAdmin,
     normaliseEmail: norm_
   };
