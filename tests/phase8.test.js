@@ -387,6 +387,93 @@ try { apiAdminDecideIdentity(other.studentId, true, 'ok'); } catch (e) { decideD
 check('a student cannot verify their own identity', decideDenied,
   'the whole point of the step is that someone else performs it');
 
+section('Read-only preview links');
+
+// Session.getActiveUser() returns an empty string for every visitor except the
+// owner when a web app is deployed "execute as me" from a consumer Google
+// account. These links exist so a student's own screen can be shown on a device
+// that is not the owner's. Being a bypass, what matters is what they CANNOT do.
+
+const previewApp = Db.findOne('Applications', { studentId: other.studentId });
+
+asUser('admin@ipu.ac.in');
+Db.setCfg('ALLOW_DEMO_LINKS', 'FALSE');
+Db.invalidate('Config');
+
+let offRefused = false, offMsg = '';
+try { apiAdminDemoLink(previewApp.appId, 24); } catch (e) { offRefused = true; offMsg = e.message; }
+check('links are refused while the feature is off', offRefused,
+  'a bypass that ships enabled is a hole');
+check('and the refusal says how to enable it', offMsg.indexOf('ALLOW_DEMO_LINKS') > 0);
+check('a token minted while off does not validate',
+  Auth.checkDemoToken(Auth.demoToken(previewApp.appId, 24)) === null);
+
+Db.setCfg('ALLOW_DEMO_LINKS', 'TRUE');
+Db.invalidate('Config');
+Policy.invalidate();
+
+const link = apiAdminDemoLink(previewApp.appId, 24);
+check('an admin can mint one when it is on', !!link.url && link.url.indexOf('?demo=') > 0);
+check('issuing one is recorded in the ledger',
+  Db.readAll('AuditLog').some(e => e.action === 'DEMO_LINK_ISSUED'));
+
+const token = decodeURIComponent(link.url.split('?demo=')[1]);
+check('the token resolves to that application',
+  Auth.checkDemoToken(token) === previewApp.appId);
+
+// ---- what it must NOT allow ------------------------------------------------
+global.Session = { getActiveUser: () => ({ getEmail: () => '' }) };   // a stranger
+
+const view = apiGetStudentView(null, token);
+check('an unauthenticated holder sees the portal', view.signedIn === true);
+check('it is marked read-only', view.demoMode === true);
+check('it is not admin', view.isAdmin !== true);
+check('it shows the right student', view.student.studentId === other.studentId);
+
+function refusedWithoutSession(label, fn) {
+  let threw = false;
+  try { fn(); } catch (e) { threw = true; }
+  check(label, threw, 'a preview link must not be able to change anything');
+}
+refusedWithoutSession('it cannot save an application',
+  () => apiSaveApplication({ preferences: [], lifestyle: {}, submit: false }));
+refusedWithoutSession('it cannot submit an identity',
+  () => apiSubmitIdentity('999000111220'));
+refusedWithoutSession('it cannot upload a document',
+  () => apiUploadDocument({ docType: 'ID_CARD', fileName: 'x.png',
+                            mimeType: 'image/png', bytes: 'AAAA' }));
+refusedWithoutSession('it cannot withdraw the application',
+  () => apiWithdrawApplication());
+refusedWithoutSession('it cannot raise a grievance', () => apiRaiseGrievance('let me in'));
+refusedWithoutSession('it cannot reach the admin dashboard', () => apiAdminOverview());
+refusedWithoutSession('it cannot mint another link',
+  () => apiAdminDemoLink(previewApp.appId, 24));
+
+// ---- forgery ---------------------------------------------------------------
+const parts = token.split('~');
+check('a re-pointed token is refused',
+  Auth.checkDemoToken(previewApp.appId.replace(/\d$/, '9') + '~' + parts[1] + '~' + parts[2]) === null,
+  'otherwise one link would open every portal');
+check('an extended expiry is refused',
+  Auth.checkDemoToken(parts[0] + '~' + (Number(parts[1]) + 86400000) + '~' + parts[2]) === null);
+check('a tampered signature is refused',
+  Auth.checkDemoToken(parts[0] + '~' + parts[1] + '~' + parts[2].replace(/.$/, 'z')) === null);
+check('a truncated signature is refused',
+  Auth.checkDemoToken(parts[0] + '~' + parts[1] + '~' + parts[2].slice(0, 8)) === null);
+check('an unsigned token is refused',
+  Auth.checkDemoToken(previewApp.appId) === null);
+check('an expired token is refused', (() => {
+  const past = Date.now() - 1000;
+  // Signed correctly, just old - the only thing wrong with it is the clock.
+  return Auth.checkDemoToken(Auth.demoToken(previewApp.appId, -1)) === null;
+})());
+
+Db.setCfg('ALLOW_DEMO_LINKS', 'FALSE');
+Db.invalidate('Config');
+check('turning it back off invalidates links already issued',
+  Auth.checkDemoToken(token) === null,
+  'the switch has to be a real off switch, not a hint');
+
 section('Nothing else broke');
 check('ledger intact', Ledger.verify().intact, Ledger.verify().reason);
 check('no policy override left active', (() => {

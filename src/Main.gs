@@ -70,6 +70,20 @@ function route_(e) {
   }
   if (page === 'verify') return render_('ui/verify', 'Verify Allotment', { params: params });
 
+  // A signed read-only link stands in for a session the platform will not give
+  // us for a visitor outside the owner's domain. Checked BEFORE the sign-in
+  // wall, since the whole point is that this visitor cannot pass it.
+  if (params.demo && !session.email) {
+    if (Auth.checkDemoToken(params.demo)) {
+      return render_('ui/student', 'My Hostel Application',
+        { session: session, demoToken: params.demo });
+    }
+    return render_('ui/index', 'Hostel Portal', {
+      session: session, needsLogin: true,
+      authError: 'That demo link is not valid, has expired, or demo links are switched off.'
+    });
+  }
+
   if (!session.email) {
     return render_('ui/index', 'Hostel Portal', {
       session: session,
@@ -83,6 +97,8 @@ function route_(e) {
     return render_('ui/admin', 'Admin Dashboard', { session: session });
   }
   if (page === 'apply')  return render_('ui/apply',   'Hostel Application', { session: session });
+  if (params.demo)       return render_('ui/student', 'My Hostel Application',
+                                        { session: session, demoToken: params.demo });
 
   return render_('ui/student', 'My Hostel Application', { session: session });
 }

@@ -113,6 +113,36 @@ function apiAdminPreviewAllocation(opts) {
 }
 
 /**
+ * Mint a read-only demo link for one application.
+ *
+ * Admin-only, ledger-recorded, and refused outright unless ALLOW_DEMO_LINKS is
+ * TRUE in Config - so turning it on is a deliberate act with a record, not a
+ * default nobody noticed.
+ */
+function apiAdminDemoLink(appId, hours) {
+  var s = Auth.requireAdmin();
+  if (!Auth.demoEnabled()) {
+    throw new Error('Demo links are switched off. Set ALLOW_DEMO_LINKS to TRUE in the ' +
+                    'Config sheet to enable them, and switch it back off afterwards.');
+  }
+  var app = Db.byId('Applications', appId);
+  if (!app) throw new Error('No such application.');
+
+  var token = Auth.demoToken(appId, hours || 24);
+  Ledger.append('DEMO_LINK_ISSUED', {
+    appId: appId, hours: Number(hours) || 24
+  }, s.email);
+
+  return {
+    url: (function () {
+      try { return ScriptApp.getService().getUrl() + '?demo=' + encodeURIComponent(token); }
+      catch (e) { return '?demo=' + encodeURIComponent(token); }
+    })(),
+    expiresInHours: Number(hours) || 24
+  };
+}
+
+/**
  * The document verification queue.
  *
  * Ordered by risk, not by arrival. Four hundred applications reviewed in upload

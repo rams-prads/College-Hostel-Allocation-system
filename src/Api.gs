@@ -15,9 +15,25 @@
 /**
  * Everything needed to render the student dashboard in one round trip.
  */
-function apiGetStudentView(asAppId) {
+function apiGetStudentView(asAppId, demoToken) {
   var s = Auth.session();
-  if (!s.email) return { signedIn: false };
+
+  // A demo link stands in for a session the platform will not give us. It grants
+  // exactly one thing: reading this one portal. Everything that writes goes
+  // through Auth.session() independently and still sees an anonymous visitor.
+  var demoAppId = demoToken ? Auth.checkDemoToken(demoToken) : null;
+  if (!s.email && !demoAppId) return { signedIn: false };
+
+  if (demoAppId && !s.email) {
+    var demoApp = Db.byId('Applications', demoAppId);
+    if (!demoApp) return { signedIn: false };
+    s = {
+      email: '', name: '', isAdmin: false, role: 'DEMO', campus: null,
+      student: Db.byId('Students', demoApp.studentId),
+      application: demoApp,
+      demoMode: true
+    };
+  }
 
   // An admin may inspect any applicant's portal exactly as that student sees
   // it. A warden already has this information; what they have never had is the
@@ -41,6 +57,7 @@ function apiGetStudentView(asAppId) {
     name: s.name,
     isAdmin: s.isAdmin,
     viewingAs: !!s.viewingAs,
+    demoMode: !!s.demoMode,
     applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
     institution: Db.cfg('INSTITUTION_SHORT', 'GGSIPU'),
     supportEmail: Db.cfg('SUPPORT_EMAIL', ''),

@@ -140,6 +140,79 @@ var Auth = (function () {
     try { cache.put(key, String(n + 1), windowSeconds); } catch (e) { /* fail open */ }
   }
 
+  // ------------------------------------------------------------ demo links
+  //
+  // Session.getActiveUser() returns an EMPTY STRING for every visitor except
+  // the owner when a web app is deployed "execute as me" from a consumer Google
+  // account. It is documented Apps Script behaviour, not a fault here: outside a
+  // Workspace domain the platform will not tell the script who the visitor is.
+  //
+  // Deployed from an institutional account (@ipu.ac.in) every student in that
+  // domain resolves normally and none of this is needed. But that account does
+  // not exist yet, and a demo has to show a student's own screen on a second
+  // device without the owner signed into it.
+  //
+  // So: a signed, expiring, READ-ONLY capability link. Whoever holds it sees one
+  // applicant's portal and can do nothing else - every write path calls
+  // session() first, finds no email, and refuses. That property is not a check
+  // added here; it falls out of the design, which is why it cannot be forgotten.
+  //
+  // OFF by default. It is a bypass, and a bypass that ships enabled is a hole.
+
+  function demoKey_() {
+    var props = PropertiesService.getScriptProperties();
+    var k = props.getProperty('DEMO_LINK_KEY');
+    if (!k) {
+      k = Utilities.getUuid() + '-' + Utilities.getUuid();
+      props.setProperty('DEMO_LINK_KEY', k);
+    }
+    return k;
+  }
+
+  function demoSig_(payload) {
+    var sig = Utilities.computeHmacSha256Signature(payload, demoKey_());
+    return sig.map(function (b) {
+      return ('0' + (b & 0xff).toString(16)).slice(-2);
+    }).join('').substring(0, 24);
+  }
+
+  function demoEnabled() {
+    return String(Db.cfg('ALLOW_DEMO_LINKS', 'FALSE')).toUpperCase() === 'TRUE';
+  }
+
+  /**
+   * Mint a read-only link for one application.
+   * @param {number=} hours  lifetime, default 24
+   */
+  function demoToken(appId, hours) {
+    var exp = Date.now() + (Number(hours) || 24) * 3600 * 1000;
+    var payload = appId + '~' + exp;
+    return payload + '~' + demoSig_(payload);
+  }
+
+  /**
+   * Validate a demo token. Returns the appId, or null for anything wrong -
+   * disabled, malformed, expired, or re-signed.
+   */
+  function checkDemoToken(token) {
+    if (!demoEnabled()) return null;
+    var parts = String(token || '').split('~');
+    if (parts.length !== 3) return null;
+
+    var appId = parts[0], exp = Number(parts[1]), sig = parts[2];
+    if (!appId || !exp || !sig) return null;
+
+    var expected = demoSig_(appId + '~' + exp);
+    // Constant-time: this is compared on a path anyone can call repeatedly.
+    if (expected.length !== sig.length) return null;
+    var diff = 0;
+    for (var i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+    if (diff !== 0) return null;
+
+    if (Date.now() > exp) return null;
+    return appId;
+  }
+
   /** Throw unless the visitor owns this application. Prevents ID tampering. */
   function requireOwner(appId) {
     var s = session();
@@ -161,6 +234,9 @@ var Auth = (function () {
     requireOwner: requireOwner,
     canCommit: canCommit,
     rateLimit: rateLimit,
+    demoEnabled: demoEnabled,
+    demoToken: demoToken,
+    checkDemoToken: checkDemoToken,
     selfEnrolAdmin: selfEnrolAdmin,
     normaliseEmail: norm_
   };

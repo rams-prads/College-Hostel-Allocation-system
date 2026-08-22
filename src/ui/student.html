@@ -6,6 +6,7 @@
   // relative link would navigate that frame to the wrong place. Every link is
   // built from this absolute URL and targets _top.
   var WEBAPP_URL = '<?= webAppUrl() ?>';
+  var DEMO_TOKEN = '<?= (typeof demoToken !== "undefined" && demoToken) ? demoToken : "" ?>';
 </script>
 
 <div id="chrome"></div>
@@ -17,7 +18,7 @@
 
   google.script.run.withSuccessHandler(render).withFailureHandler(function (e) {
     el('root').innerHTML = banner('err', 'Could not load your application: ' + e.message);
-  }).apiGetStudentView();
+  }).apiGetStudentView(null, DEMO_TOKEN);
 
   function render(v) {
     VIEW = v;
@@ -31,8 +32,12 @@
 
     paintChrome({
       unit: 'Hostel Allocation Portal',
-      user: { name: v.name || v.email, role: v.viewingAs ? 'ADMIN VIEW' : null },
-      tabs: [
+      user: v.demoMode
+        ? { name: v.student ? v.student.name : 'Preview', role: 'READ ONLY' }
+        : { name: v.name || v.email, role: v.viewingAs ? 'ADMIN VIEW' : null },
+      // A demo visitor has no session, so every tab would land them back on the
+      // sign-in wall. Showing navigation that cannot work is worse than none.
+      tabs: v.demoMode ? [] : [
         { label: 'My Application', href: '?', on: true },
         { label: v.application ? 'Edit Application' : 'Apply', href: '?page=apply' }
       ].concat(v.isAdmin ? [{ label: 'Administration', href: '?page=admin' }] : [])
@@ -55,6 +60,11 @@
       html.push(banner('info', 'You are viewing this student’s portal as an administrator. ' +
         'This is exactly what they see.'));
     }
+    if (v.demoMode) {
+      html.push(banner('info', 'Read-only preview. This is exactly what ' +
+        (v.student ? v.student.name : 'this student') + ' sees when they sign in. ' +
+        'Nothing on this page can be changed from a preview link.'));
+    }
     html.push(timeline(v));
 
     if (!v.application) { html.push(noApplication(v)); el('root').innerHTML = html.join(''); return; }
@@ -73,8 +83,13 @@
     html.push(footNote(v));
 
     el('root').innerHTML = html.join('');
-    loadSwaps();
-    loadGrievances();
+    // Swaps and grievances are write paths behind a session a preview does not
+    // have. Calling them would render two error boxes on an otherwise correct
+    // page and teach the viewer nothing.
+    if (!v.demoMode) {
+      loadSwaps();
+      loadGrievances();
+    }
   }
 
   /* ---------------------------------------------------------- timeline */
@@ -251,7 +266,7 @@
       // A verified document is finished. Everything else can still be sent or
       // replaced - a rejected one especially, since being told to resubmit with
       // no way to resubmit is the worst version of this screen.
-      var canSend = d.status !== 'VERIFIED' && d.status !== 'WAIVED';
+      var canSend = d.status !== 'VERIFIED' && d.status !== 'WAIVED' && !v.demoMode;
       var act = canSend
         ? '<input type="file" id="f-' + esc(d.docType) + '" style="display:none" ' +
           'accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" ' +
@@ -335,6 +350,7 @@
     if (!id) return '';
 
     var kind = { VERIFIED:'ok', SUBMITTED:'info', REJECTED:'bad', REQUIRED:'warn' }[id.status] || 'warn';
+    var readOnly = !!v.demoMode;
     var head = '<div class="rows"><ul class="rows" style="border:0"><li>' +
       '<span class="body"><span class="n">Aadhaar</span>' +
       '<span class="d">' + esc(id.masked || 'Not provided yet') + '</span>' +
@@ -346,7 +362,7 @@
     // when it can actually be used - an input that silently does nothing is
     // worse than no input.
     var form = '';
-    if (id.status === 'REQUIRED' || id.status === 'REJECTED') {
+    if (!readOnly && (id.status === 'REQUIRED' || id.status === 'REJECTED')) {
       form =
         '<div class="divider"></div>' +
         '<label class="field" style="margin-bottom:0">' +

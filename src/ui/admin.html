@@ -281,6 +281,27 @@
   }
 
   /* ----------------------------------------------------- student lookup */
+  /**
+   * A read-only link to one student's portal, for showing it on a device that
+   * is not signed in as the owner. Only useful while ALLOW_DEMO_LINKS is TRUE,
+   * so the failure message says exactly that rather than a bare error.
+   */
+  function demoLink(appId) {
+    google.script.run
+      .withSuccessHandler(function (r) {
+        el('msg').innerHTML = banner('good',
+          'Read-only preview link, valid for ' + r.expiresInHours + ' hours. ' +
+          'Anyone with it sees this student\u2019s portal and can change nothing.') +
+          '<div class="card" style="margin-bottom:14px"><label class="field" ' +
+          'style="margin-bottom:0"><span class="lab">Preview link</span>' +
+          '<input type="text" readonly onclick="this.select()" value="' +
+          esc(r.url) + '"></label></div>';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      })
+      .withFailureHandler(function (e) { el('msg').innerHTML = banner('err', e.message); })
+      .apiAdminDemoLink(appId, 24);
+  }
+
   function lookupCard() {
     return card('Look up a student',
       '<p class="small muted" style="margin:0 0 13px">Open any applicant&rsquo;s portal exactly as ' +
@@ -309,7 +330,9 @@
               '</div></td>' +
               '<td>' + pill('info', label('status', r.status)) + '</td>' +
               '<td class="num"><button class="btn ghost sm" onclick="viewStudent(&quot;' +
-              esc(r.appId) + '&quot;)">Open portal</button></td></tr>';
+              esc(r.appId) + '&quot;)">Open portal</button> ' +
+              '<button class="btn ghost sm" onclick="demoLink(&quot;' +
+              esc(r.appId) + '&quot;)">Preview link</button></td></tr>';
           }).join('') + '</tbody></table></div>';
       }).withFailureHandler(function () {}).apiAdminFindStudent(q);
     }, 250);
