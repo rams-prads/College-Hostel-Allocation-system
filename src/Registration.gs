@@ -71,8 +71,9 @@ function apiGetRegistrationOptions() {
       { code: 'EWS', label: 'Economically Weaker Section' }
     ],
     campuses: CAMPUS_OPTIONS,
-    // Kept for display only. Which school a student belongs to is decided by
-    // the programme they name, never asked for separately.
+    // Reference only. The school a student belongs to is decided by the
+    // programme they name and is never asked for separately, so the form shows
+    // it rather than offering it.
     schools: Catalogue.schools().map(function (c) {
       return { code: c, label: Catalogue.schoolName(c) };
     }),

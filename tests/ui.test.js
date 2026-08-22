@@ -225,6 +225,25 @@ check('and asks a first-year for their class 12 best five', (() => {
          t.screen.indexOf('class 12') > 0;
 })(), 'which is what the brochure ranks a first-year on');
 
+check('the school is shown, not asked for', (() => {
+  const t = renderPage('apply.html', 'someone.brand.new@example.com',
+    'step = STEPS.indexOf("Course"); reg.programme = "BTMT"; paint();');
+  // Named, so the applicant can see what their course implied...
+  const shows = /School: <strong>University School of Automation/.test(t.screen);
+  // ...and not a control, because a course already names its school.
+  const asks = /setReg\(&quot;school&quot;/.test(t.screen) ||
+               /'school'/.test(t.screen);
+  return shows && !asks;
+})(), 'it was a dropdown fed by a list that no longer had that shape, so it was always empty');
+
+check('no select on the form is left with nothing in it', (() => {
+  const t = renderPage('apply.html', 'someone.brand.new@example.com',
+    'step = STEPS.indexOf("Course"); reg.programme = "BTMT"; reg.year = 1; paint();');
+  // A select whose only child is the placeholder is a question nobody can answer.
+  const empties = (t.screen.match(/<select[^>]*>\s*<option value="">Select&hellip;<\/option>\s*<\/select>/g) || []);
+  return empties.length === 0;
+})(), 'an empty required dropdown is a dead end with a red asterisk on it');
+
 check('a lateral-entry programme is never offered a first year', (() => {
   const t = renderPage('apply.html', 'someone.brand.new@example.com',
     'step = STEPS.indexOf("Course"); reg.programme = "LE-BTMT"; paint();');

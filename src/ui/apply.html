@@ -48,7 +48,7 @@
 
   var reg = {
     name:'', enrollmentNo:'', phone:'', dob:'', gender:'',
-    programme:'', branch:'', campus:'', school:'', year:'',
+    programme:'', branch:'', campus:'', year:'',
     meritPercent:'', residenceCategory:'', parentTransferred:false,
     category:'', isPwD:false, pwdType:'',
     homeAddress:'', homeCity:'', homePincode:'', homeState:'',
@@ -272,10 +272,14 @@
       (prog ? '<div class="fieldrow">' +
         select('year', 'Year of study', years, { rerender: true }) + academic + '</div>' : '') +
       '<div class="divider"></div>' +
-      (prog ? select('school', 'University School of Studies',
-        (REG.schools || {})[reg.campus] || [],
-        { help: 'A hostel seat is offered to regular full-time students of the schools on ' +
-                'your own campus.' }) : '') +
+      // The school is NOT asked for. Every programme belongs to exactly one, so
+      // naming a course has already named a school; a second question invites a
+      // second answer that can contradict the first. It is shown instead, so the
+      // applicant can see what their answer implied.
+      (prog ? '<p class="small muted" style="margin:-4px 0 14px">' +
+              'School: <strong>' + esc(prog.schoolName || prog.school) + '</strong>. ' +
+              'A hostel seat is offered to regular full-time students of the schools on ' +
+              'your own campus.</p>' : '') +
 
       // The single most consequential answer on the form. It decides which
       // queue the applicant is in, and no amount of marks moves anyone between
@@ -424,7 +428,10 @@
           rv('Year of study', reg.year ? 'Year ' + reg.year : '') +
           rv('Marks ranked on', reg.meritPercent ? reg.meritPercent + '%' : '') +
           rv('Admission category', label('residence', reg.residenceCategory)) +
-          rv('School', reg.school) +
+          rv('School', (function () {
+            var p = REG.programmes.filter(function (x) { return x.code === reg.programme; })[0];
+            return p ? (p.schoolName || p.school) : '';
+          })()) +
           (reg.parentTransferred ? rv('Parent transferred out of Delhi', 'Yes') : '') +
           rv('Category', reg.category + (reg.isPwD ? ' · PwD (' + reg.pwdType + ')' : '')) +
           rv('Home', [reg.homeCity, reg.homePincode].filter(Boolean).join(' ')) +
