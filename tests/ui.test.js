@@ -385,6 +385,32 @@ check('a slow call eventually says so', (() => {
   return screen.indexOf('taking longer') > 0;
 })(), 'a spinner with no deadline is indistinguishable from a hang');
 
+section('Navigating out of the sandbox frame');
+
+// The app runs in an iframe on googleusercontent.com while the address bar is on
+// script.google.com. A cross-origin location may be WRITTEN to - navigation is
+// allowed - but not READ from, and reload() must be read before it is called.
+// Calling it threw on top of an upload that had already succeeded, so the
+// student was told the portal was broken when their document was safely stored.
+/** Source with comments removed - the claim is about code, not prose. */
+function codeOf(file) {
+  return fs.readFileSync(path.join(UI, file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+}
+check('no page reads reload() off the top frame', (() => {
+  return ['student.html', 'apply.html', 'admin.html', 'verify.html', 'index.html', 'chrome.html']
+    .every(f => !/top\.location\.reload/.test(codeOf(f)));
+})(), 'reading any property of a cross-origin location throws');
+check('there is one helper that does it', (() => {
+  const src = fs.readFileSync(path.join(UI, 'chrome.html'), 'utf8');
+  return /function reloadTop/.test(src) && /catch/.test(src.split('function reloadTop')[1].slice(0, 400));
+})(), 'and it falls back rather than throwing when even navigation is refused');
+check('pages use the helper rather than the raw assignment', (() => {
+  return ['student.html', 'apply.html', 'index.html']
+    .every(f => !/window\.top\.location/.test(codeOf(f)));
+})());
+
 section('The session shim');
 const chromeSrcAuth = fs.readFileSync(path.join(UI, 'chrome.html'), 'utf8');
 check('every call is routed through the dispatcher',

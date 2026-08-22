@@ -17,7 +17,7 @@
   // Already holding a session? Go where they were trying to go.
   if (SESSION.token) {
     srv().withSuccessHandler(function (who) {
-      if (who.signedIn) { window.top.location.href = appUrl('?'); return; }
+      if (who.signedIn) { reloadTop(); return; }
       saveToken(null);
       el('root').innerHTML = signInPanel('Your previous sign-in has expired.');
     }).withFailureHandler(function () {

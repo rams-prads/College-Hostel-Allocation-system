@@ -334,7 +334,7 @@
       // only the payload.
       var b64 = String(reader.result).split(',')[1] || '';
       srv()
-        .withSuccessHandler(function () { window.top.location.reload(); })
+        .withSuccessHandler(function () { reloadTop(); })
         .withFailureHandler(function (e) { say(e.message, true); input.value = ''; })
         .apiUploadDocument({
           docType: docType,
@@ -435,7 +435,7 @@
         // Clear the field before anything else. There is no reason for the
         // number to sit in a form control after it has been submitted.
         input.value = '';
-        window.top.location.reload();
+        reloadTop();
       })
       .withFailureHandler(function (e) {
         if (btn) { btn.disabled = false; btn.textContent = 'Submit for verification'; }
@@ -527,7 +527,7 @@
     el('swapMsg').innerHTML = banner('info', 'Checking hostel rules and applying…');
     srv()
       .withSuccessHandler(function (r) {
-        if (r.ok) window.top.location.reload(); else swapErr(r.message);
+        if (r.ok) reloadTop(); else swapErr(r.message);
       })
       .withFailureHandler(function (e) { swapErr(e.message); })
       .apiAcceptSwap(reqId);

@@ -184,7 +184,7 @@ function submitCode() {
 
   srv().withSuccessHandler(function (r) {
       saveToken(r.token);
-      window.top.location.href = appUrl('?');
+      reloadTop();
     })
     .withFailureHandler(function (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
@@ -195,7 +195,32 @@ function submitCode() {
 
 function signOut() {
   saveToken(null);
-  window.top.location.href = appUrl('?');
+  reloadTop();
+}
+
+/**
+ * Reload the page the visitor is actually looking at.
+ *
+ * NOT window.top.location.reload(). The app runs in a sandboxed iframe served
+ * from googleusercontent.com while the address bar is on script.google.com, so
+ * the two frames are different origins. A cross-origin location may be WRITTEN
+ * to - that is a navigation, and navigation is permitted - but not READ from,
+ * and reload() has to be read off the object before it can be called. It throws
+ * "Blocked a frame with origin ... from accessing a cross-origin frame", which
+ * surfaces as a failure on whatever call had just succeeded.
+ *
+ * Assigning href does the same job and is allowed.
+ *
+ * @param {string=} query e.g. '?page=admin'. Defaults to the student portal.
+ */
+function reloadTop(query) {
+  var url = appUrl(query || '?');
+  try {
+    window.top.location.href = url;
+  } catch (e) {
+    // Not in a frame we may navigate. Move this one instead.
+    window.location.href = url;
+  }
 }
 
 /**

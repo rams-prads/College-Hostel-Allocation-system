@@ -463,7 +463,7 @@
 
   function saveApplication(submit) {
     srv()
-      .withSuccessHandler(function () { window.top.location.href = appUrl('?'); })
+      .withSuccessHandler(function () { reloadTop(); })
       .withFailureHandler(fail)
       .apiSaveApplication({
         needsAccessible: needsAccessible,
