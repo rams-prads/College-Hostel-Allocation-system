@@ -189,7 +189,15 @@
       '<div class="btn-row">' +
         '<button class="btn" onclick="runAllocation()">Run and save</button>' +
         '<button class="btn ghost" onclick="preview()">Preview only</button>' +
-      '</div>');
+        (Number((d.counts || {}).allotted) > 0
+          ? '<button class="btn ghost" onclick="clearAllocation()">Clear the current one</button>'
+          : '') +
+      '</div>' +
+      (Number((d.counts || {}).allotted) > 0
+        ? '<p class="small muted" style="margin:12px 0 0">Clearing empties every bed and puts ' +
+          'each applicant back in the queue. The record of what was decided stays in the ' +
+          'ledger &mdash; only the outcome is undone.</p>'
+        : ''));
   }
 
   /* -------------------------------------------------- document reading */
@@ -1106,6 +1114,20 @@
                    ' rooms allotted, ' + r.metrics.summary.waitlisted +
                    ' on the waiting list, ' + r.converted + ' reserved places reissued.' });
     }).withFailureHandler(function (e) { done('err', e.message); }).apiAdminRunAllocation({});
+  }
+
+  function clearAllocation() {
+    if (!confirm('Clear the current allocation?\n\n' +
+        'Every bed is emptied and every applicant goes back into the queue, ready for a ' +
+        'fresh run. Letters already produced stop being valid and will be produced again. ' +
+        'The record of what was decided stays in the ledger.')) return;
+    busy('Clearing the allocation\u2026');
+    srv().withSuccessHandler(function (r) {
+      load({ kind: 'good',
+             text: 'Cleared: ' + r.bedsFreed + ' beds freed, ' + r.allocationsRemoved +
+                   ' allotments and ' + r.waitlistRemoved + ' waiting-list places removed, ' +
+                   r.applicationsReset + ' applications back in the queue.' });
+    }).withFailureHandler(function (e) { done('err', e.message); }).apiAdminClearAllocation();
   }
 
   function preview() {

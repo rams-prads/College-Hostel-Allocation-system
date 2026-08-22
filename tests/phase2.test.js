@@ -379,6 +379,53 @@ check('ledger entry pins the seed and policy hash', !!payload.seed && !!payload.
 console.log('        ledger: seed=' + payload.seed + ' policyHash=' + payload.policyHash +
             ' allocated=' + payload.allocated);
 
+section('Clearing a committed allocation');
+
+// Re-running already replaces the previous result, so this exists for the other
+// case: starting again from empty beds because the inputs themselves changed.
+Allocator.runAndCommit({ seed: 'GGSIPU-2026', runId: 'RUN-CLEAR' });
+const beforeClear = {
+  occupied: Db.readAll('Beds').filter(b => b.status === 'OCCUPIED').length,
+  allocations: Db.readAll('Allocations').length,
+  waitlist: Db.readAll('Waitlist').length,
+  runs: Db.readAll('Runs').length
+};
+check('there is something to clear', beforeClear.occupied > 0 && beforeClear.allocations > 0);
+
+const cleared = Allocator.clearCommitted('admin@ipu.ac.in');
+
+check('every bed is empty', Db.readAll('Beds').every(b => b.status !== 'OCCUPIED'));
+check('no bed keeps a phantom occupant',
+  Db.readAll('Beds').every(b => !b.occupantAppId),
+  'a leftover occupantAppId makes the next run see a bed that is not really taken');
+check('the allocations are gone', Db.readAll('Allocations').length === 0);
+check('the waiting list is gone', Db.readAll('Waitlist').length === 0);
+check('every applicant is back in the queue',
+  Db.readAll('Applications').every(a => a.status !== 'ALLOTTED' && a.status !== 'WAITLISTED'));
+check('the priority group from the old run is cleared too',
+  Db.readAll('Applications').every(a => !a.priorityTier),
+  'leaving it would let a stale group leak into the next explanation');
+check('the counts it reports are the ones it actually changed',
+  cleared.bedsFreed === beforeClear.occupied &&
+  cleared.allocationsRemoved === beforeClear.allocations &&
+  cleared.waitlistRemoved === beforeClear.waitlist);
+
+check('the run history is NOT erased', Db.readAll('Runs').length === beforeClear.runs,
+  'what was decided, and when, is not the outcome and is not ours to delete');
+check('the clearing is itself recorded',
+  Db.readAll('AuditLog').some(e => e.action === 'ALLOCATION_CLEARED'));
+check('the ledger is still intact', Ledger.verify().intact);
+
+// And the point of all of it: a run from a clean slate produces a full result.
+const again = Allocator.runAndCommit({ seed: 'GGSIPU-2026', runId: 'RUN-AGAIN' });
+check('a fresh run afterwards allots the whole hostel again',
+  again.allocations.length === beforeClear.allocations,
+  again.allocations.length + ' vs ' + beforeClear.allocations);
+check('and no bed is double-booked', (() => {
+  const used = again.allocations.map(a => a.bedId);
+  return new Set(used).size === used.length;
+})());
+
 section('Policy changes actually change the outcome');
 // The what-if simulator in Phase 5 depends on this being true.
 const before = Allocator.run({ seed: 'GGSIPU-2026', runId: 'POL-A' });

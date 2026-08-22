@@ -940,6 +940,68 @@ var Allocator = (function () {
   // ================================================================== COMMIT
 
   /** Persist a computed result to the database. This is the only writer. */
+  /**
+   * Undo a committed allocation, returning the database to the state it was in
+   * before the run.
+   *
+   * Re-running already replaces the previous result, so this is not needed to
+   * allocate again - it is needed to allocate again FROM NOTHING, with the beds
+   * empty and every applicant back in the queue, which is what you want when
+   * the inputs themselves have changed.
+   *
+   * What it clears, and why each one matters:
+   *   - bed occupancy, or the next run sees phantom occupants
+   *   - the allocations and the waiting list
+   *   - every ALLOTTED or WAITLISTED application, back to SUBMITTED, along with
+   *     the merit figure and priority group the old run stamped on it
+   *   - the recorded letter for each allotment, because a letter for a seat
+   *     nobody now holds is void, and leaving the link behind would make the
+   *     next letter batch skip a student who needs one
+   *
+   * The run records in Runs are NOT deleted. They are the history of what was
+   * decided and when, and a system that can quietly erase its own past
+   * decisions is not one anybody should trust with them.
+   */
+  function clearCommitted(actor) {
+    var beds = Db.readAll('Beds');
+    var freed = 0;
+    beds.forEach(function (b) {
+      if (b.status === 'OCCUPIED' || b.occupantAppId) {
+        b.status = 'VACANT';
+        b.occupantAppId = '';
+        freed++;
+      }
+    });
+    Db.replaceAll('Beds', beds);
+
+    var allocations = Db.readAll('Allocations').length;
+    var waitlisted = Db.readAll('Waitlist').length;
+    Db.replaceAll('Allocations', []);
+    Db.replaceAll('Waitlist', []);
+
+    var apps = Db.readAll('Applications');
+    var reset = 0;
+    apps.forEach(function (a) {
+      if (a.status === 'ALLOTTED' || a.status === 'WAITLISTED') {
+        a.status = 'SUBMITTED';
+        reset++;
+      }
+      a.meritScore = 0;
+      a.priorityTier = '';
+    });
+    Db.replaceAll('Applications', apps);
+
+    Ledger.append('ALLOCATION_CLEARED', {
+      bedsFreed: freed, allocationsRemoved: allocations,
+      waitlistRemoved: waitlisted, applicationsReset: reset
+    }, actor || 'system');
+
+    return {
+      bedsFreed: freed, allocationsRemoved: allocations,
+      waitlistRemoved: waitlisted, applicationsReset: reset
+    };
+  }
+
   function commit(result) {
     var now = new Date();
 
@@ -1040,6 +1102,7 @@ var Allocator = (function () {
     run: run,
     runAndCommit: runAndCommit,
     commit: commit,
+    clearCommitted: clearCommitted,
     // exposed for tests and the simulator
     _stages: {
       partition: stageA_partition, priority: stageB_priority, order: stageC_order,

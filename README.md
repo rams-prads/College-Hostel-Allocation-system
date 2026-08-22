@@ -64,7 +64,7 @@ iterated in seconds:
 
 ```bash
 node tests/phase1.test.js     # 66 checks: data integrity, quotas, determinism
-node tests/phase2.test.js     # 97 checks: allocation engine correctness
+node tests/phase2.test.js     # 110 checks: allocation engine correctness
 node tests/phase3.test.js     # 73 checks: document rules and portal API
 node tests/phase4.test.js     # 105 checks: letters, QR anti-forgery, email, admin
 node tests/qr.test.js         # 57 checks: QR encoder vs ISO 18004, PNG round-trip

@@ -123,6 +123,20 @@ function apiAdminPreviewAllocation(opts) {
 }
 
 /**
+ * Clear the committed allocation, so the next run starts from empty beds.
+ *
+ * Guarded by the same role check that gates committing one. The run history in
+ * Runs is left alone - what was decided, and when, is not ours to erase.
+ */
+function apiAdminClearAllocation() {
+  var s = Auth.requireAdmin();
+  if (!Auth.canCommit(s)) {
+    throw new Error('Your role (' + s.role + ') may view allocations but not clear one.');
+  }
+  return Allocator.clearCommitted(s.email);
+}
+
+/**
  * Mint a read-only demo link for one application.
  *
  * Admin-only, ledger-recorded, and refused outright unless ALLOW_DEMO_LINKS is
