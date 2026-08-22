@@ -538,6 +538,29 @@ check('pages use the helper rather than the raw assignment', (() => {
     .every(f => !/window\.top\.location/.test(codeOf(f)));
 })());
 
+section('One palette, on every page');
+
+const CSS = fs.readFileSync(path.join(UI, 'styles.html'), 'utf8');
+check('there is no dark variant to drift out of step',
+  CSS.indexOf('prefers-color-scheme: dark') < 0 &&
+  CSS.indexOf('data-theme="dark"') < 0,
+  'a second scheme following the reader\'s laptop means the screen an officer ' +
+  'describes is not the screen a student is looking at');
+check('the ground is white for every page, not only the dashboard',
+  /(^|\n)\s*body\{background:#fff\}/.test(CSS));
+check('cards sit on it with a border rather than a grey field',
+  /\.card\{background:#fff\}/.test(CSS) && /\.card\{[\s\S]{0,120}border:1px solid var\(--border\)/.test(CSS));
+check('navy carries the masthead', /\.masthead\{background:var\(--navy-900\)/.test(CSS));
+check('amber carries the primary action',
+  /\.btn\{[\s\S]{0,220}background:var\(--amber\)/.test(CSS));
+
+check('every page gets the palette pinned once, centrally', (() => {
+  const chrome = fs.readFileSync(path.join(UI, 'chrome.html'), 'utf8');
+  const perPage = ['student.html', 'apply.html', 'admin.html', 'index.html', 'verify.html']
+    .filter(f => /setAttribute\('data-theme'/.test(fs.readFileSync(path.join(UI, f), 'utf8')));
+  return /setAttribute\('data-theme', 'light'\)/.test(chrome) && perPage.length === 0;
+})(), 'five copies of one decision is five places for it to disagree');
+
 section('The session shim');
 const chromeSrcAuth = fs.readFileSync(path.join(UI, 'chrome.html'), 'utf8');
 check('every call is routed through the dispatcher',

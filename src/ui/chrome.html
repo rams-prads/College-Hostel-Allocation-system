@@ -1,4 +1,9 @@
 <script>
+// One palette for everybody, pinned before first paint. The stylesheet no
+// longer defines a dark variant, so this is belt and braces against a host
+// page that sets the attribute itself.
+try { document.documentElement.setAttribute('data-theme', 'light'); } catch (e) {}
+
 /* ===================================================================== auth
  *
  * Google identifies the project owner and their own Workspace domain, and

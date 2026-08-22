@@ -6,12 +6,6 @@
   // built from this absolute URL and targets _top.
   var WEBAPP_URL = '<?= webAppUrl() ?>';
   var LOGO_URL   = '<?= logoUrl() ?>';
-
-  // Before first paint, so there is no flash of the wrong ground. The
-  // dashboard is held to the light palette regardless of the operating
-  // system's preference: it is read beside printed forms, and a dark field
-  // of navy is the wrong background for that work.
-  document.documentElement.setAttribute('data-theme', 'light');
 </script>
 
 <div id="chrome"></div>

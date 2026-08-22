@@ -10,7 +10,7 @@
     --navy-900:#101d33; --navy-800:#16263f; --navy-700:#1e3355; --navy-600:#2a4570;
     --amber:#e8971a; --amber-600:#cf8210; --amber-soft:#fdf3e2; --amber-line:#f3d9a8;
 
-    --bg:#f2f5f9;
+    --bg:#ffffff;
     --surface:#ffffff;
     --surface-2:#f6f8fb;
     --surface-3:#eef2f7;
@@ -33,31 +33,15 @@
     --ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
     --display:'Source Serif 4',Georgia,'Times New Roman',serif;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg:#0b111c; --surface:#131c2b; --surface-2:#182334; --surface-3:#1e2b3f;
-      --border:#28374d; --border-strong:#35475f;
-      --text:#e8eef7; --text-2:#b3c1d4; --muted:#8698b0;
-      --amber-soft:#2a2114; --amber-line:#4a3a1c;
-      --ok:#4fc287; --ok-soft:#0e2419; --ok-line:#1d4a34;
-      --warn:#e0ab5a; --warn-soft:#2a2113; --warn-line:#4b3a1d;
-      --bad:#f08d8d; --bad-soft:#2b1616; --bad-line:#522626;
-      --info:#7db3ee; --info-soft:#132435; --info-line:#26456b;
-      --sh-1:0 1px 2px rgba(0,0,0,.4);
-      --sh-2:0 1px 3px rgba(0,0,0,.45), 0 6px 18px rgba(0,0,0,.35);
-      --sh-3:0 2px 6px rgba(0,0,0,.5), 0 16px 40px rgba(0,0,0,.45);
-    }
-  }
-  :root[data-theme="dark"]{
-    --bg:#0b111c; --surface:#131c2b; --surface-2:#182334; --surface-3:#1e2b3f;
-    --border:#28374d; --border-strong:#35475f;
-    --text:#e8eef7; --text-2:#b3c1d4; --muted:#8698b0;
-    --amber-soft:#2a2114; --amber-line:#4a3a1c;
-    --ok:#4fc287; --ok-soft:#0e2419; --ok-line:#1d4a34;
-    --warn:#e0ab5a; --warn-soft:#2a2113; --warn-line:#4b3a1d;
-    --bad:#f08d8d; --bad-soft:#2b1616; --bad-line:#522626;
-    --info:#7db3ee; --info-soft:#132435; --info-line:#26456b;
-  }
+  /* One palette, always: white ground, navy type, amber for anything that
+     asks to be acted on.
+
+     There is no dark variant, and that is deliberate rather than unfinished.
+     This is an institutional portal read beside printed forms and projected in
+     front of a room; a second colour scheme that follows whatever the reader's
+     laptop happens to prefer means the screen an officer is describing is not
+     the screen a student is looking at. Committing to one removes that, and
+     removes the flash of the wrong ground on every page load with it. */
 
   *,*::before,*::after{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
@@ -355,8 +339,12 @@
      Held to the light palette whatever the operating system prefers. An
      officer reads this beside printed forms and a dark field of navy is
      the wrong ground for that. */
-  body.admin{background:#fff}
-  body.admin .card{background:#fff}
+  /* The ground is white on every page, not only the dashboard. The card border
+     and the tinted card header are what separate one block from the next, so
+     nothing needs a grey field behind it to be legible. */
+  body{background:#fff}
+  .card{background:#fff}
+  .tile{background:#fff}
   /* The rail is 1400 wide; the masthead defaults to 1120 and would sit inside
      it, leaving the university name floating short of its own sidebar. */
   body.admin .masthead .row,
