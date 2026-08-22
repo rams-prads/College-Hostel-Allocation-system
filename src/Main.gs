@@ -156,10 +156,24 @@ function diagnosticPage_(e) {
   row('Running as (effective user)', effective, effective.indexOf('@') > 0);
 
   if (email.indexOf('@') < 0 && effective.indexOf('@') > 0) {
-    row('Diagnosis',
-      'The script runs, but cannot identify the visitor. Set the deployment\'s ' +
-      '"Who has access" to <strong>Anyone with a Google account</strong> ' +
-      '(not "Anyone"), then deploy a NEW VERSION.', false);
+    var ownerDomain = effective.split('@')[1] || '';
+    var personal = ownerDomain === 'gmail.com' || ownerDomain === 'googlemail.com';
+
+    row('Diagnosis', personal
+      ? 'This project is owned by a PERSONAL Google account (' + effective + '). ' +
+        'Google will not reveal a visitor\'s address to a web app running as its ' +
+        'owner unless the visitor is that owner, or is on the same Workspace domain. ' +
+        'Everyone else lands back on the sign-in page no matter how often they sign ' +
+        'in. Changing the deployment settings does NOT fix this. The project has to ' +
+        'be owned by an account on the students\' own domain.'
+      : 'Signed-out, or signing in from outside <strong>' + ownerDomain + '</strong>. ' +
+        'Only addresses on that domain can be recognised. Also check the deployment\'s ' +
+        '"Who has access" is <strong>Anyone with a Google account</strong> and that you ' +
+        'deployed a NEW VERSION after the last change.', false);
+
+    if (!personal) {
+      row('Try', 'Sign in with an address ending @' + ownerDomain);
+    }
   }
 
   var s = null;

@@ -34,17 +34,24 @@ Google Charts · Tailwind CSS. **Total running cost: ₹0.**
 
 ## Quick start
 
-1. Create a new Google Spreadsheet.
-2. **Extensions → Apps Script**, then note the script ID from **Project Settings**.
-3. `cp .clasp.json.example .clasp.json` and paste your script ID in.
-4. `npm i -g @google/clasp && clasp login && clasp push`
-5. Reload the spreadsheet. Use the **Hostel System** menu:
-   - *1. Create database* — builds all 18 tabs, seeds Config/Policy, writes the genesis ledger row
-   - *2. Seed demo data* — generates the synthetic GGSIPU cohort
-   - *Verify Phase 0 setup* — confirms the foundation is sound
-6. **Deploy → New deployment → Web app**, *Execute as: me*, *Access: anyone with a Google account*.
+> **Sign in first, decide the owner second.** Google only reveals a visitor's address to
+> a web app when that visitor shares a Workspace domain with the account that **owns the
+> project**. Own it from a personal Gmail account and *you are the only person who can
+> ever sign in* — everyone else bounces back to the sign-in page forever. Own it from
+> `@std.ggsipu.ac.in` and every student on that domain works. Decide before you build.
 
-Full instructions in [DEPLOYMENT.md](DEPLOYMENT.md).
+1. Sign in to Google as the account that should own this — for GGSIPU, a college address.
+2. Create a new Google Spreadsheet.
+3. **Extensions → Apps Script**, then note the script ID from **Project Settings**.
+4. `cp .clasp.json.example .clasp.json` and paste your script ID in.
+5. `npm i -g @google/clasp && clasp login && clasp push`
+6. In the Apps Script editor run **`setupEverything`**. It builds all 20 tabs, seeds the
+   cohort, makes you an administrator, and prints the portal address.
+7. **Deploy → New deployment → Web app**, *Execute as: me*, *Access: anyone with a Google
+   account*.
+
+Full instructions, and what to do if your university blocks Apps Script, in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
@@ -82,7 +89,7 @@ TECHNICAL_DOC.md     architecture and algorithm documentation
 src/                 Apps Script sources (pushed via clasp)
   Schema.gs          the frozen database contract
   Db.gs              typed access layer — nothing else touches getRange()
-  Setup.gs           one-click createDatabase()
+  Setup.gs           setupEverything(), createDatabase(), additive migrateSchema()
   Ledger.gs          hash-chained audit log
   Auth.gs            session + role guard
   Main.gs            web app router + spreadsheet menu

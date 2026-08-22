@@ -8,6 +8,95 @@
  * Safe to re-run: existing tabs are left alone unless you pass {force: true}.
  */
 
+/**
+ * RUN THIS ONE. Builds the database, seeds it, makes you an administrator, and
+ * prints the address of the finished portal.
+ *
+ * Everything it does was already available as four separate functions that had
+ * to be run in the right order. That ordering is not interesting and getting it
+ * wrong is easy, so it lives here instead of in a person's head.
+ *
+ * Safe to run twice: existing sheets are migrated rather than rebuilt, and
+ * seeding is skipped if there are already students.
+ */
+function setupEverything() {
+  var out = [];
+
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
+
+  out.push('Running as: ' + (me || '(unknown)'));
+
+  // Build anything missing, migrate anything out of date, destroy nothing.
+  var built = createDatabase();
+  out.push(built.created.length ? 'Created tabs: ' + built.created.join(', ')
+                                : 'All tabs already existed');
+  var migrated = migrateSchema();
+  if (migrated.added.length) out.push('Brought up to date: ' + migrated.added.join(' | '));
+  if (migrated.unsafe.length) {
+    out.push('COULD NOT MIGRATE: ' + migrated.unsafe.join(', ') +
+             ' - run resetDatabase() if you do not need the data in them.');
+  }
+
+  if (Db.readAll('Students', { fresh: true }).length) {
+    out.push('Cohort already present, not reseeding.');
+  } else {
+    var seeded = seedAll();
+    out.push('Seeded ' + seeded.students + ' students and ' + seeded.beds + ' beds.');
+  }
+
+  // Whoever runs this owns the deployment, so they are the administrator.
+  if (me) {
+    var existing = Db.readAll('Admins', { fresh: true }).filter(function (a) {
+      return String(a.email).trim().toLowerCase() === me.trim().toLowerCase();
+    })[0];
+    if (existing) {
+      Db.update('Admins', existing.email, { active: true, role: 'SUPER_ADMIN', campus: 'ALL' });
+      out.push('You were already an administrator.');
+    } else {
+      Db.append('Admins', { email: me, name: 'Project Owner', role: 'SUPER_ADMIN',
+                            campus: 'ALL', active: true });
+      out.push('Added ' + me + ' as SUPER_ADMIN.');
+    }
+  } else {
+    out.push('Could not read your address, so no administrator was added. ' +
+             'Run Auth.selfEnrolAdmin() once from the editor.');
+  }
+
+  var url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
+
+  out.push('');
+  if (url) {
+    out.push('PORTAL:      ' + url);
+    out.push('ADMIN:       ' + url + '?page=admin');
+    out.push('DIAGNOSTICS: ' + url + '?page=diag');
+  } else {
+    out.push('No web app URL yet. Deploy > New deployment > Web app,');
+    out.push('  Execute as: Me,  Who has access: Anyone with a Google account.');
+  }
+
+  // The single thing most likely to be wrong, said before it goes wrong.
+  var domain = me.indexOf('@') > 0 ? me.split('@')[1] : '';
+  out.push('');
+  if (domain && domain !== 'gmail.com' && domain !== 'googlemail.com') {
+    out.push('Sign-in: this project is owned by an account on ' + domain + ', so anyone');
+    out.push('  with an address on that domain can sign in and be recognised.');
+    out.push('  Addresses on OTHER domains will not be - that is a Google restriction,');
+    out.push('  not a setting in this project.');
+  } else {
+    out.push('Sign-in: this project is owned by a personal Google account, so ONLY YOU');
+    out.push('  can be recognised by the portal. Other people reach the sign-in page and');
+    out.push('  are sent straight back to it, however many times they sign in.');
+    out.push('  To let students in, the project must be owned by an account on THEIR');
+    out.push('  domain - see DEPLOYMENT.md, "Letting other people sign in".');
+  }
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  return msg;
+}
+
 /** Entry point. */
 function createDatabase(opts) {
   opts = opts || {};

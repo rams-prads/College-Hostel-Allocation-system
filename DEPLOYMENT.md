@@ -119,6 +119,71 @@ deploy on a university Workspace domain.
 
 ---
 
+## 5b. Letting other people sign in
+
+**Read this before you test with a second account.** It is the single thing most
+likely to waste an afternoon.
+
+Google will only tell a web app who its visitor is when **the visitor is on the
+same Workspace domain as the account that owns the project** — or is that owner.
+Everyone else gets an empty address, and the portal, having no idea who they are,
+sends them back to the sign-in page. They can sign in correctly ten times and
+still land back there. Nothing in this project can change that; it is a platform
+restriction on `Session.getActiveUser()` under *Execute as: Me*.
+
+| Project owned by | `pvrk2406@gmail.com` can sign in | `someone@std.ggsipu.ac.in` can sign in |
+|---|---|---|
+| `pvrk2406@gmail.com` (personal) | yes | **no** |
+| `you@std.ggsipu.ac.in` (college) | no | **yes — everyone on the domain** |
+
+So: **own the project from a college account.** Then every student on
+`std.ggsipu.ac.in` signs in and is recognised, which is the real deployment
+anyway.
+
+### Moving the project to your college account
+
+Roughly ten minutes. Nothing is lost — the database rebuilds itself.
+
+1. Sign in to Google Drive as **`you@std.ggsipu.ac.in`**.
+2. **New → Google Sheets**, name it `GGSIPU Hostel Allocation`.
+3. **Extensions → Apps Script**. Leave the tab open.
+4. **Project Settings** (the gear) → copy the **Script ID**.
+5. On your machine:
+   ```bash
+   npx clasp logout
+   npx clasp login          # sign in as the college account this time
+   ```
+   Put the new Script ID into `.clasp.json`, then:
+   ```bash
+   npx clasp push -f
+   ```
+6. Back in the Apps Script editor, select **`setupEverything`** from the function
+   dropdown and press **Run**. Accept the permission prompt. It builds every tab,
+   seeds the cohort, makes you an administrator, and prints the portal address.
+7. **Deploy → New deployment → Web app**, *Execute as: Me*, *Who has access:
+   Anyone with a Google account* (or *Anyone within Guru Gobind Singh Indraprastha
+   University*, which is better for the real thing).
+
+Now sign in from any `@std.ggsipu.ac.in` account and it will work.
+
+To switch back to the personal project later, `npx clasp logout && npx clasp login`
+again and restore the old Script ID. Keeping both is fine; they are separate
+spreadsheets.
+
+### If your university blocks it
+
+Some Workspace domains disable Apps Script or external web apps for students. If
+step 3 or step 7 is refused, that is an administrator policy, not a fault here.
+Two fallbacks:
+
+- **Admin → Look up a student → Open portal.** Shows any applicant's screen
+  exactly as they see it, from your own account.
+- **Admin → Look up a student → Preview link.** A signed, expiring, read-only URL
+  that works in any browser with no sign-in. Set `ALLOW_DEMO_LINKS` to `TRUE` in
+  the `Config` sheet first, and back to `FALSE` afterwards.
+
+---
+
 ## 6. Add administrators
 
 Open the `Admins` tab. Your own email is already there as `SUPER_ADMIN`. Add a
