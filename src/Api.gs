@@ -125,6 +125,11 @@ function apiGetStudentView(asAppId, demoToken) {
     eligible: app.eligible, docStatus: app.docStatus,
     needsAccessible: app.needsAccessible, meritScore: app.meritScore
   };
+  // Asked here so the portal and the form give the same answer. A page that
+  // offers an edit link the server will refuse is worse than one that does not.
+  var lock = editability_(app, st);
+  view.editable = lock.editable;
+  view.lockReason = lock.reason;
   // Targeted reads. Auth.session() has already pulled Students and Applications,
   // so those cost nothing more; Preferences, Allocations and Waitlist had not
   // been touched and were being read in full for a handful of rows each.
@@ -323,8 +328,11 @@ function apiGetApplyForm() {
     };
   }
 
+  var lock = editability_(existing, s.student);
+
   return {
     signedIn: true,
+    email: s.email,
     applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
     student: s.student,
     maxPreferences: Number(Db.cfg('MAX_PREFERENCES', 5)),
@@ -332,6 +340,13 @@ function apiGetApplyForm() {
     documents: existing ? Documents.statusFor(existing.appId, s.student)
                         : Documents.requiredFor(s.student),
     draft: draft,
+    // Sent to everybody, not only to a registering student. A student who typed
+    // their own details is the person best placed to correct them, and until
+    // the office has finished checking, correcting them is exactly what we want
+    // to happen - so the form that captured them has to be able to render again.
+    registration: apiGetRegistrationOptions(),
+    editable: lock.editable,
+    lockReason: lock.reason,
     minDistanceKm: Policy.value('eligibility', 'MIN_DISTANCE_KM', 30)
   };
 }
@@ -397,14 +412,184 @@ function apiGetHostelOptions(gender, campus, programme, year) {
 }
 
 /**
- * Save or submit an application.
+ * Whether an application can still be changed, and if not, why not.
  *
- * Campus is deliberately absent from the payload. It is a property of the
- * student's admission, read from their record, and is never accepted from the
- * browser - a student who could choose it could apply to a campus they do not
- * belong to.
+ * ONE rule, in ONE place, because the question is asked from four: the form
+ * that decides which fields to render, the portal that decides whether to offer
+ * the link, and the two endpoints that write. A rule copied into four places is
+ * a rule that will eventually disagree with itself, and the version that says
+ * "yes" is the one that will be found by whoever wants it to.
  *
- * @param {Object} payload {needsAccessible, preferences[], lifestyle{}, submit:boolean}
+ * The rule: everything a student declared is theirs to correct until the office
+ * has finished checking it. "Finished" means BOTH checks - the identity and the
+ * documents - because while either is still open somebody is still going to
+ * read this record, and a correction now costs the office a great deal less
+ * than a grievance after allotment. Once both have passed, the declaration IS
+ * what was verified, and it stops being theirs to change.
+ *
+ * Editing while a check is open does not weaken the check: reopenChecks_()
+ * sends back anything that was verified against a field that has since moved.
+ */
+function editability_(app, student) {
+  if (!app) return { editable: true, reason: '' };
+
+  var settled = { ALLOTTED: 'allotted', WAITLISTED: 'on the waiting list',
+                  CANCELLED: 'cancelled', WITHDRAWN: 'withdrawn' };
+  if (settled[app.status]) {
+    return { editable: false,
+      reason: 'Your application is ' + settled[app.status] + ', so it can no longer be ' +
+              'changed. Contact the hostel office if something is wrong.' };
+  }
+
+  var idStatus = 'REQUIRED';
+  try {
+    if (student) idStatus = Identity.statusFor(student.studentId).status;
+  } catch (e) { /* no Identity tab yet - treat as not verified */ }
+
+  if (idStatus === 'VERIFIED' && String(app.docStatus) === 'VERIFIED') {
+    return { editable: false,
+      reason: 'Your identity and your documents have both been verified, so your ' +
+              'application is now fixed as the office checked it. Contact the hostel ' +
+              'office if something still needs to change.' };
+  }
+  return { editable: true, reason: '' };
+}
+
+/**
+ * The fields a student may correct about themselves, and nothing else.
+ *
+ * A whitelist rather than "everything except": a column added to Students later
+ * would silently become student-writable under a blacklist, and the columns
+ * most worth protecting - the re-admission and disciplinary flags - are exactly
+ * the ones somebody would add later.
+ */
+var EDITABLE_DETAIL_FIELDS = [
+  'name', 'enrollmentNo', 'phone', 'dob', 'gender', 'programme', 'branch',
+  'campus', 'year', 'meritPercent', 'residenceCategory', 'parentTransferred',
+  'category', 'isPwD', 'pwdType', 'homeAddress', 'homeCity', 'homePincode',
+  'homeState', 'guardianName', 'guardianPhone', 'guardianEmail', 'bloodGroup',
+  'medicalNotes'
+];
+
+/** The record as it would be if this correction were accepted. Not written. */
+function mergedStudent_(student, details) {
+  var out = {};
+  Object.keys(student).forEach(function (k) { out[k] = student[k]; });
+  details = details || {};
+  EDITABLE_DETAIL_FIELDS.forEach(function (f) {
+    if (details[f] === undefined) return;
+    var v = details[f];
+    if (f === 'parentTransferred' || f === 'isPwD') v = !!v;
+    else if (f === 'year' || f === 'meritPercent') v = Number(v) || 0;
+    else if (f === 'phone' || f === 'guardianPhone') v = String(v).replace(/\D/g, '');
+    else v = String(v == null ? '' : v).trim();
+    out[f] = v;
+  });
+  if (out.residenceCategory !== 'DELHI') out.parentTransferred = false;
+  if (!out.isPwD) out.pwdType = '';
+  return out;
+}
+
+/**
+ * Write a correction, record exactly what moved, and reopen anything that was
+ * checked against a field that moved.
+ */
+function applyDetailChanges_(before, after, actor) {
+  var changed = {};
+  EDITABLE_DETAIL_FIELDS.forEach(function (f) {
+    var a = before[f] == null ? '' : before[f];
+    var b = after[f] == null ? '' : after[f];
+    if (String(a) !== String(b)) changed[f] = { from: a, to: b };
+  });
+  var fields = Object.keys(changed);
+  if (!fields.length) return { changed: [] };
+
+  var write = {};
+  EDITABLE_DETAIL_FIELDS.forEach(function (f) { write[f] = after[f]; });
+  // Derived, never declared: naming a course has already named the school, and
+  // the year decides which result the merit percentage is.
+  write.school = Catalogue.schoolOf(after.programme);
+  write.meritBasis = Number(after.year) <= Catalogue.entryYear(after.programme)
+    ? 'CLASS_12' : 'SEMESTER';
+  var geo = Geo.distanceFromHome(after.homePincode, after.campus);
+  if (geo.resolved) write.homeState = geo.state;
+
+  Db.update('Students', before.studentId, write);
+
+  // WHAT changed, not merely that something did. An officer who verified an
+  // address has to be able to see that the address moved after they looked.
+  Ledger.append('STUDENT_DETAILS_UPDATED', {
+    studentId: before.studentId, fields: fields, changes: changed
+  }, actor);
+
+  reopenChecks_(before.studentId, changed, actor);
+  return { changed: fields };
+}
+
+/**
+ * A check is worth something only if it was made against what the record says
+ * NOW. Corrections before verification are allowed on purpose, so any field a
+ * check actually asserts must reopen that check when it moves - otherwise
+ * "get it verified, then quietly change it" is a hole wide enough to drive an
+ * address through, and the address is the field the priority order turns on.
+ */
+function reopenChecks_(studentId, changed, actor) {
+  function touched(list) {
+    return list.some(function (f) { return !!changed[f]; });
+  }
+
+  // The identity check matches a name and an enrolment number to a card.
+  if (touched(['name', 'enrollmentNo'])) {
+    try { Identity.reopen(studentId, 'the declared details were changed', actor); }
+    catch (e) { /* no Identity tab yet */ }
+  }
+
+  // A document check asserts the name on it, the enrolment number on it, and
+  // the PIN code read off it.
+  if (!touched(['name', 'enrollmentNo', 'homePincode'])) return;
+
+  var app = Db.findOne('Applications', { studentId: studentId });
+  if (!app) return;
+
+  var reopened = 0;
+  Db.where('Documents', { appId: app.appId }).forEach(function (d) {
+    if (!d.driveFileId) return;
+    var wasChecked = d.status === 'VERIFIED' || d.status === 'REJECTED' ||
+                     (d.scanVerdict && d.scanVerdict !== 'UNSCANNED');
+    if (!wasChecked) return;
+    Db.update('Documents', d.docId, {
+      status: 'UPLOADED', verifiedBy: '', verifiedAt: '',
+      scanVerdict: 'UNSCANNED', scanJson: null, scannedAt: '',
+      note: 'Checked again because the details it was compared against were changed.'
+    });
+    reopened++;
+  });
+
+  if (!reopened) return;
+  Db.invalidate('Documents');
+  var student = Db.byId('Students', studentId);
+  Db.update('Applications', app.appId, { docStatus: Documents.rollUp(app.appId, student) });
+  Ledger.append('DOCUMENT_CHECK_REOPENED', {
+    appId: app.appId, count: reopened, fields: Object.keys(changed)
+  }, actor);
+}
+
+/**
+ * Save or submit an application, and optionally a correction to the details it
+ * is judged on.
+ *
+ * The two arrive TOGETHER rather than on separate calls, because preferences
+ * are validated against gender and campus. Saving one without the other would
+ * check the new choices against the old record - or the old choices against the
+ * new one - and leave the two disagreeing in a way nothing downstream expects.
+ *
+ * Details are accepted only from `payload.details`, only through the whitelist
+ * above, and only while editability_() says the record is still the student's
+ * to correct. Everything in it is self-declared and always was; verification is
+ * what turns it into evidence, and a change reopens the verification.
+ *
+ * @param {Object} payload {details{}?, needsAccessible, preferences[],
+ *                          lifestyle{}, submit:boolean}
  */
 function apiSaveApplication(payload) {
   var s = Auth.session();
@@ -415,28 +600,51 @@ function apiSaveApplication(payload) {
     throw new Error('Applications are closed.');
   }
 
-  var errors = validateApplication_(payload, s.student);
-  if (errors.length) throw new Error(errors.join(' '));
-
   var app = s.application;
   var isNew = !app;
   var appId = app ? app.appId : Db.nextId('APP');
 
-  // Locking an allotted application prevents a student editing preferences
-  // after results are out and quietly rewriting the basis of their allocation.
-  if (app && ['ALLOTTED', 'WAITLISTED', 'CANCELLED', 'WITHDRAWN'].indexOf(app.status) >= 0) {
-    throw new Error('Your application is ' + String(app.status).toLowerCase() +
-                    ' and can no longer be edited. Raise a grievance if something is wrong.');
+  var lock = editability_(app, s.student);
+  if (!lock.editable) throw new Error(lock.reason);
+
+  // Validate EVERYTHING before writing anything. A correction that passes while
+  // the preferences it invalidates do not must leave the record untouched,
+  // rather than saving half of an application that no longer holds together.
+  var student = s.student;
+  if (payload.details) {
+    student = mergedStudent_(s.student, payload.details);
+    var dErrors = validateRegistration_(student);
+    if (dErrors.length) throw new Error(dErrors.join(' '));
+
+    var wanted = String(student.enrollmentNo).trim().toLowerCase();
+    var clash = Db.readAll('Students').filter(function (x) {
+      return x.studentId !== s.student.studentId &&
+             String(x.enrollmentNo).trim().toLowerCase() === wanted;
+    })[0];
+    if (clash) {
+      throw new Error('Enrolment number ' + student.enrollmentNo + ' is already registered ' +
+                      'to another student. Contact the hostel office.');
+    }
   }
 
-  var geo = Geo.distanceFromHome(s.student.homePincode, s.student.campus);
-  var status = payload.submit ? 'SUBMITTED' : 'DRAFT';
+  var errors = validateApplication_(payload, student);
+  if (errors.length) throw new Error(errors.join(' '));
+
+  if (payload.details) applyDetailChanges_(s.student, student, s.email);
+
+  var geo = Geo.distanceFromHome(student.homePincode, student.campus);
+  // Saving a draft must never UNDO a submission. Before details could be
+  // corrected there was nothing to save on a submitted application, so nobody
+  // hit this; now "Save as draft" on an edit would have quietly withdrawn a
+  // student from the allocation they were already in.
+  var status = payload.submit ? 'SUBMITTED'
+             : (app && app.status !== 'DRAFT' ? app.status : 'DRAFT');
   var now = new Date();
 
   var record = {
     appId: appId,
-    studentId: s.student.studentId,
-    campus: s.student.campus,
+    studentId: student.studentId,
+    campus: student.campus,
     status: status,
     submittedAt: payload.submit ? now : (app ? app.submittedAt : ''),
     meritScore: app ? app.meritScore : 0,
@@ -469,8 +677,8 @@ function apiSaveApplication(payload) {
     else Db.append('Lifestyle', life);
   }
 
-  Documents.provision(appId, s.student);
-  Db.update('Applications', appId, { docStatus: Documents.rollUp(appId, s.student) });
+  Documents.provision(appId, student);
+  Db.update('Applications', appId, { docStatus: Documents.rollUp(appId, student) });
 
   if (payload.submit) {
     Ledger.append('APPLICATION_SUBMITTED', {
@@ -721,9 +929,28 @@ function apiCancelSwap(reqId) {
 
 // ============================================================ grievances
 
+/**
+ * Report a problem. Open to residents, which means students holding a room.
+ *
+ * Before allotment there is nothing to report yet: the application has its own
+ * screens for documents and identity, each of which says what is outstanding
+ * and what to do about it, and a free-text box beside them only invited
+ * questions those screens had already answered. After allotment the student
+ * lives somewhere, and the things that go wrong - water, power, the mess, a
+ * roommate, the room itself - have nowhere else to go.
+ */
 function apiRaiseGrievance(text) {
   var s = Auth.session();
-  if (!s.application) throw new Error('You need an application before raising a grievance.');
+  if (!s.application) throw new Error('You need an application before reporting a problem.');
+
+  var alloc = Db.rowsWhere('Allocations', 'appId', s.application.appId)
+    .filter(function (a) { return a.status === 'ACTIVE'; })[0];
+  if (!alloc) {
+    throw new Error('Reporting is open once you have been allotted a room. Until then, ' +
+                    'your application page shows what is outstanding, and anything else ' +
+                    'should go to the hostel office at ' +
+                    Db.cfg('SUPPORT_EMAIL', 'hostel@ipu.ac.in') + '.');
+  }
   return Grievance.raise(s.application.appId, text, s.email);
 }
 

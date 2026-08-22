@@ -201,16 +201,60 @@ check('at most two documents are ever asked for', (() => {
   return uniq.length <= 2 && uniq.every(t => t === 'AADHAAR' || t === 'ID_CARD');
 })(), 'the rest of the checklist is collected on paper at the counter');
 
-section('Application form - returning student');
-r = renderPage('apply.html', studentEmail);
+// A student the office has not finished checking. That is who the form is for
+// now - an allotted application is settled, and settled is not editable.
+const openApp = Db.readAll('Applications').find(a => a.status === 'SUBMITTED');
+const openStudent = Db.byId('Students', openApp.studentId);
+const openEmail = openStudent.email;
+
+section('Application form - a student the office has not finished checking');
+r = renderPage('apply.html', openEmail);
 check('script runs without throwing', !r.threw, r.threw || '');
 check('no unhandled server errors', r.errors.length === 0, r.errors.join('; '));
 check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
 check('the form body rendered', r.screen.length > 1200, r.screen.length + ' bytes');
-check('opens on the preference step', r.screen.indexOf('Room preferences') > 0);
-check('shows the step indicator', r.screen.indexOf('class="wiz"') > 0);
 check('a returning student is not asked to register again',
   r.screen.indexOf('registers you') < 0);
+check('shows the step indicator', r.screen.indexOf('class="wiz"') > 0);
+
+check('the details they declared are editable, not just the room choices',
+  r.screen.indexOf('About you') > 0 &&
+  (r.screen.match(/<li class="[^"]*"[^>]*onclick="goStep/g) || []).length === 7,
+  'not being able to fix a typed PIN code after submitting is what sent people to the office');
+check('and the form starts from what we already hold',
+  r.screen.indexOf('value="' + openStudent.name + '"') > 0,
+  'an edit that starts blank is a re-typing exercise, and loses whatever nobody retypes');
+check('it says plainly how long they can keep changing it',
+  r.screen.indexOf('verified both your identity and your documents') > 0);
+check('and does not offer to un-submit it as a draft',
+  r.screen.indexOf('Save as draft') < 0,
+  'a submitted application has no draft state to go back to');
+
+section('Application form - once both checks have passed');
+(() => {
+  const app = Db.readAll('Applications').find(a => a.status === 'SUBMITTED' &&
+                                                   a.appId !== openApp.appId);
+  const st = Db.byId('Students', app.studentId);
+  Db.update('Applications', app.appId, { docStatus: 'VERIFIED' });
+  Db.append('Identity', { studentId: st.studentId, aadhaarRef: 'x', aadhaarLast4: '1234',
+                          enrolmentNorm: '', status: 'VERIFIED', riskScore: 0,
+                          findingsJson: null, submittedAt: new Date(),
+                          verifiedBy: 'admin@ipu.ac.in', verifiedAt: new Date(), note: '' });
+  Db.invalidate('Applications'); Db.invalidate('Identity');
+
+  const t = renderPage('apply.html', st.email);
+  check('the form is not rendered at all', t.screen.indexOf('class="wiz"') < 0,
+    'a form the server will refuse is a student typing a correction twice and losing it twice');
+  check('and it says why', t.screen.indexOf('now fixed') > 0);
+  check('the portal stops offering the edit link too',
+    renderPage('student.html', st.email).chrome.indexOf('Edit Application') < 0,
+    'a tab leading to a locked page is a promise the next screen has to take back');
+
+  // Put it back, so nothing after this depends on a record this test moved.
+  Db.update('Applications', app.appId, { docStatus: 'PENDING' });
+  Db.update('Identity', st.studentId, { status: 'SUBMITTED' });
+  Db.invalidate('Applications'); Db.invalidate('Identity');
+})();
 
 section('Application form - brand new student');
 r = renderPage('apply.html', 'someone.brand.new@example.com');
@@ -297,17 +341,52 @@ check('it no longer asks about smoking', r.screen.toLowerCase().indexOf('smok') 
   'hostels are non-smoking - it is not a lifestyle preference to be matched on');
 
 section('Application form - the preference step');
-r = renderPage('apply.html', studentEmail, atStep('Preferences'));
+r = renderPage('apply.html', openEmail, atStep('Preferences'));
 check('script survives stepping to the preference page', !r.threw, r.threw || '');
 check('no campus choice is offered', r.screen.indexOf('Campus preference') < 0,
   'a student cannot choose the campus they were admitted to');
 check('the campus restriction is stated instead',
   r.screen.indexOf('fixed by your admission') > 0);
 check('only the student\'s own campus appears in the options', (() => {
-  const other = student.campus === 'DWARKA' ? 'East Delhi Campus' : 'Dwarka Campus';
-  const mine = student.campus === 'DWARKA' ? 'Dwarka Campus' : 'East Delhi Campus';
+  const other = openStudent.campus === 'DWARKA' ? 'East Delhi Campus' : 'Dwarka Campus';
+  const mine = openStudent.campus === 'DWARKA' ? 'Dwarka Campus' : 'East Delhi Campus';
   return r.screen.indexOf(mine) > 0 && r.screen.split(other).length - 1 === 0;
 })(), 'offering an option that can never be granted is worse than offering none');
+
+section('Reporting a problem is a residents desk');
+
+(() => {
+  const res = renderPage('student.html', studentEmail);
+  check('a student holding a room is offered it',
+    res.screen.indexOf('Report a problem') > 0);
+  check('and it is framed around living there, not around the application',
+    /geyser|water, power, the wifi, the mess/.test(res.screen),
+    'the box used to sit beside the document screens collecting questions they answered');
+
+  const wl = Db.readAll('Waitlist')[0];
+  const wlApp = Db.byId('Applications', wl.appId);
+  const wlEmail = Db.byId('Students', wlApp.studentId).email;
+  const pending = renderPage('student.html', wlEmail);
+  check('a student with no room is not', pending.screen.indexOf('Report a problem') < 0,
+    'there is nothing to report about a room nobody has been given');
+  check('and nothing on that page invites a grievance either',
+    pending.screen.toLowerCase().indexOf('raise a grievance') < 0);
+})();
+
+section('Can I still fix this?');
+
+(() => {
+  const open = renderPage('student.html', openEmail);
+  check('an unverified application says so on the page itself',
+    open.screen.indexOf('can still be changed') > 0,
+    'it used to be answered only by a link in the footer, which nobody read');
+  check('with the way to do it right there',
+    open.screen.indexOf('Edit my application') > 0);
+
+  const settled = renderPage('student.html', studentEmail);
+  check('an allotted one says the opposite',
+    settled.screen.indexOf('can still be changed') < 0);
+})();
 
 section('Document upload');
 r = renderPage('student.html', studentEmail);

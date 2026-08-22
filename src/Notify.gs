@@ -62,7 +62,8 @@ var Notify = (function () {
           (d.reasons && d.reasons.length
             ? '<ul>' + d.reasons.map(function (r) { return '<li>' + r + '</li>'; }).join('') + '</ul>'
             : '') +
-          '<p>If you believe this is an error, you may raise a grievance through the portal.</p>';
+          '<p>If you believe this is an error, correct your application on the portal ' +
+          'or contact the hostel office.</p>';
       }
     },
     DOC_REJECTED: {

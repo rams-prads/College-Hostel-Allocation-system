@@ -1,6 +1,18 @@
 /**
  * Grievance.gs - ticket handling with auto-triage.
  *
+ * WHO THIS IS FOR
+ * ---------------
+ * Residents. Reporting opens when a student is allotted a room, and from then
+ * on it is the desk for everything that goes wrong where they live - water,
+ * power, the mess, the room itself, a roommate - as well as a question about
+ * the allotment they were given.
+ *
+ * It is deliberately NOT open during the application. Before allotment the
+ * portal already tells a student what is outstanding, on the screen that can do
+ * something about it, and a free-text box beside those screens only collected
+ * questions they had already answered.
+ *
  * The valuable part is not the keyword classifier. It is that an allocation
  * dispute is AUDITED rather than answered: the system re-checks the student's
  * outcome against the recorded run and only then composes a reply.
@@ -26,8 +38,17 @@ var Grievance = (function () {
     ['DOCUMENT', ['document', 'certificate', 'upload', 'verifi', 'scan', 'proof', 'admission letter', 'id card']],
     ['FEE',      ['fee', 'payment', 'refund', 'money', 'charge', 'paid', 'receipt']],
     ['ROOMMATE', ['roommate', 'room mate', 'roomie', 'partner', 'sharing with', 'my room mate']],
-    ['FACILITY', ['water', 'electricity', 'wifi', 'internet', 'clean', 'maintenance', 'fan',
-                  'washroom', 'toilet', 'bathroom', 'furniture', 'broken', 'leak', 'mess food']],
+    // The day-to-day list, which is most of what a resident ever reports. Every
+    // entry is long enough not to appear inside an unrelated word: 'ac' would
+    // match "place" and 'rat' would match "administration", and a classifier
+    // that files a fee query under maintenance is worse than one that gives up.
+    ['FACILITY', ['water', 'electricity', 'power cut', 'wifi', 'internet', 'clean',
+                  'maintenance', 'fan', 'cooler', 'geyser', 'heater', 'washroom',
+                  'toilet', 'bathroom', 'furniture', 'broken', 'leak', 'tap',
+                  'drain', 'sewage', 'mess', 'food', 'canteen', 'mosquito',
+                  'cockroach', 'pest', 'garbage', 'dustbin', 'laundry', 'lift',
+                  'security', 'guard', 'noise', 'mattress', 'window', 'switch',
+                  'bulb', 'light', 'door lock', 'hot water', 'drinking water']],
     ['ALLOCATION', ['allot', 'allocat', 'waitlist', 'waiting list', 'seat', 'merit', 'quota',
                     'reject', 'preference', 'room type', 'not fair', 'unfair', 'why did', 'rank']]
   ];
@@ -84,6 +105,7 @@ var Grievance = (function () {
       case 'ALLOCATION': result = triageAllocation_(t); break;
       case 'DOCUMENT':   result = triageDocument_(t);   break;
       case 'ROOMMATE':   result = triageRoommate_(t);   break;
+      case 'FACILITY':   result = triageFacility_(t);   break;
       default:
         result = {
           status: 'ESCALATED',
@@ -377,6 +399,53 @@ var Grievance = (function () {
     };
   }
 
+  /** Where this student actually lives - a report about a room needs the room. */
+  function residence_(appId) {
+    var alloc = Db.findOne('Allocations', { appId: appId });
+    if (!alloc || alloc.status !== 'ACTIVE') return null;
+    var bed = Db.byId('Beds', alloc.bedId);
+    var room = bed ? Db.byId('Rooms', bed.roomId) : null;
+    var hostel = room ? Db.byId('Hostels', room.hostelId) : null;
+    if (!room || !hostel) return null;
+    return {
+      hostelName: hostel.name, warden: hostel.warden, contact: hostel.contact,
+      block: room.block, floor: room.floor, roomNo: room.roomNo
+    };
+  }
+
+  /**
+   * A tap does not fix itself, so this never claims to have settled anything.
+   * What it does is attach the room, the block and the warden to the ticket
+   * before a person ever opens it, so nobody has to write back asking the
+   * student where they live - which is the step that actually loses the days.
+   */
+  function triageFacility_(t) {
+    var at = residence_(t.appId);
+    if (!at) {
+      return {
+        status: 'ESCALATED',
+        headline: 'Passed to the hostel office',
+        body: 'This has been passed to the hostel office and a person will look at it.',
+        findings: []
+      };
+    }
+    var due = fmtWhen_(t.slaDueAt);
+    return {
+      status: 'ESCALATED',
+      headline: 'Logged against room ' + at.roomNo + ', ' + at.hostelName,
+      body: 'Logged against room ' + at.roomNo + ' (block ' + at.block + ', floor ' +
+            at.floor + ') in ' + at.hostelName + ', and with the warden' +
+            (at.warden ? ', ' + at.warden : '') +
+            (at.contact ? ' (' + at.contact + ')' : '') + '. ' +
+            (due ? 'It is due to be dealt with by ' + due + '. ' : '') +
+            'Maintenance is not settled automatically - it needs a person and a toolbox - ' +
+            'but your room and block are already attached, so nobody has to ask you where ' +
+            'you live before starting.',
+      findings: [{ check: 'ROOM_IDENTIFIED', ok: true,
+                   text: at.hostelName + ', block ' + at.block + ', room ' + at.roomNo }]
+    };
+  }
+
   function triageRoommate_(t) {
     var alloc = Db.findOne('Allocations', { appId: t.appId });
     if (!alloc || alloc.status !== 'ACTIVE') {
@@ -439,6 +508,10 @@ var Grievance = (function () {
       .map(function (g) {
         var app = apps[g.appId];
         var student = app ? stu[app.studentId] : null;
+        // A report about a room is useless without the room. Attached to every
+        // ticket, not only the maintenance ones, because the warden reading an
+        // inbox wants to know which building each line belongs to.
+        var at = residence_(g.appId);
         var triageData = typeof g.autoTriage === 'string'
           ? (function () { try { return JSON.parse(g.autoTriage); } catch (e) { return null; } })()
           : g.autoTriage;
@@ -448,6 +521,9 @@ var Grievance = (function () {
           enrollmentNo: student ? student.enrollmentNo : '',
           category: g.category, status: g.status,
           text: g.text,
+          hostelName: at ? at.hostelName : '',
+          roomNo: at ? at.roomNo : '',
+          block: at ? at.block : '',
           headline: triageData ? triageData.headline : '',
           anomalies: triageData && triageData.anomalies ? triageData.anomalies : [],
           // Formatted here rather than handed over as Date objects. Every other

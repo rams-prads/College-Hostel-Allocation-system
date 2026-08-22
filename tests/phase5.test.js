@@ -383,6 +383,41 @@ const gOther = Grievance.raise(allottedApp,
   'I would like to request a change in my mess timings please.', 'student');
 check('an unrecognised request escalates to a human', gOther.status === 'ESCALATED');
 
+section('The day-to-day desk');
+
+const gFac = Grievance.raise(allottedApp,
+  'The geyser in our bathroom has not given hot water for three days.', 'student');
+check('a maintenance report is classified as a facility problem',
+  Grievance.classify('the geyser gives no hot water') === 'FACILITY');
+check('it is not pretended to be settled', gFac.status === 'ESCALATED',
+  'a tap needs a person and a toolbox, and claiming otherwise would be a lie in a ticket');
+check('but the room it is about is already attached', (() => {
+  const alloc = Db.findOne('Allocations', { appId: allottedApp });
+  const room = Db.byId('Rooms', Db.byId('Beds', alloc.bedId).roomId);
+  return gFac.body.indexOf(String(room.roomNo)) > 0 &&
+         gFac.headline.indexOf(String(room.roomNo)) > 0;
+})(), 'writing back to ask a student where they live is the step that loses the days');
+check('and so is the warden it belongs to', (() => {
+  const alloc = Db.findOne('Allocations', { appId: allottedApp });
+  const room = Db.byId('Rooms', Db.byId('Beds', alloc.bedId).roomId);
+  const hostel = Db.byId('Hostels', room.hostelId);
+  return !hostel.warden || gFac.body.indexOf(hostel.warden) > 0;
+})());
+check('the inbox row carries the room, so a warden can act on the list itself', (() => {
+  const row = Grievance.inbox(null, 200).find(t => t.ticketId === gFac.ticketId);
+  return !!row && !!row.roomNo && !!row.hostelName;
+})());
+
+const daily = ['the wifi has been down all week', 'there is no drinking water on our floor',
+               'the mess food was uncooked today', 'my window latch is broken',
+               'there are cockroaches in the bathroom'];
+check('the everyday reports all land in one place',
+  daily.every(t => Grievance.classify(t) === 'FACILITY'),
+  daily.map(t => Grievance.classify(t)).join(', '));
+check('and an allocation question still is not one of them',
+  Grievance.classify('why was I waitlisted when my merit was higher') === 'ALLOCATION',
+  'the audited reply is the whole point, and it must not be swallowed by a keyword');
+
 section('Grievance inbox and stats');
 const st = Grievance.stats();
 check('stats are computed', st.total > 0, st.total + ' tickets');

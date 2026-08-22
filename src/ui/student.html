@@ -69,10 +69,13 @@
             signOut: !v.viewingAs && !!SESSION.token },
       // A demo visitor has no session, so every tab would land them back on the
       // sign-in wall. Showing navigation that cannot work is worse than none.
-      tabs: v.demoMode ? [] : [
-        { label: 'My Application', href: '?', on: true },
-        { label: v.application ? 'Edit Application' : 'Apply', href: '?page=apply' }
-      ].concat(v.isAdmin ? [{ label: 'Administration', href: '?page=admin' }] : [])
+      tabs: v.demoMode ? [] : [{ label: 'My Application', href: '?', on: true }]
+        // Offered only while the form can still accept it. A tab that leads to
+        // a locked page is a promise the next screen has to take back.
+        .concat(!v.application || v.editable
+          ? [{ label: v.application ? 'Edit Application' : 'Apply', href: '?page=apply' }]
+          : [])
+        .concat(v.isAdmin ? [{ label: 'Administration', href: '?page=admin' }] : [])
     });
 
     if (v.unregistered) {
@@ -111,6 +114,10 @@
     else if (v.waitlist)  html.push(waitlistHero(v));
     else                  html.push(pendingHero(v));
 
+    // Answered where the student is already looking. It used to be answered
+    // only by a link in the footer, which is not a place anybody looked.
+    if (!v.allocation && !v.waitlist) html.push(editNote(v));
+
     if (v.explanation && v.explanation.groups) html.push(explanationCard(v));
     if (v.allocation && (v.allocation.roommates || []).length) html.push(roommateCard(v));
 
@@ -123,7 +130,10 @@
     html.push(documentsCard(v));
     html.push(identityCard(v));
     html.push('<div id="swapCard"></div>');
-    html.push('<div id="grievCard"></div>');
+    // Reporting is a residents' desk: it opens with the room. Before allotment
+    // the documents and identity cards above already say what is outstanding,
+    // and a free-text box beside them only collected questions they answered.
+    if (v.allocation) html.push('<div id="grievCard"></div>');
     html.push(footNote(v));
 
     el('root').innerHTML = html.join('');
@@ -134,7 +144,7 @@
     // page and teach the viewer nothing.
     if (!v.demoMode) {
       loadSwaps();
-      loadGrievances();
+      if (v.allocation) loadGrievances();
     }
   }
 
@@ -201,7 +211,7 @@
         '<div class="eyebrow">Application outcome</div>' +
         '<h1 class="big" style="font-size:30px">Not eligible</h1>' +
         '<div class="where">The reasons are set out below. If you believe this is a ' +
-        'mistake you can raise a grievance.</div>' +
+        'mistake, contact the hostel office.</div>' +
       '</div></div></div>';
     }
     return '<div class="hero"><div class="hero-grid"><div class="main">' +
@@ -515,6 +525,24 @@
       .apiSubmitIdentity(value);
   }
 
+  /**
+   * One line answering "can I still fix this?", in front of the student rather
+   * than buried in a footer link.
+   */
+  function editNote(v) {
+    if (v.editable) {
+      return card('', '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:260px" class="small">' +
+        '<strong>Anything here can still be changed.</strong> Your details, your room ' +
+        'choices and the roommate answers stay yours to correct until the hostel office ' +
+        'has verified both your identity and your documents.</div>' +
+        '<a class="btn ghost" href="' + appUrl('?page=apply') + '" target="_top">' +
+        'Edit my application</a></div>');
+    }
+    return banner('ok', v.lockReason ||
+      'Your application is now fixed as the office checked it.');
+  }
+
   function noApplication(v) {
     if (!v.applicationsOpen) {
       return card('', emptyState('&#128197;', 'Applications are closed',
@@ -529,7 +557,9 @@
   }
 
   function footNote(v) {
-    var canEdit = ['DRAFT','SUBMITTED','VERIFIED'].indexOf(v.application.status) >= 0;
+    // The server's answer, not a second guess at it. This list had already
+    // drifted from what apiSaveApplication would actually accept.
+    var canEdit = !!v.editable;
     return '<div class="foot-note">' +
       '<span>Application reference <strong>' + esc(v.application.appId) + '</strong>' +
       (v.application.submittedAt ? ' &middot; submitted ' + esc(v.application.submittedAt) : '') +
@@ -612,8 +642,9 @@
 
   function swapErr(msg) { el('swapMsg').innerHTML = banner('err', msg); }
 
-  /* ========================================================== grievances */
+  /* ============================================== reporting a problem */
   function loadGrievances() {
+    if (!VIEW.allocation || !el('grievCard')) return;
     srv().withSuccessHandler(paintGrievances)
       .withFailureHandler(function () { el('grievCard').innerHTML = ''; }).apiGetGrievances();
   }
@@ -642,19 +673,22 @@
       (tickets ? '<ul class="rows" style="margin:-18px -18px 0">' + tickets + '</ul><div class="divider"></div>'
                : '') +
       '<label class="field"><span class="lab">' +
-      (tickets ? 'Raise another grievance' : 'Raise a grievance') + '</span>' +
+      (tickets ? 'Report something else' : 'What has gone wrong?') + '</span>' +
       '<textarea id="grievText" rows="3" ' +
-      'placeholder="Describe the problem in a sentence or two."></textarea>' +
-      '<span class="help">Questions about your allocation are re-checked against the recorded ' +
-      'run automatically, and usually answered within seconds.</span></label>' +
-      '<div class="btn-row"><button class="btn" onclick="raiseGrievance()">Submit</button></div>';
+      'placeholder="e.g. the geyser in the bathroom has not worked for three days"></textarea>' +
+      '<span class="help">Anything about living here \u2014 water, power, the wifi, the mess, ' +
+      'cleaning, furniture, your roommate \u2014 or a question about the room you were given. ' +
+      'A maintenance report goes to your warden with your room and block already attached; a ' +
+      'question about your allotment is re-checked against the recorded run and usually ' +
+      'answered within seconds.</span></label>' +
+      '<div class="btn-row"><button class="btn" onclick="raiseGrievance()">Report it</button></div>';
 
-    el('grievCard').innerHTML = card('Grievances', '<div id="grievMsg"></div>' + body);
+    el('grievCard').innerHTML = card('Report a problem', '<div id="grievMsg"></div>' + body);
   }
 
   function raiseGrievance() {
     var text = (el('grievText') || {}).value || '';
-    el('grievMsg').innerHTML = banner('info', 'Checking your case against the recorded run…');
+    el('grievMsg').innerHTML = banner('info', 'Logging your report…');
     srv().withSuccessHandler(loadGrievances)
       .withFailureHandler(function (e) {
         el('grievMsg').innerHTML = banner('err', e.message);

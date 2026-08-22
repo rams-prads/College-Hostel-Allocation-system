@@ -43,7 +43,10 @@
 <div class="wrap narrow" id="root"></div>
 
 <script>
-  var FORM = null, REG = null, STEPS = [], step = 0, pinInfo = null;
+  // FULL: this form is showing the declared details, not only the room choices.
+  // True while registering, and true again for any application the office has
+  // not finished checking - the same form, so there is only one of it.
+  var FORM = null, REG = null, STEPS = [], step = 0, pinInfo = null, FULL = false;
   loadToken();
 
   var reg = {
@@ -97,17 +100,35 @@
       return;
     }
 
-    if (f.needsRegistration) {
-      REG = f.registration;
-      STEPS = ['Your details', 'Course', 'Home address', 'Family', 'Preferences',
-               'Roommate', 'Review'];
-    } else {
-      STEPS = ['Preferences', 'Roommate', 'Review'];
-      if (f.draft) {
-        chosen = (f.draft.preferences || []).slice();
-        needsAccessible = !!f.draft.needsAccessible;
-        lifestyle = f.draft.lifestyle || {};
-      }
+    // An application the office has finished with is not a form any more.
+    // Rendering one that the server will refuse to save is how a student ends
+    // up typing a correction twice and losing it twice.
+    if (f.draft && f.editable === false) {
+      el('root').innerHTML =
+        card('', emptyState('&#128274;', 'Your application is now fixed', f.lockReason)) +
+        card('', '<div style="text-align:center"><a class="btn" href="' + appUrl('?') +
+             '" target="_top">Back to my application</a></div>');
+      return;
+    }
+
+    REG = f.registration;
+
+    // Everything a student declared is theirs to correct until the office has
+    // finished checking it, so an editable application renders the SAME form
+    // that captured it. A cut-down version that could only reach the room
+    // choices is exactly what left people unable to fix a typed PIN code.
+    FULL = f.needsRegistration || (!!f.student && f.editable !== false);
+
+    STEPS = FULL
+      ? ['Your details', 'Course', 'Home address', 'Family', 'Preferences',
+         'Roommate', 'Review']
+      : ['Preferences', 'Roommate', 'Review'];
+
+    if (f.student) prefillFrom(f.student);
+    if (f.draft) {
+      chosen = (f.draft.preferences || []).slice();
+      needsAccessible = !!f.draft.needsAccessible;
+      lifestyle = f.draft.lifestyle || {};
     }
     if (!lifestyle.cleanliness) lifestyle.cleanliness = 3;
     if (!lifestyle.sociability) lifestyle.sociability = 3;
@@ -115,12 +136,28 @@
     paint();
   }
 
+  /** Load the record into the form, so an edit starts from what we hold. */
+  function prefillFrom(st) {
+    Object.keys(reg).forEach(function (k) {
+      if (st[k] === undefined || st[k] === null || st[k] === '') return;
+      reg[k] = (typeof st[k] === 'boolean') ? st[k] : String(st[k]);
+    });
+    reg.parentTransferred = !!st.parentTransferred;
+    reg.isPwD = !!st.isPwD;
+  }
+
   /* ================================================================ shell */
   function paint() {
+    var editing = FULL && !FORM.needsRegistration;
     var head = FORM.needsRegistration
       ? banner('info', 'We have no record for ' + FORM.email + ' yet, so this form registers ' +
                        'you and applies for a hostel place in one go.')
-      : '';
+      : (editing
+          ? banner('info', 'Everything you told us is here and can be changed \u2014 your ' +
+                   'details, your room choices, the roommate answers. Nothing is saved until ' +
+                   'you submit at the end, and you can keep correcting it until the hostel ' +
+                   'office has verified both your identity and your documents.')
+          : '');
 
     el('root').innerHTML =
       '<div id="msg"></div>' + head +
@@ -136,8 +173,10 @@
         (step < STEPS.length - 1
           ? '<button class="btn" onclick="goStep(' + (step + 1) + ')">Continue</button>'
           : '<button class="btn" id="submitBtn" onclick="submitAll()">Submit application</button>') +
-        (FORM.needsRegistration ? ''
-          : '<button class="btn ghost" onclick="saveDraft()">Save as draft</button>') +
+        // Only offered on an application that has not been submitted. On one
+        // that has, "draft" is not a state it can go back to.
+        (!FORM.needsRegistration && (!FORM.draft || FORM.draft.status === 'DRAFT')
+          ? '<button class="btn ghost" onclick="saveDraft()">Save as draft</button>' : '') +
         '<span class="small muted">Step ' + (step + 1) + ' of ' + STEPS.length + '</span>' +
       '</div>');
 
@@ -418,7 +457,7 @@
         }).join('') + '</ol>'
       : '<p class="muted small" style="margin:0">None chosen.</p>';
 
-    var personal = FORM.needsRegistration
+    var personal = FULL
       ? card('Your details', '<dl class="kv review">' +
           rv('Name', reg.name) + rv('Enrolment number', reg.enrollmentNo) +
           rv('Mobile', reg.phone) +
@@ -531,16 +570,24 @@
   }
 
   function saveApplication(submit) {
+    var wasSubmitted = !!(FORM.draft && FORM.draft.status !== 'DRAFT');
     srv()
       .withSuccessHandler(function () {
         if (submit) {
-          flashOnNextPage('good', 'Your application has been submitted. ' +
-            'Upload the documents listed below so the hostel office can verify you.');
+          flashOnNextPage('good', wasSubmitted
+            ? 'Your application has been updated. Anything the office had already checked ' +
+              'against a detail you changed goes back into the queue to be checked again.'
+            : 'Your application has been submitted. Upload the documents listed below so ' +
+              'the hostel office can verify you.');
         }
         reloadTop();
       })
       .withFailureHandler(fail)
       .apiSaveApplication({
+        // Sent only when this form is actually showing the details. A student
+        // editing room choices alone must not be able to post a details object
+        // assembled from a half-filled form.
+        details: (FULL && !FORM.needsRegistration) ? reg : null,
         needsAccessible: needsAccessible,
         preferences: chosen, lifestyle: lifestyle, submit: !!submit
       });
@@ -551,6 +598,7 @@
       .withSuccessHandler(function () { say('good', 'Draft saved. You can finish it later.'); })
       .withFailureHandler(fail)
       .apiSaveApplication({
+        details: (FULL && !FORM.needsRegistration) ? reg : null,
         needsAccessible: needsAccessible,
         preferences: chosen, lifestyle: lifestyle, submit: false
       });
@@ -568,8 +616,11 @@
   }
 
   /* =============================================================== campus */
-  function myGender()  { return FORM.student ? FORM.student.gender : reg.gender; }
-  function myCampus()  { return FORM.student ? FORM.student.campus : reg.campus; }
+  // The form's own value wins over the record, because on an edit the form IS
+  // the correction. reg is prefilled from the record, so the two agree until
+  // the student changes something - and from then on the change is what counts.
+  function myGender()  { return reg.gender || (FORM.student ? FORM.student.gender : ''); }
+  function myCampus()  { return reg.campus || (FORM.student ? FORM.student.campus : ''); }
   function campusLabel(c) { return label('campus', c, 'your campus'); }
 
   /**
@@ -588,7 +639,7 @@
    * options with the form. Fetch them once gender and campus are declared.
    */
   function ensureOptions() {
-    if (!FORM.needsRegistration) return;
+    if (!FULL) return;
     var key = [myGender(), myCampus(), reg.programme, reg.year].join('|');
     if (optionsFor === key && FORM.options) return;
 

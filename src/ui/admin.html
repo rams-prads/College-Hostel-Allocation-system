@@ -46,7 +46,8 @@
     { id: 'students',     label: 'Students',
       title: 'Students', blurb: 'Open any applicant\u2019s portal exactly as they see it.' },
     { id: 'requests',     label: 'Requests',
-      title: 'Grievances and swaps', blurb: 'What students have asked for.' },
+      title: 'Resident reports and swaps',
+      blurb: 'What students living in the hostels have reported or asked for.' },
     { id: 'policy',       label: 'Policy',
       title: 'Policy', blurb: 'Change a rule and see who moves, before committing it.' },
     { id: 'operations',   label: 'Operations',
@@ -941,15 +942,15 @@
 
   function paintGrievances(d) {
     if (!d || !d.stats) {
-      el('grievCard').innerHTML = card('Grievances',
-        banner('warn', 'The grievance inbox could not be loaded. Everything else on ' +
+      el('grievCard').innerHTML = card('Resident reports',
+        banner('warn', 'The reports inbox could not be loaded. Everything else on ' +
                        'this page is unaffected.'));
       return;
     }
     var st = d.stats;
     if (!st.total) {
-      el('grievCard').innerHTML = card('Grievances',
-        '<p class="muted small" style="margin:0">No grievances have been raised.</p>');
+      el('grievCard').innerHTML = card('Resident reports',
+        '<p class="muted small" style="margin:0">Nothing has been reported.</p>');
       return;
     }
     // Open and escalated first: those are the ones a person still owes an
@@ -969,6 +970,11 @@
           (t.enrollmentNo ? ' &middot; ' : '') +
           esc(String(t.category).toLowerCase().replace(/_/g, ' ')) +
           ' &middot; ' + esc(t.ticketId) + '</div>' +
+          // Where they live, on the line a warden reads first. A report about a
+          // tap is not actionable without the room it is in.
+          (t.roomNo ? '<div class="small" style="margin-top:3px"><strong>' +
+            esc(t.hostelName) + '</strong> &middot; block ' + esc(t.block) +
+            ' &middot; room ' + esc(t.roomNo) + '</div>' : '') +
         '</div>' + pill(kind, label('grievance', t.status)) + '</div>' +
         '<p class="small" style="margin:10px 0 0">' + esc(t.text) + '</p>' +
         (t.headline ? '<p class="small muted" style="margin:8px 0 0"><strong>Automatic ' +
@@ -996,9 +1002,9 @@
              esc(t.resolution) + '</p>' : ''));
     }
 
-    el('grievCard').innerHTML = card('Grievances',
+    el('grievCard').innerHTML = card('Resident reports',
       '<div class="tiles" style="margin-bottom:15px">' +
-        tile(st.total, 'raised', '') +
+        tile(st.total, 'reported', '') +
         tile(st.autoResolvedPct + '%', 'answered automatically', 'good') +
         tile(live.length, 'waiting on you', live.length ? 'hi' : '') +
       '</div>' +

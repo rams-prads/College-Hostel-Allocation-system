@@ -511,6 +511,26 @@ var Identity = (function () {
   }
 
   /** What the student is allowed to see about their own identity record. */
+  /**
+   * Send a verified identity back for checking.
+   *
+   * Called when the name or enrolment number the check was made against is
+   * corrected. Silently doing nothing to an identity that was never verified is
+   * the point: this is a downgrade, never an upgrade, so it cannot be used to
+   * push a record forward.
+   */
+  function reopen(studentId, why, actor) {
+    var row = Db.byId('Identity', studentId);
+    if (!row || row.status !== 'VERIFIED') return false;
+    Db.update('Identity', studentId, {
+      status: 'SUBMITTED', verifiedBy: '', verifiedAt: '',
+      note: 'Sent back for checking because ' + why + '.'
+    });
+    Ledger.append('IDENTITY_REOPENED', { studentId: studentId, why: why },
+      actor || 'system');
+    return true;
+  }
+
   function statusFor(studentId) {
     var row = Db.byId('Identity', studentId);
     if (!row) {
@@ -543,6 +563,7 @@ var Identity = (function () {
     rescreen: rescreen,
     submit: submit,
     decide: decide,
+    reopen: reopen,
     statusFor: statusFor
   };
 })();

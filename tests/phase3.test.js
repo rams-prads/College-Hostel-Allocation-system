@@ -232,6 +232,189 @@ const draft = apiSaveApplication({
 });
 check('an empty draft saves without error', draft.ok && draft.status === 'DRAFT');
 
+section('Correcting the details, until the office has finished checking');
+
+Db.update('Applications', myApp.appId, { status: 'SUBMITTED', docStatus: 'PENDING' });
+Db.invalidate('Applications');
+
+check('a submitted application is still the student to correct',
+  apiGetApplyForm().editable === true,
+  'verification is what fixes a declaration, not the act of submitting it');
+
+check('the form carries what is needed to render the details again',
+  !!apiGetApplyForm().registration &&
+  apiGetApplyForm().registration.programmes.length > 0,
+  'the reference data used to be sent only to students who had not registered');
+
+const before = Db.byId('Students', target.studentId);
+const newPin = String(before.homePincode) === '110078' ? '560001' : '110078';
+
+// The seeded registry never held a guardian or a full address - a real import
+// would. The form asks for them with a red asterisk, so a correction carries
+// them; these tests do the same rather than pretending the form does not.
+function details(over) {
+  return Object.assign({}, Db.byId('Students', target.studentId), {
+    homeAddress: 'House 12, Main Road, Sector 4',
+    guardianName: 'Ramesh Kumar', guardianPhone: '9812345670'
+  }, over || {});
+}
+
+const edited = apiSaveApplication({
+  details: details({ homePincode: newPin, phone: '9876500011' }),
+  needsAccessible: false, preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
+});
+check('the correction is accepted', edited.ok === true);
+check('and it reached the record', String(
+  Db.byId('Students', target.studentId).homePincode) === newPin,
+  'this is the field the whole priority order turns on for a Delhi applicant');
+check('the distance is recomputed from the corrected address, not left stale', (() => {
+  const geo = Geo.distanceFromHome(newPin, Db.byId('Students', target.studentId).campus);
+  return geo.resolved &&
+         Number(Db.byId('Applications', myApp.appId).distanceKm) === Number(geo.km);
+})(), 'a corrected address that leaves the old distance behind has corrected nothing');
+
+check('the ledger records WHICH fields moved, not merely that something did', (() => {
+  const e = Db.readAll('AuditLog').filter(x => x.action === 'STUDENT_DETAILS_UPDATED').pop();
+  if (!e) return false;
+  const p = typeof e.payloadJson === 'string' ? JSON.parse(e.payloadJson) : e.payloadJson;
+  return p.fields.indexOf('homePincode') >= 0 && !!p.changes.homePincode.from;
+})(), 'an officer who verified an address has to see that the address moved afterwards');
+
+check('a field nobody may set themselves is refused', (() => {
+  const held = Db.byId('Students', target.studentId);
+  apiSaveApplication({
+    details: details({ disciplinaryFlag: !held.disciplinaryFlag,
+                       exResident: !held.exResident,
+                       attendancePct: 99, category: 'SC' }),
+    needsAccessible: false, preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
+  });
+  const after = Db.byId('Students', target.studentId);
+  // The whitelisted field moved; the three that are not on the list did not.
+  return after.category === 'SC' &&
+         !!after.disciplinaryFlag === !!held.disciplinaryFlag &&
+         !!after.exResident === !!held.exResident &&
+         Number(after.attendancePct) === Number(held.attendancePct);
+})(), 'a blacklist would quietly hand over any column added to Students later');
+
+check('an invalid correction is refused whole, leaving the record alone', (() => {
+  const held = Db.byId('Students', target.studentId);
+  let threw = false;
+  try {
+    apiSaveApplication({
+      details: details({ homePincode: '12' }),
+      needsAccessible: false, preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
+    });
+  } catch (e) { threw = true; }
+  return threw && String(Db.byId('Students', target.studentId).homePincode) === String(held.homePincode);
+})(), 'half an application saved is worse than none');
+
+check('saving a draft cannot un-submit a submitted application', (() => {
+  apiSaveApplication({ preferences: goodPrefs, lifestyle: goodLifestyle, submit: false });
+  return Db.byId('Applications', myApp.appId).status === 'SUBMITTED';
+})(), 'it would have withdrawn them from the allocation they were already in');
+
+section('A correction reopens whatever was checked against it');
+
+// Both checks passed, and THEN the address changed.
+const doc = Db.where('Documents', { appId: myApp.appId })[0];
+Db.update('Documents', doc.docId, {
+  driveFileId: 'file-x', status: 'VERIFIED', scanVerdict: 'MATCH',
+  verifiedBy: 'warden@ipu.ac.in', verifiedAt: new Date()
+});
+Db.append('Identity', {
+  studentId: target.studentId, aadhaarRef: 'ref', aadhaarLast4: '4321',
+  enrolmentNorm: '', status: 'VERIFIED', riskScore: 0, findingsJson: null,
+  submittedAt: new Date(), verifiedBy: 'warden@ipu.ac.in', verifiedAt: new Date(), note: ''
+});
+Db.invalidate('Documents'); Db.invalidate('Identity');
+Db.update('Applications', myApp.appId, { docStatus: 'PENDING' });
+Db.invalidate('Applications');
+
+apiSaveApplication({
+  details: details({ homePincode: newPin === '110078' ? '560001' : '110078' }),
+  needsAccessible: false, preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
+});
+Db.invalidate('Documents');
+
+check('the document that was checked against the old address goes back in the queue',
+  Db.byId('Documents', doc.docId).status === 'UPLOADED' &&
+  Db.byId('Documents', doc.docId).scanVerdict === 'UNSCANNED',
+  'otherwise "get it verified, then change it" is the whole hole');
+check('and the reopening is on the ledger',
+  Db.readAll('AuditLog').some(e => e.action === 'DOCUMENT_CHECK_REOPENED'));
+
+check('changing the name sends the identity check back too', (() => {
+  Db.update('Identity', target.studentId, { status: 'VERIFIED' });
+  Db.invalidate('Identity');
+  apiSaveApplication({
+    details: details({ name: 'Corrected Name' }),
+    needsAccessible: false, preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
+  });
+  Db.invalidate('Identity');
+  return Identity.statusFor(target.studentId).status === 'SUBMITTED';
+})(), 'the identity check matches a name to a card, so a new name is a new check');
+
+check('a correction that touches nothing checkable leaves the checks alone', (() => {
+  Db.update('Documents', doc.docId, { status: 'VERIFIED', scanVerdict: 'MATCH' });
+  Db.invalidate('Documents');
+  apiSaveApplication({
+    details: details({ medicalNotes: 'Asthma inhaler kept in the room' }),
+    needsAccessible: false, preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
+  });
+  Db.invalidate('Documents');
+  return Db.byId('Documents', doc.docId).status === 'VERIFIED';
+})(), 'reopening a check nothing invalidated would just punish people for typing');
+
+section('Once both checks have passed, it is fixed');
+
+Db.readAll('Documents').filter(d => d.appId === myApp.appId).forEach(d =>
+  Db.update('Documents', d.docId, { status: 'VERIFIED', driveFileId: 'f', scanVerdict: 'MATCH' }));
+Db.update('Identity', target.studentId, { status: 'VERIFIED' });
+Db.update('Applications', myApp.appId, { docStatus: 'VERIFIED' });
+Db.invalidate('Documents'); Db.invalidate('Identity'); Db.invalidate('Applications');
+
+check('the form says so rather than rendering fields', apiGetApplyForm().editable === false);
+check('and the reason names both checks',
+  /identity and your documents/.test(apiGetApplyForm().lockReason),
+  apiGetApplyForm().lockReason);
+check('a save is refused', (() => {
+  try {
+    apiSaveApplication({ preferences: goodPrefs, lifestyle: goodLifestyle, submit: true });
+    return false;
+  } catch (e) { return true; }
+})());
+check('and so is a details correction', (() => {
+  try {
+    apiSaveApplication({
+      details: details({ homePincode: '110001' }),
+      preferences: goodPrefs, lifestyle: goodLifestyle, submit: true });
+    return false;
+  } catch (e) { return true; }
+})(), 'the declaration IS what was verified once both have passed');
+
+check('one check alone does not fix it', (() => {
+  Db.update('Applications', myApp.appId, { docStatus: 'SUBMITTED' });
+  Db.invalidate('Applications');
+  return apiGetApplyForm().editable === true;
+})(), 'while either check is still open somebody is still going to read this record');
+
+Db.update('Applications', myApp.appId, { docStatus: 'PENDING' });
+Db.update('Identity', target.studentId, { status: 'SUBMITTED' });
+Db.invalidate('Applications'); Db.invalidate('Identity');
+
+section('Reporting a problem is a residents desk');
+
+(function () {
+  let refused = false, msg = '';
+  try { apiRaiseGrievance('The geyser in the bathroom has not worked for three days'); }
+  catch (e) { refused = true; msg = e.message; }
+  check('an applicant with no room cannot open one', refused,
+    'before allotment the application screens already say what is outstanding');
+  if (refused) console.log('        -> "' + msg + '"');
+  check('and it points them somewhere real',
+    /hostel office/.test(msg), msg);
+})();
+
 section('Allotted applications lock');
 Db.update('Applications', myApp.appId, { status: 'ALLOTTED' });
 let locked = false, lockMsg = '';
