@@ -238,7 +238,7 @@ refuses('a spoofed content-type parameter does not slip through',
   { mimeType: 'text/html; charset=utf-8' }, 'PDF or a photo');
 refuses('an empty file is refused', { bytes: '' }, 'empty');
 refuses('a document type that was never required is refused',
-  { docType: 'PWD_CERT' }, 'not required');
+  { docType: 'RULES_UNDERTAKING' }, 'not required');
 refuses('an oversized file is refused',
   { bytes: Utilities.base64Encode(new Array(9 * 1024 * 1024).fill(65)) }, 'larger than');
 
@@ -297,12 +297,16 @@ check('and it is treated as blocking', dupScreen.level === 'HIGH');
 console.log('        -> "' +
   (dupScreen.findings.find(f => f.code === 'DOCUMENT_REUSED') || {}).text + '"');
 
-// A claim with nothing behind it.
+// A category claim is checked against the certificate at the counter, where
+// the certificate actually is. Screening must not manufacture a finding about a
+// document the portal never asked anybody to upload - a queue full of those is
+// a queue nobody reads.
 const claimant = Db.readAll('Students').find(s => s.category !== 'GEN');
 const claimApp = Db.findOne('Applications', { studentId: claimant.studentId });
 const claimScreen = Identity.screen(claimApp.appId);
-check('a reserved-category claim with no certificate is flagged',
-  claimScreen.findings.some(f => f.code === 'CATEGORY_UNSUPPORTED'),
+check('a reserved-category claim raises nothing the portal cannot check',
+  !claimScreen.findings.some(f => f.code === 'CATEGORY_UNSUPPORTED' ||
+                                  f.code === 'PWD_UNSUPPORTED'),
   claimScreen.findings.map(f => f.code).join(', '));
 
 // The address, which is what actually moves the score.

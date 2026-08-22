@@ -12,64 +12,48 @@ seedConfig_();
 seedPolicy_();
 seedAll();
 
-section('Document requirements are computed, not a fixed checklist');
-const firstYearGen = { year: 1, category: 'GEN', isPwD: false };
-const seniorGen    = { year: 3, category: 'GEN', isPwD: false };
-const firstYearSC  = { year: 1, category: 'SC',  isPwD: false };
-const seniorPwdOBC = { year: 2, category: 'OBC', isPwD: true };
+section('Two documents, and who is asked for which');
+
+const firstYearGen = { year: 1, category: 'GEN', isPwD: false, programme: 'BTMT' };
+const seniorGen    = { year: 3, category: 'GEN', isPwD: false, programme: 'BTMT' };
+const firstYearSC  = { year: 1, category: 'SC',  isPwD: false, programme: 'BTMT' };
+const seniorPwdOBC = { year: 2, category: 'OBC', isPwD: true,  programme: 'BTMT' };
 
 const types = s => Documents.requiredFor(s).map(d => d.docType).sort();
 
-check('first-year student is asked for an admission letter',
-  types(firstYearGen).includes('ADMISSION_LETTER'));
-check('first-year student is NOT asked for an ID card',
+check('everybody is asked for their Aadhaar',
+  [firstYearGen, seniorGen, firstYearSC, seniorPwdOBC].every(s =>
+    types(s).includes('AADHAAR')),
+  'it is the identity document and the address the distance is computed from');
+check('a first-year is asked for the Aadhaar and nothing else',
+  types(firstYearGen).join(',') === 'AADHAAR',
+  types(firstYearGen).join(', '));
+check('a continuing student is asked for their ID card as well',
+  types(seniorGen).join(',') === 'AADHAAR,ID_CARD',
+  types(seniorGen).join(', '));
+check('a first-year is NOT asked for an ID card',
   !types(firstYearGen).includes('ID_CARD'),
   'ID cards are not issued yet in year 1');
-check('continuing student is asked for an ID card',
-  types(seniorGen).includes('ID_CARD'));
-check('continuing student is NOT asked for an admission letter',
-  !types(seniorGen).includes('ADMISSION_LETTER'));
-check('General category is NOT asked for a category certificate',
-  !types(firstYearGen).includes('CATEGORY_CERT'),
-  'GEN claims no reserved seat, so there is nothing to verify');
-check('reserved category IS asked for a category certificate',
-  types(firstYearSC).includes('CATEGORY_CERT'));
-check('PwD student is asked for a disability certificate',
-  types(seniorPwdOBC).includes('PWD_CERT'));
-check('non-PwD student is not asked for a disability certificate',
-  !types(seniorGen).includes('PWD_CERT'));
-check('everyone is asked for address proof',
+
+check('a lateral-entry student is a first-year in their second year', (() => {
+  // LE-BTMT starts at year 2, so a year-2 lateral entrant has no ID card either.
+  const le = { year: 2, category: 'GEN', isPwD: false, programme: 'LE-BTMT' };
+  return types(le).join(',') === 'AADHAAR';
+})(), 'asking a brand-new student for a card nobody has issued them is a dead end');
+
+check('nothing is asked for on account of a category or a PwD claim',
+  types(firstYearSC).join(',') === types(firstYearGen).join(',') &&
+  types(seniorPwdOBC).join(',') === types(seniorGen).join(','),
+  'those certificates are checked on paper at the counter, not uploaded twice');
+
+check('no student is ever asked for more than two documents',
   [firstYearGen, seniorGen, firstYearSC, seniorPwdOBC].every(s =>
-    types(s).includes('ADDRESS_PROOF')),
-  'distance gates eligibility and carries score weight');
-check('a PwD OBC senior is asked for both certificates they are claiming on',
-  types(seniorPwdOBC).indexOf('PWD_CERT') >= 0 &&
-  types(seniorPwdOBC).indexOf('CATEGORY_CERT') >= 0,
-  types(seniorPwdOBC).join(', '));
-check('a General first-year is asked for neither, because they claim neither',
-  types(firstYearGen).indexOf('PWD_CERT') < 0 &&
-  types(firstYearGen).indexOf('CATEGORY_CERT') < 0,
-  types(firstYearGen).join(', '));
-check('a General first-year is asked for less than a claiming senior',
-  types(firstYearGen).length < types(seniorPwdOBC).length,
-  types(firstYearGen).length + ' vs ' + types(seniorPwdOBC).length);
-check('the marksheet is asked of everyone',
-  types(firstYearGen).indexOf('MARKSHEET') >= 0 &&
-  types(seniorPwdOBC).indexOf('MARKSHEET') >= 0,
-  'the priority list is built from those marks');
-check('a first-year gives the admission slip, a continuing student the ID card',
-  types(firstYearGen).indexOf('ADMISSION_LETTER') >= 0 &&
-  types(seniorPwdOBC).indexOf('ID_CARD') >= 0);
-check('a transfer order is asked for only where that priority is claimed', (() => {
-  const claimer = Object.assign({}, firstYearGen,
-    { residenceCategory: 'DELHI', parentTransferred: true });
-  return Documents.requiredFor(claimer).some(d => d.docType === 'TRANSFER_CERT') &&
-         types(firstYearGen).indexOf('TRANSFER_CERT') < 0;
-})());
-check('the category certificate names the actual category', (() => {
-  const d = Documents.requiredFor(firstYearSC).find(x => x.docType === 'CATEGORY_CERT');
-  return d.label.indexOf('SC') === 0;
-})());
+    types(s).length <= 2));
+
+check('a student with no programme on record still gets a sane answer',
+  Documents.requiredFor({ year: 1, category: 'GEN' }).length === 1,
+  'an unknown course must not throw on the way to the upload screen');
+
 check('every requirement explains why it is being asked for',
   Documents.requiredFor(seniorPwdOBC).every(d => d.why && d.why.length > 25));
 

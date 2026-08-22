@@ -214,7 +214,7 @@
       // checks and what it leaves to them.
       el('scanCard').innerHTML = card('Document reading',
         '<p class="small muted" style="margin:0">No documents have been uploaded yet. ' +
-        'When they are, each address proof is read and its PIN code compared with the ' +
+        'When they are, each Aadhaar card is read and its PIN code compared with the ' +
         'one declared &mdash; that is the field distance and eligibility are computed ' +
         'from. A difference is only raised when it would change the outcome; everything ' +
         'else is recorded and left alone.</p>');
@@ -224,7 +224,7 @@
     var settled = (v.MATCH || 0) + (v.MINOR || 0);
 
     el('scanCard').innerHTML = card('Document reading',
-      '<p class="small muted" style="margin:0 0 14px">Each address proof is read and its ' +
+      '<p class="small muted" style="margin:0 0 14px">Each Aadhaar card is read and its ' +
       'PIN code compared with the one declared &mdash; that is the field distance and ' +
       'eligibility are computed from. A difference is only raised when it would change ' +
       'the outcome.</p>' +
@@ -422,7 +422,7 @@
       '<p class="small muted" style="margin:0 0 14px">' + rows.length + ' waiting. Each ' +
       'Aadhaar number was checked for a valid checksum and against every other record ' +
       'before it reached you; only the last four digits are ever stored. Match those ' +
-      'four against the card in the address proof, then decide.</p>' + body);
+      'four against the uploaded Aadhaar card, then decide.</p>' + body);
   }
 
   function decideIdentity(studentId, approve) {

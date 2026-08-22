@@ -114,7 +114,13 @@
     if (v.explanation && v.explanation.groups) html.push(explanationCard(v));
     if (v.allocation && (v.allocation.roommates || []).length) html.push(roommateCard(v));
 
-    html.push('<div class="cols">' + preferencesCard(v) + documentsCard(v) + '</div>');
+    // Stacked, not side by side. Two half-width columns meant the documents -
+    // the only thing on this page the student still has to ACT on - sat in a
+    // narrow column beside a list they can do nothing about, and on a phone the
+    // grid collapsed into an order nobody chose. Full width, one below the
+    // other, in the order they matter.
+    html.push(preferencesCard(v));
+    html.push(documentsCard(v));
     html.push(identityCard(v));
     html.push('<div id="swapCard"></div>');
     html.push('<div id="grievCard"></div>');
@@ -438,7 +444,7 @@
         'maxlength="14" placeholder="XXXX XXXX XXXX" oninput="checkAadhaarFormat()">' +
         '<span class="help">We store only the last four digits and a one-way code. ' +
         'The number itself is never saved, and the hostel office uses it only to ' +
-        'match your address proof.</span></label>' +
+        'match your Aadhaar card.</span></label>' +
         '<div id="aadhaarHint"></div>' +
         '<div class="btn-row" style="margin-top:12px">' +
         '<button class="btn" id="aadhaarBtn" onclick="submitAadhaar()">Submit for verification</button>' +

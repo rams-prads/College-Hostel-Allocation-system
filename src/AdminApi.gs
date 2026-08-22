@@ -362,7 +362,7 @@ function apiAdminDocQueue(limit, onlyConflicts) {
 
 /**
  * The identity verification queue - applicants who have declared an Aadhaar
- * number and are waiting on a human to match it to their address proof.
+ * number and are waiting on a human to match it to their Aadhaar card.
  */
 function apiAdminIdentityQueue(limit) {
   Auth.requireAdmin();

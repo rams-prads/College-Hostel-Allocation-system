@@ -243,7 +243,7 @@ var DocScan = (function () {
     }
 
     // --- the college ID proves enrolment, not address --------------------
-    if (doc.docType === 'ID_CARD' || doc.docType === 'ADMISSION_LETTER') {
+    if (doc.docType === 'ID_CARD') {
       var enrol = String(student.enrollmentNo || '').replace(/\D/g, '');
       if (enrol) {
         var numbers = longNumbers(text, enrol.length).concat(longNumbers(text, enrol.length + 1));
@@ -259,7 +259,9 @@ var DocScan = (function () {
       return { verdict: verdictOf_(findings), findings: findings, detail: detail };
     }
 
-    // --- the address proof: everything hinges on the PIN code ------------
+    // --- the Aadhaar: everything hinges on the PIN code ------------------
+    // It is the identity document and the address proof at once, which is why
+    // it is the one document asked of everybody.
     var declared = String(student.homePincode || '').replace(/\D/g, '');
     var found = pincodes(text);
     detail.declaredPincode = declared;
@@ -268,7 +270,7 @@ var DocScan = (function () {
     if (!found.length) {
       findings.push({
         code: 'NO_PINCODE_ON_DOCUMENT', severity: 'REVIEW',
-        text: 'No PIN code could be read from the address proof, so the distance ' +
+        text: 'No PIN code could be read from the Aadhaar card, so the distance ' +
               'from home could not be confirmed automatically.'
       });
       return { verdict: 'UNREADABLE', findings: findings, detail: detail };

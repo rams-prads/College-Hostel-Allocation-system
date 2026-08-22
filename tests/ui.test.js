@@ -182,6 +182,25 @@ check('the page body rendered', r.screen.length > 800, r.screen.length + ' bytes
 check('the allotment hero is present', r.screen.indexOf('Your allotment') > 0);
 check('the explanation panel is present', r.screen.indexOf('Why you got this result') > 0);
 
+check('preferences and documents are stacked, not side by side', (() => {
+  // They used to share a two-column grid, which put the only thing on this page
+  // the student still has to ACT on into a half-width column beside a list they
+  // can do nothing about.
+  const prefAt = r.screen.indexOf('Your room preferences');
+  const docAt  = r.screen.indexOf('Documents required of you');
+  if (prefAt < 0 || docAt < 0 || docAt < prefAt) return false;
+  // Nothing may wrap the pair back into a grid.
+  return !/class="cols"[^>]*>\s*<section[^>]*>[\s\S]{0,4000}?Documents required of you/
+    .test(r.screen);
+})(), 'documents belong full width, below the preferences');
+
+check('at most two documents are ever asked for', (() => {
+  const asked = (r.screen.match(/id="u-([A-Z_]+)"/g) || [])
+    .map(m => m.replace(/[^A-Z_]/g, ''));
+  const uniq = asked.filter((v, i) => asked.indexOf(v) === i);
+  return uniq.length <= 2 && uniq.every(t => t === 'AADHAAR' || t === 'ID_CARD');
+})(), 'the rest of the checklist is collected on paper at the counter');
+
 section('Application form - returning student');
 r = renderPage('apply.html', studentEmail);
 check('script runs without throwing', !r.threw, r.threw || '');

@@ -18,76 +18,37 @@
  * Delhi-category applicant with no transferred parent is not asked for a
  * transfer certificate they have no reason to hold.
  */
+/**
+ * Two documents, and only two.
+ *
+ * The full brochure checklist runs to a dozen forms and affidavits, all of
+ * which are collected on paper at the counter when the student physically
+ * reports. Asking for them again here achieved nothing except a screen of
+ * upload buttons long enough that nobody reached the bottom of it - and a
+ * verification queue long enough that nobody worked through that either.
+ *
+ * What the portal actually needs is what the ALLOCATION depends on:
+ *
+ *   Aadhaar    identity, and the address the distance is computed from. It
+ *              carries the PIN code, which is the one field the priority order
+ *              turns on for a Delhi-category applicant.
+ *   ID card    proof that a continuing student is still enrolled. A first-year
+ *              has not been issued one, so they are not asked for it.
+ *
+ * The rest is the counter's business, and the counter is better at it.
+ */
 var DOC_TYPES = {
-  ADMISSION_LETTER: {
-    label: 'University admission slip',
-    hint: 'The admission slip card issued when you took your seat in the university.',
-    why: 'You are in your first year, so a college ID card has not been issued yet.'
+  AADHAAR: {
+    label: 'Aadhaar card',
+    hint: 'A clear photo or scan of your Aadhaar card, showing your address.',
+    why: 'Confirms who you are, and the address your distance from campus is ' +
+         'calculated from.'
   },
   ID_CARD: {
     label: 'College ID card',
     hint: 'A clear photo or scan of your current college identity card.',
-    why: 'You are a continuing student, so your ID card is your proof of enrolment.'
-  },
-  MARKSHEET: {
-    label: 'Marksheets',
-    hint: 'Class 10 and 12 marksheets, or the marksheets of your preceding semesters.',
-    why: 'Your position in the priority list is calculated from these marks, so they ' +
-         'are the document the allotment order actually rests on.'
-  },
-  ACADEMIC_FEE_PROOF: {
-    label: 'Proof of university fee payment',
-    hint: 'The receipt for your academic fee for this session.',
-    why: 'A hostel seat is offered only to a currently enrolled full-time student.'
-  },
-  CATEGORY_CERT: {
-    label: 'Category certificate',
-    hint: 'SC/ST caste certificate, OBC non-creamy-layer certificate, or EWS certificate.',
-    why: 'You are claiming a seat under a reserved category, which must be verified.'
-  },
-  PWD_CERT: {
-    label: 'Disability certificate',
-    hint: 'UDID card, or a certificate from the Vocational Rehabilitation Centre.',
-    why: 'Disabled applicants are the FIRST priority group for a hostel seat, so this ' +
-         'certificate is what places you there.'
-  },
-  TRANSFER_CERT: {
-    label: "Parent's transfer order",
-    hint: 'The transfer order posting your parent out of Delhi (Central or State ' +
-          'Government, PSU or an autonomous body under Government only).',
-    why: 'You are claiming the third priority group, which is open to Delhi-category ' +
-         'applicants whose parent has been transferred out of Delhi.'
-  },
-  ADDRESS_PROOF: {
-    label: 'Permanent address proof',
-    hint: 'Aadhaar, domicile certificate, ration card or a utility bill.',
-    why: 'Delhi-category applicants are ordered by distance from campus, so the address ' +
-         'on file decides your position.'
-  },
-  AADHAAR_PARENT: {
-    label: "Aadhaar of parent",
-    hint: "A copy of a parent's Aadhaar card.",
-    why: 'Required with the hostel application form for every applicant.'
-  },
-  LOCAL_GUARDIAN: {
-    label: "Local guardian's consent form",
-    hint: 'The signed local guardian form, with a copy of their Aadhaar.',
-    why: 'The hostel requires a local guardian who can be contacted in an emergency.'
-  },
-  MEDICAL_CERT: {
-    label: 'Medical certificate',
-    hint: 'Signed by a registered practitioner holding at least an MBBS, with their stamp.',
-    why: 'Required at admission so the hostel knows of any condition needing care.'
-  },
-  ANTI_RAGGING: {
-    label: 'Anti-ragging affidavit',
-    hint: 'The UGC affidavit, signed by you and by a parent or guardian.',
-    why: 'Required once, under the UGC Regulations on Curbing the Menace of Ragging.'
-  },
-  RULES_UNDERTAKING: {
-    label: 'Undertaking on hostel rules',
-    hint: 'Signed by you and by a parent or guardian.',
-    why: 'Confirms that you and your parent have read the hostel regulations.'
+    why: 'You are a continuing student, so your ID card is your proof that you ' +
+         'are still enrolled.'
   }
 };
 
@@ -99,47 +60,15 @@ var Documents = (function () {
    * @return {Array<{docType, label, hint, why, mandatory}>}
    */
   function requiredFor(student, app) {
-    var out = [];
-    var readmission = app && app.admissionType === 'READMISSION';
+    var out = [spec_('AADHAAR')];
 
-    // Proof of enrolment: a first-year has no ID card yet.
-    if (Number(student.year) <= 1 && !readmission) out.push(spec_('ADMISSION_LETTER'));
-    else out.push(spec_('ID_CARD'));
+    // A student in their first year has not been issued an ID card yet. For a
+    // lateral-entry programme that first year is the second, which is why this
+    // asks the catalogue rather than comparing against 1.
+    var firstYear = 1;
+    try { firstYear = Catalogue.entryYear(student.programme); } catch (e) { firstYear = 1; }
 
-    // The marks the priority list is built from, and proof of enrolment fee.
-    out.push(spec_('MARKSHEET'));
-    out.push(spec_('ACADEMIC_FEE_PROOF'));
-
-    // Only where a claim is actually being made.
-    if (student.category && student.category !== 'GEN') {
-      var c = spec_('CATEGORY_CERT');
-      c.label = student.category + ' category certificate';
-      c.why = 'You are claiming a seat under the ' + student.category +
-              ' category, which must be verified before a reserved seat is granted.';
-      out.push(c);
-    }
-    if (student.isPwD) out.push(spec_('PWD_CERT'));
-    if (student.parentTransferred) out.push(spec_('TRANSFER_CERT'));
-
-    // Distance decides the order within the Delhi group, so their address proof
-    // carries real weight. Everyone supplies one, but say WHY it matters to them.
-    var addr = spec_('ADDRESS_PROOF');
-    if (student.residenceCategory !== 'DELHI') {
-      addr.why = 'Confirms the permanent address on your application. Your group is ranked ' +
-                 'on marks rather than distance, so this is a check rather than a factor.';
-    }
-    out.push(addr);
-
-    out.push(spec_('AADHAAR_PARENT'));
-    out.push(spec_('LOCAL_GUARDIAN'));
-    out.push(spec_('MEDICAL_CERT'));
-
-    // Once only. A returning resident who has already filed the affidavit is
-    // not asked for it again, which is what the brochure says in as many words.
-    if (!readmission) {
-      out.push(spec_('ANTI_RAGGING'));
-    }
-    out.push(spec_('RULES_UNDERTAKING'));
+    if (Number(student.year) > firstYear) out.push(spec_('ID_CARD'));
 
     return out;
   }

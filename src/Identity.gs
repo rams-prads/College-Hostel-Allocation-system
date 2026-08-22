@@ -337,33 +337,9 @@ var Identity = (function () {
       });
     }
 
-    // --- 4. the claims that decide the outcome ----------------------------
-    // Category and PwD status both move a student into a reserved pool, and
-    // distance carries weight in the merit score. These are exactly the fields
-    // worth misstating, so each is checked against its supporting document.
-    var docs = Db.where('Documents', { appId: appId });
-    var byType = {};
-    docs.forEach(function (d) { byType[d.docType] = d; });
-
-    if (student.category && student.category !== 'GEN') {
-      var cat = byType.CATEGORY_CERT;
-      if (!cat || cat.status === 'REQUIRED') {
-        findings.push({
-          code: 'CATEGORY_UNSUPPORTED', severity: 'REVIEW',
-          text: 'A ' + student.category + ' reserved seat is claimed, but no category ' +
-                'certificate has been uploaded.'
-        });
-      }
-    }
-    if (student.isPwD) {
-      var pwd = byType.PWD_CERT;
-      if (!pwd || pwd.status === 'REQUIRED') {
-        findings.push({
-          code: 'PWD_UNSUPPORTED', severity: 'REVIEW',
-          text: 'PwD status is claimed, but no disability certificate has been uploaded.'
-        });
-      }
-    }
+    // A category or PwD claim is verified against the certificate at the
+    // counter, not here - those documents are no longer collected through the
+    // portal, and a finding that asks for one nobody uploads is noise.
 
     // --- 5. does the address stand up? ------------------------------------
     var geo = Geo.distanceFromHome(student.homePincode, student.campus);

@@ -365,11 +365,9 @@ var SCHEMA = {
     cols: [
       { name: 'docId',      type: T.STR },
       { name: 'appId',      type: T.STR },
-      { name: 'docType',    type: T.ENUM,
-        values: ['ADMISSION_LETTER', 'ID_CARD', 'MARKSHEET', 'ACADEMIC_FEE_PROOF',
-                 'CATEGORY_CERT', 'PWD_CERT', 'TRANSFER_CERT', 'ADDRESS_PROOF',
-                 'AADHAAR_PARENT', 'LOCAL_GUARDIAN', 'MEDICAL_CERT',
-                 'ANTI_RAGGING', 'RULES_UNDERTAKING'] },
+      // Two documents. The rest of the brochure checklist is collected on paper
+      // at the counter; see Documents.gs for why it is not collected twice.
+      { name: 'docType',    type: T.ENUM, values: ['AADHAAR', 'ID_CARD'] },
       { name: 'status',     type: T.ENUM, values: ['REQUIRED', 'UPLOADED', 'VERIFIED', 'REJECTED', 'WAIVED'] },
       { name: 'driveFileId',type: T.STR },
       { name: 'fileName',   type: T.STR },

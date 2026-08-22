@@ -94,14 +94,14 @@ check('short tokens are ignored',
   'initials match everything and prove nothing');
 
 // ============================================================ the verdict
-section('An address proof that agrees is not sent to anybody');
+section('An Aadhaar that agrees is not sent to anybody');
 
 const student = Db.readAll('Students').find(s => Number(s.homePincode) > 700000);
 const app = Db.findOne('Applications', { studentId: student.studentId });
 Documents.provision(app.appId, student);
 
 const addrDoc = Db.findOne('Applications', { appId: app.appId }) &&
-  Db.where('Documents', { appId: app.appId }).find(d => d.docType === 'ADDRESS_PROOF');
+  Db.where('Documents', { appId: app.appId }).find(d => d.docType === 'AADHAAR');
 Db.update('Documents', addrDoc.docId, { driveFileId: 'file-1', status: 'UPLOADED' });
 Db.invalidate('Documents');
 
@@ -161,21 +161,30 @@ check('a document with no PIN code is unreadable, not a pass',
   'silently passing something it could not read would be the worst outcome');
 
 section('A college ID proves enrolment, not address');
-const idDoc = Db.where('Documents', { appId: app.appId }).find(d => d.docType === 'ID_CARD') ||
-              Db.where('Documents', { appId: app.appId }).find(d => d.docType === 'ADMISSION_LETTER');
+// Only a continuing student is asked for one, so this must be a continuing
+// student - taking whichever student came first would make the whole section
+// skip itself the day the seed order changed.
+const senior = Db.readAll('Students').find(s => Number(s.year) > 1);
+const seniorApp = Db.findOne('Applications', { studentId: senior.studentId });
+Documents.provision(seniorApp.appId, senior);
+Db.invalidate('Documents');
+const idDoc = Db.where('Documents', { appId: seniorApp.appId })
+  .find(d => d.docType === 'ID_CARD');
+check('a continuing student was asked for an ID card at all', !!idDoc,
+  'without one there is nothing here to test');
 if (idDoc) {
   Db.update('Documents', idDoc.docId, { driveFileId: 'file-2', status: 'UPLOADED' });
   Db.invalidate('Documents');
-  OCR = { ok: true, text: 'GGSIPU IDENTITY CARD\n' + student.name +
-                          '\nEnrolment No ' + student.enrollmentNo, reason: '' };
-  const idScan = DocScan.checkDocument(Db.byId('Documents', idDoc.docId), student, reader);
+  OCR = { ok: true, text: 'GGSIPU IDENTITY CARD\n' + senior.name +
+                          '\nEnrolment No ' + senior.enrollmentNo, reason: '' };
+  const idScan = DocScan.checkDocument(Db.byId('Documents', idDoc.docId), senior, reader);
   check('a matching ID card passes', idScan.verdict === 'MATCH', JSON.stringify(idScan.findings));
   check('and no PIN code was demanded of it',
     idScan.detail.declaredPincode === undefined);
 
-  OCR = { ok: true, text: 'GGSIPU IDENTITY CARD\n' + student.name +
+  OCR = { ok: true, text: 'GGSIPU IDENTITY CARD\n' + senior.name +
                           '\nEnrolment No 09999999999', reason: '' };
-  const wrongId = DocScan.checkDocument(Db.byId('Documents', idDoc.docId), student, reader);
+  const wrongId = DocScan.checkDocument(Db.byId('Documents', idDoc.docId), senior, reader);
   check('a wrong enrolment number is raised',
     wrongId.findings.some(f => f.code === 'ENROLMENT_NOT_ON_DOCUMENT'));
 }
@@ -201,7 +210,7 @@ function aadhaarText(st, pin) {
 
 let liars = 0;
 Db.readAll('Documents')
-  .filter(d => d.docType === 'ADDRESS_PROOF' &&
+  .filter(d => d.docType === 'AADHAAR' &&
                allApps.some(a => a.appId === d.appId))
   .forEach((d, i) => {
     const st = students[Db.byId('Applications', d.appId).studentId];
@@ -244,7 +253,7 @@ check('the queue defaults to only what needs a person',
                            r.scanVerdict === 'UNSCANNED'),
   conflictsOnly.map(r => r.scanVerdict).join(','));
 const addressConflicts = conflictsOnly.filter(
-  r => r.scanVerdict === 'CONFLICT' && r.docType === 'ADDRESS_PROOF');
+  r => r.scanVerdict === 'CONFLICT' && r.docType === 'AADHAAR');
 check('every planted misdeclaration is in it, and nothing else is',
   addressConflicts.length === liars,
   addressConflicts.length + ' raised vs ' + liars + ' planted');
