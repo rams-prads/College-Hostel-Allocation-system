@@ -87,7 +87,10 @@ check('ledger chain survives document activity', Ledger.verify().intact);
 
 section('Apply form API');
 // Impersonate a real seeded student by pointing the session at their email.
-const target = students.find(s => s.gender === 'F' && s.year >= 2);
+// Dwarka deliberately: it has two women's hostels, so this student is offered
+// more options than MAX_PREFERENCES and the over-length case below is reachable.
+// A single-hostel campus cannot produce one, which is itself worth knowing.
+const target = students.find(s => s.gender === 'F' && s.year >= 2 && s.campus === 'DWARKA');
 global.Session = { getActiveUser: () => ({ getEmail: () => target.email }) };
 
 const form = apiGetApplyForm();
@@ -97,7 +100,11 @@ check('options are offered', form.options.length > 0, form.options.length + ' op
 check('options never cross the gender partition', (() => {
   const hostels = Db.indexBy('Hostels', 'hostelId');
   return form.options.every(o => hostels[o.hostelId].gender === target.gender);
-})(), 'the allocator has exactly one hard constraint and the form must not violate it');
+})(), 'a hard partition of the allocator - the form must not offer across it');
+check('options never cross the campus partition', (() => {
+  const hostels = Db.indexBy('Hostels', 'hostelId');
+  return form.options.every(o => hostels[o.hostelId].campus === target.campus);
+})(), 'a student admitted to one campus can only be housed there');
 check('every option has real rooms behind it', form.options.every(o => o.rooms > 0));
 check('the document list matches this student',
   form.documents.length === Documents.requiredFor(target).length);
@@ -117,11 +124,11 @@ const goodPrefs = form.options.slice(0, 3).map(o => o.key);
 const goodLifestyle = {
   sleepTime: 'LATE', wakeTime: 'LATE', studyStyle: 'QUIET', cleanliness: 4,
   sociability: 2, foodPref: 'VEG', language: 'Hindi',
-  smokingTolerance: false, guestsFrequency: 'SOMETIMES'
+  guestsFrequency: 'SOMETIMES'
 };
 
 const saved = apiSaveApplication({
-  campusPref: 'DWARKA', needsAccessible: false,
+  needsAccessible: false,
   preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
 });
 check('submit succeeds', saved.ok && saved.status === 'SUBMITTED');
@@ -155,38 +162,51 @@ function expectReject(label, payload) {
 
 Db.update('Applications', myApp.appId, { status: 'DRAFT' });
 expectReject('duplicate preferences are rejected', {
-  campusPref: 'ANY', preferences: [goodPrefs[0], goodPrefs[0]],
+  preferences: [goodPrefs[0], goodPrefs[0]],
   lifestyle: goodLifestyle, submit: true
 });
 expectReject('submitting with no preferences is rejected', {
-  campusPref: 'ANY', preferences: [], lifestyle: goodLifestyle, submit: true
+  preferences: [], lifestyle: goodLifestyle, submit: true
 });
+const overLimit = Number(Db.cfg('MAX_PREFERENCES', 5)) + 1;
+check('this campus offers enough hostels to exceed the preference limit',
+  form.options.length >= overLimit,
+  form.options.length + ' options vs a limit of ' + (overLimit - 1));
 expectReject('too many preferences are rejected', {
-  campusPref: 'ANY',
-  preferences: form.options.slice(0, Number(Db.cfg('MAX_PREFERENCES', 5)) + 1).map(o => o.key),
+  preferences: form.options.slice(0, overLimit).map(o => o.key),
   lifestyle: goodLifestyle, submit: true
 });
 expectReject('an incomplete roommate questionnaire is rejected on submit', {
-  campusPref: 'ANY', preferences: goodPrefs, lifestyle: { sleepTime: 'LATE' }, submit: true
+  preferences: goodPrefs, lifestyle: { sleepTime: 'LATE' }, submit: true
 });
 
 // The security case: a hostel of the wrong gender must never enter the list,
 // even if the client sends it directly.
 const wrongGenderHostel = Db.readAll('Hostels').find(h => h.gender !== target.gender);
 expectReject('a wrong-gender hostel is rejected even if posted directly', {
-  campusPref: 'ANY',
   preferences: [wrongGenderHostel.hostelId + '|DOUBLE'],
   lifestyle: goodLifestyle, submit: true
 });
 expectReject('an unknown hostel id is rejected', {
-  campusPref: 'ANY', preferences: ['NOT-A-HOSTEL|DOUBLE'],
+  preferences: ['NOT-A-HOSTEL|DOUBLE'],
   lifestyle: goodLifestyle, submit: true
 });
+
+// Campus is a property of admission. A student who could post a preference for
+// the other campus could apply for a hostel they can never be housed in.
+const otherCampusHostel = Db.readAll('Hostels')
+  .find(h => h.gender === target.gender && h.campus !== target.campus);
+expectReject('a hostel at the other campus is rejected even if posted directly', {
+  preferences: [otherCampusHostel.hostelId + '|DOUBLE'],
+  lifestyle: goodLifestyle, submit: true
+});
+check('the application records the campus from the student record, not the browser',
+  Db.byId('Applications', saved.appId).campus === target.campus);
 
 section('Drafts are permitted to be incomplete');
 Db.update('Applications', myApp.appId, { status: 'DRAFT' });
 const draft = apiSaveApplication({
-  campusPref: 'ANY', preferences: [], lifestyle: {}, submit: false
+  preferences: [], lifestyle: {}, submit: false
 });
 check('an empty draft saves without error', draft.ok && draft.status === 'DRAFT');
 
@@ -194,7 +214,7 @@ section('Allotted applications lock');
 Db.update('Applications', myApp.appId, { status: 'ALLOTTED' });
 let locked = false, lockMsg = '';
 try {
-  apiSaveApplication({ campusPref: 'EDC', preferences: goodPrefs,
+  apiSaveApplication({ preferences: goodPrefs,
                        lifestyle: goodLifestyle, submit: true });
 } catch (e) { locked = true; lockMsg = e.message; }
 check('an allotted application cannot be edited', locked,

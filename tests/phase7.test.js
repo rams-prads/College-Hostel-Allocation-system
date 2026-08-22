@@ -23,7 +23,8 @@ function asUser(email) {
 const VALID = {
   name: 'Riya Sharma', enrollmentNo: '04116403223', phone: '9876543210',
   dob: '2006-03-14', gender: 'F', programme: 'BTech',
-  branch: 'Computer Science & Engineering', year: 1, entranceRank: 1842,
+  branch: 'Computer Science & Engineering', campus: 'DWARKA',
+  year: 1, entranceRank: 1842,
   category: 'OBC', isPwD: false,
   homeAddress: '12 Beltola Road, Beltola', homeCity: 'Guwahati', homePincode: '781028',
   guardianName: 'S. Sharma', guardianPhone: '9812345678',
@@ -39,21 +40,36 @@ check('programme list is supplied', form.registration.programmes.length >= 5);
 check('every programme declares its branches and duration',
   form.registration.programmes.every(p => p.branches.length > 0 && p.years >= 2));
 check('all five categories are offered', form.registration.categories.length === 5);
+check('both campuses are offered, each explained',
+  form.registration.campuses.length === 2 &&
+  form.registration.campuses.every(c => c.code && c.label && c.note));
 check('the distance rule is stated up front', form.registration.minDistanceKm > 0);
 
 section('PIN code lookup, before the form is submitted');
-const far = apiLookupPincode('781028');
+const far = apiLookupPincode('781028', 'DWARKA');
 check('a far PIN resolves', far.resolved === true);
 check('it reports the distance', far.km > 1000, far.km + ' km');
 check('it says the applicant is eligible on distance', far.eligible === true);
 console.log('        ' + far.message);
 
-const near = apiLookupPincode('110078');
+const near = apiLookupPincode('110078', 'DWARKA');
 check('a nearby PIN resolves', near.resolved === true);
 check('it warns rather than silently failing later', near.eligible === false);
 console.log('        ' + near.message);
 
-const unknown = apiLookupPincode('999999');
+const unknown = apiLookupPincode('999999', 'DWARKA');
+
+// Dwarka and East Delhi are ~25 km apart, either side of the 30 km threshold.
+// Measuring against the wrong campus would decide eligibility wrongly.
+const ghaziabadDW = apiLookupPincode('201001', 'DWARKA');
+const ghaziabadED = apiLookupPincode('201001', 'EDC');
+check('distance is measured to the student\'s own campus, not the nearest',
+  ghaziabadDW.km !== ghaziabadED.km,
+  ghaziabadDW.km + ' km to Dwarka vs ' + ghaziabadED.km + ' km to East Delhi');
+check('and the two campuses can fall on opposite sides of the 30 km rule',
+  ghaziabadDW.eligible !== ghaziabadED.eligible ||
+  Math.abs(ghaziabadDW.km - ghaziabadED.km) > 10,
+  'if they never differ materially, campus-specific distance buys nothing');
 check('an unknown PIN does not block the applicant', unknown.resolved === false);
 check('and says so plainly', unknown.message.indexOf('still apply') > 0);
 
@@ -76,6 +92,7 @@ check('no CGPA is invented for a first-year', Number(row.cgpa) === 0);
 check('guardian contact stored', row.guardianName === 'S. Sharma');
 check('home state derived from the PIN code', row.homeState === 'Assam',
   'typed state is not trusted when the PIN resolves');
+check('campus is stored on the student record', row.campus === 'DWARKA');
 check('the record is flagged as self-declared', row.selfDeclared === true,
   'it is a claim until documents verify it');
 check('registration is written to the ledger',
@@ -122,6 +139,8 @@ reject('a seven-digit phone number is refused', { phone: '1234567' }, 'mobile');
 reject('a landline-style number is refused', { phone: '0112345678' }, 'mobile');
 reject('an unknown gender is refused', { gender: 'X' }, 'gender');
 reject('an unknown programme is refused', { programme: 'PhD' }, 'programme');
+reject('a missing campus is refused', { campus: '' }, 'campus');
+reject('an invented campus is refused', { campus: 'ROHINI' }, 'campus');
 reject('year 6 of a four-year degree is refused', { year: 6 }, 'Year of study');
 reject('a first-year with no entrance rank is refused',
   { year: 1, entranceRank: 0 }, 'entrance');
@@ -140,7 +159,7 @@ reject('a malformed guardian email is refused',
 section('A continuing student registers on CGPA instead');
 asUser('senior@example.com');
 const senior = apiRegisterStudent(Object.assign({}, VALID, {
-  name: 'Aditi Rao', enrollmentNo: '04116403999', gender: 'F',
+  name: 'Aditi Rao', enrollmentNo: '04116403999', gender: 'F', campus: 'EDC',
   year: 3, cgpa: 8.4, entranceRank: 0, category: 'GEN'
 }));
 const seniorRow = Db.byId('Students', senior.studentId);
@@ -159,16 +178,57 @@ check('only same-gender hostels are offered', (() => {
   const hostels = Db.indexBy('Hostels', 'hostelId');
   return applyForm.options.every(o => hostels[o.hostelId].gender === 'F');
 })());
+check('only her own campus is offered', applyForm.options.every(o => o.campus === 'DWARKA'),
+  'campus is fixed at admission, so the other campus is not an option');
+check('the East Delhi student sees a different list', (() => {
+  asUser('senior@example.com');
+  const theirs = apiGetApplyForm();
+  asUser('riya.new@example.com');
+  return theirs.options.length > 0 && theirs.options.every(o => o.campus === 'EDC');
+})());
+
+// A registering student has no record for the server to read a campus from, so
+// the options arrive through a second call once they have declared both.
+check('a registrant can fetch options for a declared gender and campus', (() => {
+  asUser('brand.new@example.com');           // signed in, no record yet
+  const opts = apiGetHostelOptions('F', 'EDC');
+  asUser('riya.new@example.com');
+  return opts.length > 0 && opts.every(o => o.campus === 'EDC');
+})(), 'without this the preference step is empty and registration cannot complete');
+check('a registrant must declare both before options exist', (() => {
+  asUser('brand.new@example.com');
+  let threw = 0;
+  try { apiGetHostelOptions('', 'EDC'); } catch (e) { threw++; }
+  try { apiGetHostelOptions('F', ''); } catch (e) { threw++; }
+  asUser('riya.new@example.com');
+  return threw === 2;
+})());
+check('an existing record overrides what the browser claims',
+  apiGetHostelOptions('M', 'EDC').every(o => o.campus === 'DWARKA'),
+  'Riya is a Dwarka student; asking for East Delhi must not change that');
+
+// The other campus's hostels must be refused even when posted directly.
+let crossCampus = false;
+try {
+  const alien = Db.readAll('Hostels').filter(h => h.gender === 'F' && h.campus === 'EDC')[0];
+  apiSaveApplication({
+    needsAccessible: false, preferences: [alien.hostelId + '|DOUBLE'],
+    lifestyle: { sleepTime: 'LATE', wakeTime: 'LATE', studyStyle: 'QUIET', foodPref: 'VEG' },
+    submit: true
+  });
+} catch (e) { crossCampus = true; }
+check('a hostel at the other campus is refused on submit', crossCampus);
 
 const saved = apiSaveApplication({
-  campusPref: 'ANY', needsAccessible: false,
+  needsAccessible: false,
   preferences: applyForm.options.slice(0, 3).map(o => o.key),
   lifestyle: { sleepTime: 'LATE', wakeTime: 'LATE', studyStyle: 'QUIET', cleanliness: 4,
                sociability: 2, foodPref: 'VEG', language: 'Assamese',
-               smokingTolerance: false, guestsFrequency: 'SOMETIMES' },
+               guestsFrequency: 'SOMETIMES' },
   submit: true
 });
 check('the application is created', saved.status === 'SUBMITTED');
+check('the application mirrors her campus', Db.byId('Applications', saved.appId).campus === 'DWARKA');
 check('its id does not collide either',
   Db.readAll('Applications').filter(a => a.appId === saved.appId).length === 1);
 
@@ -212,6 +272,14 @@ check('no bed double-booked', (() => {
   const used = run.allocations.map(a => a.bedId);
   return new Set(used).size === used.length;
 })());
+check('campus partition holds', (() => {
+  const rooms = Db.indexBy('Rooms', 'roomId'), hostels = Db.indexBy('Hostels', 'hostelId');
+  const apps = Db.indexBy('Applications', 'appId'), stu = Db.indexBy('Students', 'studentId');
+  return run.allocations.every(a => {
+    const s = stu[apps[a.appId].studentId];
+    return hostels[rooms[a.roomId].hostelId].campus === s.campus;
+  });
+})(), 'a student cannot be housed at a campus they are not admitted to');
 check('gender partition holds', (() => {
   const rooms = Db.indexBy('Rooms', 'roomId'), hostels = Db.indexBy('Hostels', 'hostelId');
   const apps = Db.indexBy('Applications', 'appId'), stu = Db.indexBy('Students', 'studentId');

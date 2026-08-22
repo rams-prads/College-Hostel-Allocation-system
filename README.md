@@ -56,13 +56,13 @@ iterated in seconds:
 ```bash
 node tests/phase1.test.js     # 57 checks: data integrity, quotas, determinism
 node tests/phase2.test.js     # 93 checks: allocation engine correctness
-node tests/phase3.test.js     # 65 checks: document rules and portal API
-node tests/phase4.test.js     # 94 checks: letters, QR anti-forgery, email, admin
+node tests/phase3.test.js     # 69 checks: document rules and portal API
+node tests/phase4.test.js     # 101 checks: letters, QR anti-forgery, email, admin
 node tests/qr.test.js         # 57 checks: QR encoder vs ISO 18004, PNG round-trip
-node tests/phase5.test.js     # 99 checks: simulator, swaps, grievance audit
+node tests/phase5.test.js     # 102 checks: simulator, swaps, grievance audit
 node tests/phase6.test.js     # 45 checks: demo scenario and access guards
-node tests/phase7.test.js     # 63 checks: self-registration and first-year ranking
-node tests/ui.test.js         # 49 checks: every page renders, links escape the iframe
+node tests/phase7.test.js     # 77 checks: self-registration and first-year ranking
+node tests/ui.test.js         # 60 checks: every page renders, links escape the iframe
 node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
 ```
 

@@ -101,9 +101,11 @@ of sync with it.
 
 ### 4.2 Roommate compatibility matching
 
-A short lifestyle survey (sleep time, study style, cleanliness, sociability, food preference,
-language, smoking tolerance) feeds a compatibility score, and students are paired within room
-slots via stable matching.
+A short lifestyle survey (sleep time, wake time, study style, cleanliness, sociability, food
+preference, guests, language) feeds a compatibility score, and students are paired within room
+slots via stable matching. Smoking is deliberately not an axis: hostels are non-smoking, and
+asking students to declare a tolerance for it would treat a prohibited act as a lifestyle
+preference and build it into the pairing score.
 
 **Why it matters:** most mid-year hostel transfer requests are roommate conflicts. Solving it at
 allocation time reduces downstream administrative load — a real GGSIPU pain point.
@@ -183,10 +185,10 @@ This schema is the interface between the parallel work tracks.
 |---|---|---|
 | `Config` | runtime settings | key, value |
 | `Policy` | **rules as data, not code** | ruleId, category, key, value, effectiveFrom, notes |
-| `Students` | student master registry | studentId, name, enrollmentNo, email, gender, programme, branch, year, cgpa, category, isPwD, homePincode |
-| `Applications` | one row per application | appId, studentId, campusPref, status, submittedAt, meritScore, distanceKm, eligibility, docStatus |
+| `Students` | student master registry | studentId, name, enrollmentNo, email, gender, programme, branch, **campus**, year, cgpa, entranceRank, category, isPwD, homePincode, guardian\*, selfDeclared |
+| `Applications` | one row per application | appId, studentId, **campus**, status, submittedAt, meritScore, distanceKm, eligibility, docStatus |
 | `Preferences` | ranked, long format | appId, rank, hostelId, roomType |
-| `Lifestyle` | roommate survey | appId, sleepTime, studyStyle, cleanliness, sociability, foodPref, language, smokingTolerance |
+| `Lifestyle` | roommate survey | appId, sleepTime, wakeTime, studyStyle, cleanliness, sociability, foodPref, language, guestsFrequency |
 | `Hostels` | hostel master | hostelId, name, campus, gender, warden, contact |
 | `Rooms` | room inventory | roomId, hostelId, block, floor, roomNo, capacity, roomType, isAccessible |
 | `Beds` | **bed-level** inventory | bedId, roomId, bedNo, status, occupantAppId |
@@ -540,7 +542,8 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 - [ ] **Phase 2** — Is there a minimum distance-from-home threshold for eligibility? A minimum CGPA?
 - [x] **Phase 3** — Documents confirmed 21 Aug 2026: admission letter (year 1, no ID card issued yet), ID card (year 2+), category certificate (non-GEN only, where a reserved seat is claimed), PwD certificate (PwD only), address proof (everyone - distance gates eligibility and carries score weight, so it is the main gaming vector).
 - [x] **Phase 4** — Letter format implemented 21 Aug 2026 with a standard university layout: DSW letterhead, warden + Dean of Student Welfare as signatories, five terms of allotment, signed QR. Swap in the real letterhead and clauses when available - it is one function in Letters.gs.
-- [x] **General** — Dwarka and EDC are a SINGLE allocation pool. Confirmed 21 Aug 2026. Students compete in one merit pool and may be allotted to either campus; campus choice is expressed through ranked hostel preferences, not a hard partition. Gender remains the only hard partition.
+- [x] **General** — Campus is a HARD PARTITION. Corrected 22 Aug 2026, superseding the 21 Aug reading. A student is admitted to Dwarka or to East Delhi and attends only that campus, so they can only be housed in that campus's hostels. Campus is therefore a property of the student's admission, declared once at registration, and is never offered as a choice on the application form. Merit ordering and quota apportionment remain university-wide — a Dwarka and an East Delhi applicant are ranked on the same scale — but the beds they may occupy differ. There are now two hard partitions, gender and campus.
+- [x] **General** — Distance is measured to the student's OWN campus, not the nearer of the two. The campuses are ~25 km apart, either side of the 30 km eligibility threshold, so measuring against the wrong one decides eligibility wrongly.
 
 ---
 
@@ -554,6 +557,7 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 
 | Date | Change |
 |---|---|
+| 2026-08-22 | **Campus corrected from a preference to a hard partition.** A student is admitted to one campus and can only be housed there, so the application form no longer offers a campus choice: it is declared once during registration and read from the record thereafter. Enforced in one chokepoint in the allocator, in application validation, and in swap validation — a swap was the one route by which two consenting students could have undone the constraint after allocation. Distance now measures to the student's own campus. Smoking removed from the roommate questionnaire, the schema and the compatibility score. `Students.campus` added, `Applications.campusPref` becomes `Applications.campus`, `Lifestyle.smokingTolerance` dropped — **the sheet must be rebuilt with `resetDatabase()` then `seedAll()`**; `createDatabase()` now detects and reports header drift instead of silently skipping a stale sheet. 680 checks. |
 | 2026-08-22 | Camera-free verification added: the code printed under the QR can be typed or pasted into the verification page. DryRun.gs added - a 24-point end-to-end self-test against the LIVE spreadsheet, since every failure so far has been in the gap the offline suites cannot reach. QR scanning remains an open defect, tracked in section 15b. |
 | 2026-08-22 | Self-registration added. A student not in the registry can now register and apply in one stepped form. Students gains 10 columns (guardian, address, medical, entrance rank, self-declared flag). Two real bugs fixed: Db.nextId handed out ids the seed generator had already used, silently aliasing an existing student; and a first-year was failed on the minimum-CGPA rule despite having no CGPA to be judged on. First-years are now ranked on entrance rank, normalised within their own cohort. 63 new checks; 648 total. |
 | 2026-08-22 | Phase 6 complete. QR was invisible in the generated PDF - Google's HTML-to-PDF converter drops background colours on empty cells, so the cell-grid QR vanished. Replaced with a real PNG built byte by byte in pure JS (zlib stored blocks, CRC32, Adler-32), verified by inflating it in Node and comparing every pixel to the matrix. Letter layout tightened to one page. TECHNICAL_DOC.md written. 530 checks. |
@@ -563,5 +567,5 @@ Fill these in as GGSIPU-specific information becomes available. Each maps to a *
 | 2026-08-21 | Phase 3 complete. Student portal: apply form with drag-to-rank preferences, dashboard with the "why did I get this room?" panel, per-applicant document rules, roommate display. Added a Documents tab (19 total). 65 offline checks passing. |
 | 2026-08-21 | Phase 2 complete. Allocation engine (stages A-H), eligibility with reasons, roommate matching, waitlist ETA, fairness metrics. Two significant fixes: unfilled reserved seats are now dereserved and reissued (utilisation 82 -> 98%), and the vacancy buffer holds real beds per hostel instead of a global seat cap that made one gender absorb the whole reserve. 93 offline checks passing. |
 | 2026-08-21 | Phase 1 complete. Synthetic cohort (900 students, 756 beds, 6 hostels), offline pincode geo table, seeded generator. Fixed a real bug in largest-remainder apportionment that over-reserved quota seats. 57 offline checks passing. |
-| 2026-08-21 | Dwarka and EDC confirmed as a SINGLE allocation pool. Gender is the only hard partition. |
+| 2026-08-21 | Dwarka and EDC recorded as a single allocation pool with gender the only hard partition. *Superseded 22 Aug 2026 — see above.* |
 | 2026-08-21 | Project initiated. Stack, auth, intake, data strategy and four novelty features locked. Phase plan written. This document created. |

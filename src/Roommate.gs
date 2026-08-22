@@ -58,15 +58,11 @@ var Roommate = (function () {
 
     var parts = { sleep: sleep, study: study, clean: clean, social: social, food: food, lang: lang };
 
+    // Smoking is deliberately NOT a factor. Hostels are non-smoking, so asking
+    // students to declare a tolerance for it would treat a prohibited act as a
+    // lifestyle preference and quietly build it into the pairing score.
     var total = w.W_SLEEP * sleep + w.W_STUDY * study + w.W_CLEAN * clean +
                 w.W_SOCIAL * social + w.W_FOOD * food + w.W_LANG * lang;
-
-    // Smoking is treated as a near-veto rather than a weighted preference:
-    // pairing a non-tolerant student with a smoker is a recurring source of
-    // formal complaints, so a mismatch caps the score instead of nudging it.
-    var smokingClash = a.smokingTolerance !== b.smokingTolerance;
-    if (smokingClash) total *= 0.85;
-    parts.smokingClash = smokingClash;
 
     return { score: Util.clamp(total, 0, 1), parts: parts };
   }

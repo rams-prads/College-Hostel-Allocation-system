@@ -46,13 +46,16 @@
 
   var reg = {
     name:'', enrollmentNo:'', phone:'', dob:'', gender:'',
-    programme:'', branch:'', year:'', cgpa:'', entranceRank:'',
+    programme:'', branch:'', campus:'', year:'', cgpa:'', entranceRank:'',
     category:'', isPwD:false, pwdType:'',
     homeAddress:'', homeCity:'', homePincode:'', homeState:'',
     guardianName:'', guardianPhone:'', guardianEmail:'',
     bloodGroup:'', medicalNotes:''
   };
-  var chosen = [], lifestyle = {}, campusPref = 'ANY', needsAccessible = false;
+  var chosen = [], lifestyle = {}, needsAccessible = false;
+  // Options are keyed by the gender + campus they were fetched for, so a change
+  // on the Course step invalidates a stale list instead of silently keeping it.
+  var optionsFor = '';
 
   el('root').innerHTML = loadingState('Loading the application form');
 
@@ -90,7 +93,6 @@
       STEPS = ['Preferences', 'Roommate', 'Review'];
       if (f.draft) {
         chosen = (f.draft.preferences || []).slice();
-        campusPref = f.draft.campusPref || 'ANY';
         needsAccessible = !!f.draft.needsAccessible;
         lifestyle = f.draft.lifestyle || {};
       }
@@ -145,7 +147,7 @@
       'Review': stepReview
     }[name];
     el('stepBody').innerHTML = fn ? fn() : '';
-    if (name === 'Preferences') { paintCampus(); paintOptions(); paintChosen(); }
+    if (name === 'Preferences') { ensureOptions(); paintOptions(); paintChosen(); }
     if (name === 'Roommate') paintLifestyle();
     if (name === 'Home address' && pinInfo) showPin(pinInfo);
   }
@@ -224,7 +226,20 @@
                 'eligibility is ' + REG.minCgpa + '.' });
     }
 
+    var picked = REG.campuses.filter(function (c) { return c.code === reg.campus; })[0];
+    var campusHelp = picked ? picked.note
+      : 'Fixed when you joined the university. You can only be allotted a hostel at your own ' +
+        'campus, so this decides which hostels you are offered.';
+
     return card('Your course',
+      '<label class="field"><span class="lab">Campus you are admitted to ' +
+        '<span class="req">*</span></span>' +
+        '<div class="seg">' + REG.campuses.map(function (c) {
+          return '<button type="button" aria-pressed="' + (reg.campus === c.code) +
+            '" onclick="setCampus(&quot;' + c.code + '&quot;)">' + esc(c.label) + '</button>';
+        }).join('') + '</div>' +
+        '<span class="help">' + esc(campusHelp) + '</span></label>' +
+      '<div class="divider"></div>' +
       '<div class="fieldrow">' +
         select('programme', 'Programme',
           REG.programmes.map(function (p) { return { code: p.code, label: p.code }; }),
@@ -270,7 +285,7 @@
     box.innerHTML = '<div class="hint"><span class="spin"></span> Locating&hellip;</div>';
     google.script.run.withSuccessHandler(function (r) { pinInfo = r; showPin(r); })
       .withFailureHandler(function () { box.innerHTML = ''; })
-      .apiLookupPincode(pin);
+      .apiLookupPincode(pin, myCampus());
   }
 
   function showPin(r) {
@@ -300,11 +315,14 @@
   }
 
   function stepPreferences() {
+    var g = myGender(), c = myCampus();
+    var who = { M: "men's", F: "women's", O: '' }[g] || '';
     return card('Room preferences',
       '<p class="small muted" style="margin:0 0 15px">Choose up to ' + esc(FORM.maxPreferences) +
       ' options, then put them in the order you want them. Your first choice goes at the top.</p>' +
-      '<div class="grp-title">Campus preference</div>' +
-      '<div class="seg" id="campus" style="margin-bottom:18px"></div>' +
+      '<div class="hint" style="margin-bottom:18px">Showing the ' + esc(who) + ' hostels at ' +
+      '<strong>' + esc(campusLabel(c)) + '</strong>. Your campus is fixed by your admission, ' +
+      'so these are the only hostels you can be allotted.</div>' +
       '<div class="grp-title">Your ranked choices</div>' +
       '<div id="chosenWrap" style="margin-bottom:18px"></div>' +
       '<div class="grp-title">Available options</div>' +
@@ -343,6 +361,7 @@
           rv('Name', reg.name) + rv('Enrolment number', reg.enrollmentNo) +
           rv('Mobile', reg.phone) +
           rv('Gender', { M:'Male', F:'Female', O:'Other' }[reg.gender]) +
+          rv('Campus', campusLabel(reg.campus)) +
           rv('Programme', reg.programme + (reg.branch ? ' — ' + reg.branch : '')) +
           rv('Year of study', reg.year ? 'Year ' + reg.year : '') +
           rv(String(reg.year) === '1' ? 'Entrance rank' : 'CGPA',
@@ -361,8 +380,7 @@
 
     return personal +
       card('Your application', '<dl class="kv review">' +
-        rv('Campus preference',
-           { ANY:'No preference', DWARKA:'Dwarka', EDC:'East Delhi' }[campusPref]) +
+        rv('Campus', campusLabel(myCampus())) +
         rv('Accessible room needed', needsAccessible ? 'Yes' : 'No') +
         '</dl><div class="grp-title" style="margin-top:15px">Room choices, in order</div>' + prefs) +
       card('What happens next',
@@ -389,6 +407,7 @@
       if (!reg.gender) miss.push('your gender');
     }
     if (name === 'Course') {
+      if (!reg.campus) miss.push('the campus you are admitted to');
       if (!reg.programme) miss.push('your programme');
       if (!reg.branch) miss.push('your branch');
       if (!reg.year) miss.push('your year of study');
@@ -446,7 +465,7 @@
       .withSuccessHandler(function () { window.top.location.href = appUrl('?'); })
       .withFailureHandler(fail)
       .apiSaveApplication({
-        campusPref: campusPref, needsAccessible: needsAccessible,
+        needsAccessible: needsAccessible,
         preferences: chosen, lifestyle: lifestyle, submit: !!submit
       });
   }
@@ -456,7 +475,7 @@
       .withSuccessHandler(function () { say('good', 'Draft saved. You can finish it later.'); })
       .withFailureHandler(fail)
       .apiSaveApplication({
-        campusPref: campusPref, needsAccessible: needsAccessible,
+        needsAccessible: needsAccessible,
         preferences: chosen, lifestyle: lifestyle, submit: false
       });
   }
@@ -473,25 +492,52 @@
   }
 
   /* =============================================================== campus */
-  function paintCampus() {
-    var box = el('campus');
-    if (!box) return;
-    box.innerHTML = [['ANY','No preference'], ['DWARKA','Dwarka'], ['EDC','East Delhi']]
-      .map(function (o) {
-        return '<button type="button" aria-pressed="' + (campusPref === o[0]) +
-          '" onclick="setCampus(&quot;' + o[0] + '&quot;)">' + esc(o[1]) + '</button>';
-      }).join('');
+  function myGender()  { return FORM.student ? FORM.student.gender : reg.gender; }
+  function myCampus()  { return FORM.student ? FORM.student.campus : reg.campus; }
+  function campusLabel(c) { return label('campus', c, 'your campus'); }
+
+  /**
+   * Changing campus invalidates any hostel choices already made - they belong to
+   * hostels this student can no longer be allotted. Dropping them here is
+   * clearer than letting the server reject the submission later.
+   */
+  function setCampus(v) {
+    if (reg.campus && reg.campus !== v && chosen.length) chosen = [];
+    reg.campus = v;
+    paintStep();
   }
-  function setCampus(v) { campusPref = v; paintCampus(); paintOptions(); }
+
+  /**
+   * A registering student has no record yet, so the server could not send hostel
+   * options with the form. Fetch them once gender and campus are declared.
+   */
+  function ensureOptions() {
+    if (!FORM.needsRegistration) return;
+    var key = myGender() + '|' + myCampus();
+    if (optionsFor === key && FORM.options) return;
+
+    var box = el('options');
+    if (box) box.innerHTML = '<div class="hint"><span class="spin"></span> ' +
+      'Loading the hostels open to you&hellip;</div>';
+
+    google.script.run
+      .withSuccessHandler(function (opts) {
+        FORM.options = opts;
+        optionsFor = key;
+        paintOptions();
+        paintChosen();
+      })
+      .withFailureHandler(function (e) {
+        if (el('options')) el('options').innerHTML = banner('err', e.message);
+      })
+      .apiGetHostelOptions(myGender(), myCampus());
+  }
 
   /* ============================================================== options */
   function paintOptions() {
     var box = el('options');
     if (!box || !FORM.options) return;
     var avail = FORM.options.filter(function (o) { return chosen.indexOf(o.key) < 0; });
-    if (campusPref !== 'ANY') {
-      avail.sort(function (a, b) { return (b.campus === campusPref) - (a.campus === campusPref); });
-    }
     var full = chosen.length >= FORM.maxPreferences;
     box.innerHTML = avail.length
       ? '<ul class="rows" style="border:1px solid var(--border);border-radius:var(--r)">' +
@@ -610,15 +656,12 @@
         seg('guestsFrequency', 'How often do you have visitors?',
           [['NEVER','Rarely'],['SOMETIMES','Sometimes'],['OFTEN','Often']]) +
       '</div>' +
-      '<div class="fieldrow">' +
-        '<label class="field"><span class="lab">Language you are most comfortable in</span>' +
-        '<input type="text" value="' + esc(lifestyle.language || '') +
-        '" oninput="lifestyle.language=this.value" placeholder="e.g. Hindi">' +
-        '<span class="help">A small pairing bonus only. Rooms are never grouped by region.</span>' +
-        '</label>' +
-        seg('smokingTolerance', 'Would you share with someone who smokes?',
-          [[true,'Yes'],[false,'No']]) +
-      '</div>';
+      '<label class="field" style="margin-bottom:0">' +
+      '<span class="lab">Language you are most comfortable in</span>' +
+      '<input type="text" value="' + esc(lifestyle.language || '') +
+      '" oninput="lifestyle.language=this.value" placeholder="e.g. Hindi">' +
+      '<span class="help">A small pairing bonus only. Rooms are never grouped by region.</span>' +
+      '</label>';
   }
 
   function setLife(field, value) {

@@ -234,18 +234,27 @@ var Geo = (function () {
   }
 
   /**
-   * Distance in km from a student's home PIN to the NEAREST campus.
-   * Dwarka and EDC are one allocation pool, so the relevant distance is to
-   * whichever campus is closer.
+   * Distance in km from a student's home PIN to THEIR campus.
+   *
+   * A student is admitted to one campus and can only be housed there, so the
+   * distance that decides eligibility is the distance to that campus. Dwarka and
+   * East Delhi are about 25 km apart - close to the 30 km eligibility threshold -
+   * so measuring against the wrong one would reject people who qualify. With no
+   * campus given (legacy callers, records predating the field) the nearest campus
+   * is used, which is the reading most favourable to the applicant.
+   *
+   * @param {string} pincode
+   * @param {string=} campus  'DWARKA' | 'EDC'
    * @return {{km: number, campus: string, district: string, state: string, resolved: boolean}}
    */
-  function distanceFromHome(pincode) {
+  function distanceFromHome(pincode, campus) {
     var loc = locate(pincode);
     if (!loc) {
       return { km: -1, campus: null, district: '', state: '', resolved: false };
     }
+    var keys = CAMPUSES[campus] ? [campus] : Object.keys(CAMPUSES);
     var best = null;
-    Object.keys(CAMPUSES).forEach(function (key) {
+    keys.forEach(function (key) {
       var c = CAMPUSES[key];
       var km = haversine(Number(loc.lat), Number(loc.lng), c.lat, c.lng);
       if (!best || km < best.km) best = { km: km, campus: key };
@@ -259,10 +268,16 @@ var Geo = (function () {
     };
   }
 
+  function campusName(code) {
+    return (CAMPUSES[code] || {}).name || code || '';
+  }
+
   return {
     haversine: haversine,
     locate: locate,
     distanceFromHome: distanceFromHome,
+    campusName: campusName,
+    campuses: CAMPUSES,
     index: index,
     invalidate: invalidate
   };

@@ -116,8 +116,16 @@ var Allocator = (function () {
   // ======================================================== STAGE A: PARTITION
 
   /**
-   * Hard constraints. Gender is the ONLY partition - Dwarka and EDC are a
-   * single allocation pool, so campus is a preference, not a boundary.
+   * Hard constraints. There are TWO partitions, gender and campus.
+   *
+   * Campus is not a preference. A student is admitted to Dwarka or to East Delhi
+   * and can only be housed in that campus's hostels, so an allocation that
+   * crosses campuses is not a worse outcome - it is an impossible one.
+   *
+   * Merit order is still computed across the whole university, so a Dwarka and an
+   * East Delhi applicant are ranked on the same scale and reserved seats are
+   * apportioned university-wide. Only the beds they may occupy differ.
+   *
    * Accessibility is a placement constraint handled in stage E, not a partition.
    */
   function stageA_partition(ctx) {
@@ -137,6 +145,7 @@ var Allocator = (function () {
         appId: app.appId,
         studentId: app.studentId,
         gender: student.gender,
+        campus: student.campus || app.campus,
         category: student.category,
         isPwD: !!student.isPwD,
         needsAccessible: !!app.needsAccessible,
@@ -472,9 +481,10 @@ var Allocator = (function () {
         releaseSeat_(ctx, src.bucket);
         trace_(ctx, c.appId, reason('WAITLIST_NO_BED_FOR_GENDER', false,
           'A seat was available for you when unfilled reserved seats were converted, ' +
-          'but every room in the hostels open to your gender was already occupied. ' +
-          'The remaining vacancies are in hostels you cannot be allotted to.',
-          { meritPosition: c.meritPosition }));
+          'but every room in the hostels you can be allotted to (' +
+          openToText_(c) + ') was already occupied. The remaining vacancies are ' +
+          'in hostels you are not eligible for.',
+          { meritPosition: c.meritPosition, campus: c.campus, gender: c.gender }));
         if (totalVacantBeds_(pools) === 0) break;
       }
     }
@@ -568,9 +578,19 @@ var Allocator = (function () {
     return pools;
   }
 
-  function genderOk_(ctx, hostelId, candidate) {
+  /**
+   * May this candidate be housed in this hostel at all?
+   *
+   * The single chokepoint for both hard partitions. Every path that hands out a
+   * bed - ranked preferences, the fallback sweep, the dereservation pass - goes
+   * through here, so the two can never disagree about what is legal.
+   */
+  function hostelOk_(ctx, hostelId, candidate) {
     var h = ctx.hostels[hostelId];
-    return h && h.active && (h.gender === candidate.gender || h.gender === 'CO');
+    if (!h || !h.active) return false;
+    if (h.gender !== 'CO' && h.gender !== candidate.gender) return false;
+    if (candidate.campus && h.campus !== candidate.campus) return false;
+    return true;
   }
 
   function totalAccessibleVacant_(pools) {
@@ -586,7 +606,7 @@ var Allocator = (function () {
    */
   function takeBed_(ctx, pools, key, candidate, accessibleDemand) {
     var hostelId = key.split('|')[0];
-    if (!genderOk_(ctx, hostelId, candidate)) return null;
+    if (!hostelOk_(ctx, hostelId, candidate)) return null;
     var pool = pools[key];
     if (!pool) return null;
 
@@ -671,6 +691,17 @@ var Allocator = (function () {
            c.meritPosition + '). You were placed on the waiting list.';
   }
 
+  /**
+   * Names the two hard partitions in the reader's own terms. A waitlisted
+   * student told only that "no bed was available" learns nothing; told which
+   * hostels were even open to them, they can check the reasoning themselves.
+   */
+  function openToText_(c) {
+    var g = { M: "men's", F: "women's", O: '' }[c.gender] || '';
+    var campus = { DWARKA: 'Dwarka Campus', EDC: 'East Delhi Campus' }[c.campus] || c.campus;
+    return campus ? (g ? campus + ', ' + g + ' hostels' : campus) : (g + ' hostels');
+  }
+
   function hostelName_(ctx, hostelId) {
     var h = ctx.hostels[hostelId];
     return h ? h.name : hostelId;
@@ -716,7 +747,9 @@ var Allocator = (function () {
         iter++;
         var A = allocs[i], B = allocs[j];
         var ca = A.candidate, cb = B.candidate;
+        // A swap has to be legal for both students, and both partitions bind.
         if (ca.gender !== cb.gender) continue;
+        if (ca.campus !== cb.campus) continue;
 
         var ra = ctx.roomById[A.roomId], rb = ctx.roomById[B.roomId];
         if (ca.needsAccessible && !rb.isAccessible) continue;

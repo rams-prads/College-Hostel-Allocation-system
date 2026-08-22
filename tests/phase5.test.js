@@ -5,7 +5,7 @@
  *
  * The claims that matter here:
  *   - a simulation cannot touch live state, even when it throws
- *   - a swap cannot break the gender partition or the accessibility guarantee
+ *   - a swap cannot break either hard partition, or the accessibility guarantee
  *   - an allocation dispute is AUDITED, not just answered, and a planted
  *     irregularity escalates instead of being papered over
  */
@@ -123,20 +123,25 @@ function roomOf(appId) {
   return roomById[Db.byId('Beds', a.bedId).roomId];
 }
 
-// Pick a pair that SHOULD be swappable: same gender, neither needing an
-// accessible room, neither currently holding accessible stock. Grabbing the
-// first two allotments would sometimes catch a PwD student and fail the
-// accessibility check correctly, which tests nothing about the happy path.
-function plainAllocsFor(gender) {
+function campusOf(appId) { return stuById[appById[appId].studentId].campus; }
+
+// Pick a pair that SHOULD be swappable: same gender, same campus, neither
+// needing an accessible room, neither currently holding accessible stock.
+// Grabbing the first two allotments would sometimes catch a PwD student and fail
+// the accessibility check correctly, which tests nothing about the happy path.
+function plainAllocsFor(gender, campus) {
   return allocs.filter(a =>
     genderOf(a.appId) === gender &&
+    (!campus || campusOf(a.appId) === campus) &&
     !appById[a.appId].needsAccessible &&
     !roomById[Db.byId('Beds', a.bedId).roomId].isAccessible);
 }
-const boys = plainAllocsFor('M');
-const girls = plainAllocsFor('F');
+const boys = plainAllocsFor('M', 'DWARKA');
+const girls = plainAllocsFor('F', 'DWARKA');
+const edcBoys = plainAllocsFor('M', 'EDC');
 const boyA = boys[0].appId, boyB = boys[1].appId, girlA = girls[0].appId;
-console.log('        pair: ' + boyA + ' and ' + boyB + ' (both plain rooms, same gender)');
+console.log('        pair: ' + boyA + ' and ' + boyB +
+            ' (both plain rooms, same gender, same campus)');
 
 const vSame = Swap.validate(boyA, boyB);
 check('two same-gender students may swap', vSame.ok, JSON.stringify(
@@ -151,6 +156,16 @@ check('the refusal names the gender check',
   vCross.checks.some(c => c.name === 'GENDER' && !c.ok));
 console.log('        cross-gender -> "' +
   vCross.checks.find(c => !c.ok).text + '"');
+
+// Two consenting students cannot agree their way past a partition. A swap is
+// the only route by which an allocation changes after the run, so it is the only
+// route by which either partition could be broken after the fact.
+const vCampus = Swap.validate(boyA, edcBoys[0].appId);
+check('a cross-campus swap is refused', !vCampus.ok);
+check('the refusal names the campus check',
+  vCampus.checks.some(c => c.name === 'CAMPUS' && !c.ok));
+console.log('        cross-campus -> "' +
+  vCampus.checks.find(c => c.name === 'CAMPUS').text + '"');
 
 check('a student cannot swap with themselves', !Swap.validate(boyA, boyA).ok);
 check('swapping with an unallotted student is refused', (() => {
@@ -210,6 +225,13 @@ check('bed occupancy was updated on both sides', (() => {
 check('no bed is double-booked after the swap', (() => {
   const used = Db.readAll('Allocations').filter(a => a.status === 'ACTIVE').map(a => a.bedId);
   return new Set(used).size === used.length;
+})());
+check('the campus partition still holds after the swap', (() => {
+  return Db.readAll('Allocations').filter(a => a.status === 'ACTIVE').every(a => {
+    const st = stuById[appById[a.appId].studentId];
+    const h = Db.byId('Hostels', roomById[Db.byId('Beds', a.bedId).roomId].hostelId);
+    return !st.campus || h.campus === st.campus;
+  });
 })());
 check('the gender partition still holds after the swap', (() => {
   return Db.readAll('Allocations').filter(a => a.status === 'ACTIVE').every(a => {

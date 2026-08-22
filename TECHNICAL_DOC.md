@@ -117,10 +117,15 @@ remains, so the operator presses the button again rather than watching a timeout
 `src/Allocator.gs`. Deterministic, seeded, and explainable by construction.
 
 ```
-A  PARTITION    Gender is the ONLY hard partition. Dwarka and EDC are a single
-                pool, so campus is a preference, not a boundary.
+A  PARTITION    TWO hard partitions: gender and campus. A student is admitted to
+                one campus and can only be housed there, so an allocation that
+                crosses campuses is not a worse outcome - it is an impossible
+                one. Merit order and quota apportionment stay university-wide;
+                only the beds a student may occupy differ.
+                Accessibility is a placement constraint (stage E), not a
+                partition.
 
-B  SCORE        composite = w_merit·norm(CGPA)
+B  SCORE        composite = w_merit·norm(CGPA or entrance rank)
                           + w_distance·norm(min(distance, cap))
                           + w_year·seniority
                           + w_special·specialNeed
@@ -304,9 +309,12 @@ Hence the PNG encoder.
 ## 8. Roommate matching
 
 `src/Roommate.gs`. Six weighted dimensions — sleep schedule, study style,
-cleanliness, sociability, food preference, language — plus smoking treated as a
-near-veto rather than a weighted preference, because a mismatch there is a
-recurring source of formal complaints.
+cleanliness, sociability, food preference and language, with guests and wake
+time feeding the sleep and sociability terms.
+
+Smoking is deliberately **not** a dimension. Hostels are non-smoking, so asking
+students to declare a tolerance for it would treat a prohibited act as a
+lifestyle preference and quietly build it into the pairing score.
 
 Grouping runs **only among students who already received the same (hostel,
 roomType) outcome**, so it cannot change anyone's preference rank. Compatibility
@@ -349,7 +357,8 @@ break are checked explicitly:
 
 | Check | Why |
 |---|---|
-| `GENDER` | The allocator's only hard partition |
+| `GENDER` | A hard partition of the allocator |
+| `CAMPUS` | A hard partition of the allocator |
 | `ACCESSIBILITY` | A student needing an accessible room must keep one |
 | `ACCESSIBLE_STOCK` | Accessible rooms cannot be released while someone waits |
 | `BOTH_ALLOTTED` | Both parties must hold an active allotment |

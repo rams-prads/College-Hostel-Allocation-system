@@ -61,7 +61,7 @@ function apiGetStudentView(asAppId) {
   view.student = {
     studentId: st.studentId, name: st.name, enrollmentNo: st.enrollmentNo,
     programme: st.programme, branch: st.branch, year: st.year, cgpa: st.cgpa,
-    category: st.category, isPwD: st.isPwD, gender: st.gender,
+    campus: st.campus, category: st.category, isPwD: st.isPwD, gender: st.gender,
     homePincode: st.homePincode, homeState: st.homeState
   };
 
@@ -69,7 +69,7 @@ function apiGetStudentView(asAppId) {
   if (!app) return view;
 
   view.application = {
-    appId: app.appId, status: app.status, campusPref: app.campusPref,
+    appId: app.appId, status: app.status, campus: app.campus,
     submittedAt: fmtDate_(app.submittedAt), distanceKm: app.distanceKm,
     eligible: app.eligible, docStatus: app.docStatus,
     needsAccessible: app.needsAccessible, meritScore: app.meritScore
@@ -231,24 +231,7 @@ function apiGetApplyForm() {
     };
   }
 
-  var hostels = Db.readAll('Hostels').filter(function (h) {
-    return h.active && (h.gender === s.student.gender || h.gender === 'CO');
-  });
-
-  var options = [];
-  hostels.forEach(function (h) {
-    ['SINGLE', 'DOUBLE', 'TRIPLE'].forEach(function (rt) {
-      var capacity = Db.readAll('Rooms').filter(function (r) {
-        return r.hostelId === h.hostelId && r.roomType === rt && r.status === 'ACTIVE';
-      }).length;
-      if (!capacity) return;
-      options.push({
-        key: h.hostelId + '|' + rt,
-        hostelId: h.hostelId, hostelName: h.name, campus: h.campus,
-        roomType: rt, roomTypeLabel: roomTypeLabel_(rt), rooms: capacity
-      });
-    });
-  });
+  var options = hostelOptions_(s.student.gender, s.student.campus);
 
   var existing = s.application;
   var draft = null;
@@ -256,7 +239,6 @@ function apiGetApplyForm() {
     draft = {
       appId: existing.appId,
       status: existing.status,
-      campusPref: existing.campusPref,
       needsAccessible: existing.needsAccessible,
       preferences: Db.where('Preferences', { appId: existing.appId })
         .sort(function (a, b) { return a.rank - b.rank; })
@@ -283,8 +265,60 @@ function roomTypeLabel_(rt) {
 }
 
 /**
+ * The (hostel, room type) options open to one gender at one campus.
+ *
+ * Both filters are hard partitions, not rankings: a student cannot be housed in
+ * another campus's hostel any more than in another gender's. Offering an option
+ * that can never be granted is worse than offering none.
+ */
+function hostelOptions_(gender, campus) {
+  var rooms = Db.readAll('Rooms');
+  var hostels = Db.readAll('Hostels').filter(function (h) {
+    return h.active && (h.gender === gender || h.gender === 'CO') &&
+           (!campus || h.campus === campus);
+  });
+
+  var options = [];
+  hostels.forEach(function (h) {
+    ['SINGLE', 'DOUBLE', 'TRIPLE'].forEach(function (rt) {
+      var capacity = rooms.filter(function (r) {
+        return r.hostelId === h.hostelId && r.roomType === rt && r.status === 'ACTIVE';
+      }).length;
+      if (!capacity) return;
+      options.push({
+        key: h.hostelId + '|' + rt,
+        hostelId: h.hostelId, hostelName: h.name, campus: h.campus,
+        roomType: rt, roomTypeLabel: roomTypeLabel_(rt), rooms: capacity
+      });
+    });
+  });
+  return options;
+}
+
+/**
+ * Options for a student who is still registering and therefore has no record to
+ * read a gender or campus from. Called from the form as soon as they have
+ * declared both, so the preference step can be filled in the same sitting.
+ */
+function apiGetHostelOptions(gender, campus) {
+  var s = Auth.session();
+  if (!s.email) throw new Error('Please sign in first.');
+  // An existing record is authoritative - what the browser sends is not.
+  if (s.student) return hostelOptions_(s.student.gender, s.student.campus);
+  if (['M', 'F', 'O'].indexOf(gender) < 0) throw new Error('Select your gender first.');
+  if (['DWARKA', 'EDC'].indexOf(campus) < 0) throw new Error('Select your campus first.');
+  return hostelOptions_(gender, campus);
+}
+
+/**
  * Save or submit an application.
- * @param {Object} payload {campusPref, needsAccessible, preferences[], lifestyle{}, submit:boolean}
+ *
+ * Campus is deliberately absent from the payload. It is a property of the
+ * student's admission, read from their record, and is never accepted from the
+ * browser - a student who could choose it could apply to a campus they do not
+ * belong to.
+ *
+ * @param {Object} payload {needsAccessible, preferences[], lifestyle{}, submit:boolean}
  */
 function apiSaveApplication(payload) {
   var s = Auth.session();
@@ -309,14 +343,14 @@ function apiSaveApplication(payload) {
                     ' and can no longer be edited. Raise a grievance if something is wrong.');
   }
 
-  var geo = Geo.distanceFromHome(s.student.homePincode);
+  var geo = Geo.distanceFromHome(s.student.homePincode, s.student.campus);
   var status = payload.submit ? 'SUBMITTED' : 'DRAFT';
   var now = new Date();
 
   var record = {
     appId: appId,
     studentId: s.student.studentId,
-    campusPref: payload.campusPref || 'ANY',
+    campus: s.student.campus,
     status: status,
     submittedAt: payload.submit ? now : (app ? app.submittedAt : ''),
     meritScore: app ? app.meritScore : 0,
@@ -355,7 +389,7 @@ function apiSaveApplication(payload) {
   if (payload.submit) {
     Ledger.append('APPLICATION_SUBMITTED', {
       appId: appId, studentId: s.student.studentId,
-      preferences: mine.length, campusPref: record.campusPref
+      preferences: mine.length, campus: record.campus
     }, s.email);
   }
 
@@ -378,8 +412,9 @@ function validateApplication_(payload, student) {
     errors.push('The same choice appears more than once in your preference list.');
   }
 
-  // A preference in the wrong gender's hostel would violate the allocator's one
-  // hard partition, so it is rejected at the door rather than filtered later.
+  // A preference outside either hard partition would be impossible to grant, so
+  // it is rejected at the door rather than silently dropped later - a student
+  // whose choices vanish without explanation has a legitimate grievance.
   var hostels = Db.indexBy('Hostels', 'hostelId');
   prefs.forEach(function (key) {
     var hostelId = String(key).split('|')[0];
@@ -387,6 +422,10 @@ function validateApplication_(payload, student) {
     if (!h) { errors.push('Unknown hostel in your preferences.'); return; }
     if (h.gender !== 'CO' && h.gender !== student.gender) {
       errors.push(h.name + ' does not accept applications from your gender.');
+    }
+    if (student.campus && h.campus !== student.campus) {
+      errors.push(h.name + ' is at ' + Geo.campusName(h.campus) + '. You are admitted to ' +
+                  Geo.campusName(student.campus) + ' and can only be allotted a hostel there.');
     }
   });
 

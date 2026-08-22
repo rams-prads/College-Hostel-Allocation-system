@@ -43,10 +43,10 @@ check('hash is short enough to display', h1.length === 16);
 
 section('Roommate compatibility');
 const A = { sleepTime:'EARLY', wakeTime:'EARLY', studyStyle:'QUIET', cleanliness:5,
-            sociability:2, foodPref:'VEG', language:'Hindi', smokingTolerance:false };
+            sociability:2, foodPref:'VEG', language:'Hindi' };
 const clone = JSON.parse(JSON.stringify(A));
 const opposite = { sleepTime:'LATE', wakeTime:'LATE', studyStyle:'GROUP', cleanliness:1,
-                   sociability:5, foodPref:'NONVEG', language:'Tamil', smokingTolerance:true };
+                   sociability:5, foodPref:'NONVEG', language:'Tamil' };
 check('identical profiles score ~1', Roommate.score(A, clone).score > 0.99,
   Roommate.score(A, clone).score.toFixed(3));
 check('opposite profiles score low', Roommate.score(A, opposite).score < 0.35,
@@ -61,9 +61,13 @@ check('score stays in [0,1]', (() => {
   }
   return true;
 })());
-const smokeA = Object.assign({}, A, { smokingTolerance: true });
-check('smoking mismatch penalises the score',
-  Roommate.score(A, smokeA).score < Roommate.score(A, clone).score);
+// Hostels are non-smoking, so smoking is not a lifestyle axis. A profile that
+// still carries the old field must not change anyone's score.
+const stale = Object.assign({}, A, { smokingTolerance: true });
+check('a stale smoking field no longer affects the score',
+  Roommate.score(A, stale).score === Roommate.score(A, clone).score);
+check('and it is absent from the breakdown',
+  Roommate.score(A, opposite).parts.smokingClash === undefined);
 check('breakdown is returned for the student-facing panel',
   Object.keys(Roommate.score(A, opposite).parts).length >= 6);
 
@@ -181,45 +185,46 @@ check('conversion happened', r.converted > 0, r.converted + '');
 check('converted students are told so',
   r.allocations.filter(a => a.quotaUsed === 'CONVERTED')
     .every(a => (r.traces[a.appId] || []).some(t => t.code === 'SEAT_CONVERTED')));
-// Merit order holds WITHIN each gender. Across genders it cannot: once the
-// boys' hostels are full, a lower-ranked girl is correctly seated ahead of a
-// higher-ranked boy, because no bed he could legally occupy exists.
-check('conversion respects merit order within each gender', ['M', 'F'].every(g => {
+// There are two hard partitions - gender and campus - so the pool a student
+// actually competes in is the pair. Merit order holds WITHIN a partition. Across
+// partitions it cannot: once the Dwarka boys' hostels are full, a lower-ranked
+// East Delhi student is correctly seated ahead of a higher-ranked Dwarka one,
+// because no bed the latter could legally occupy exists.
+const part = c => c.gender + '|' + c.campus;
+const PARTS = [...new Set(Db.readAll('Hostels').map(h => h.gender + '|' + h.campus))];
+
+check('conversion respects merit order within each gender and campus', PARTS.every(k => {
   const conv = r.allocations
-    .filter(a => a.quotaUsed === 'CONVERTED' && a.candidate.gender === g)
+    .filter(a => a.quotaUsed === 'CONVERTED' && part(a.candidate) === k)
     .map(a => a.candidate.meritPosition);
   const waiting = r.waitlist
-    .filter(w => w.candidate.gender === g)
+    .filter(w => part(w.candidate) === k)
     .map(w => w.candidate.meritPosition);
   if (!conv.length || !waiting.length) return true;
   return Math.max(...conv) < Math.min(...waiting);
 }));
-check('the waiting list is only the oversubscribed gender', (() => {
-  const genders = new Set(r.waitlist.map(w => w.candidate.gender));
-  return genders.size === 1;
-})(), 'both genders still waiting means beds were stranded');
 check('utilisation is now near-total', r.metrics.summary.utilisationPct > 97,
   r.metrics.summary.utilisationPct + '%');
 // The real claim is not "zero vacant beds" - beds in the under-subscribed
 // gender's hostels are unavoidable once every eligible student there is housed.
 // The claim is that NOBODY WAITS while a bed they could legally occupy is free.
 check('no student waits while a bed they could occupy sits empty', (() => {
-  const heldPerHostel = {};
-  Db.readAll('Hostels').forEach(h => {
-    const n = Db.readAll('Beds').filter(b => roomById[b.roomId].hostelId === h.hostelId).length;
-    heldPerHostel[h.hostelId] = Math.floor(n * 2 / 100);   // VACANCY_BUFFER_PCT
-  });
-  const surplus = { M: 0, F: 0 };
+  const surplus = {};
   Db.readAll('Hostels').forEach(h => {
     const total = Db.readAll('Beds').filter(b => roomById[b.roomId].hostelId === h.hostelId).length;
     const used = r.allocations.filter(a => roomById[a.roomId].hostelId === h.hostelId).length;
-    surplus[h.gender] += total - used - heldPerHostel[h.hostelId];
+    const held = Math.floor(total * 2 / 100);   // VACANCY_BUFFER_PCT
+    const k = h.gender + '|' + h.campus;
+    surplus[k] = (surplus[k] || 0) + total - used - held;
   });
-  const waitingGenders = new Set(r.waitlist.map(w => w.candidate.gender));
-  return [...waitingGenders].every(g => surplus[g] === 0);
+  const waitingIn = new Set(r.waitlist.map(w => part(w.candidate)));
+  return [...waitingIn].every(k => surplus[k] === 0);
 })(), 'a waitlisted student had an occupiable bed available');
-check('the waiting list is confined to the oversubscribed gender',
-  new Set(r.waitlist.map(w => w.candidate.gender)).size === 1);
+// Not every partition can be oversubscribed at once - some must have absorbed
+// their whole demand, or beds were stranded somewhere.
+check('the waiting list does not span every partition',
+  new Set(r.waitlist.map(w => part(w.candidate))).size < PARTS.length,
+  'if everyone is waiting everywhere, no partition was actually satisfied');
 check('the vacancy buffer is spread across hostels, not borne by one gender',
   r.quota.buffer > 0 && r.quota.buffer < r.quota.totalBeds * 0.05,
   r.quota.buffer + ' beds held back');

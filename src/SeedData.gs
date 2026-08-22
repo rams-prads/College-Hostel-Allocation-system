@@ -207,6 +207,12 @@ function seedStudentsAndApplications_(seed, cohort) {
   var ineligible = 0, needsAccessible = 0;
 
   // Pre-compute the merit-rank ordering by drawing CGPAs first.
+  // Campus is drawn in proportion to the beds that exist for that gender, so the
+  // two campuses come out under comparable pressure. Skewing demand away from
+  // supply would flatter the allocator: it would look efficient simply because
+  // one campus had spare beds and nobody who could use them.
+  var campusWeights = campusWeightsByGender_();
+
   var draft = [];
   for (var i = 0; i < cohort; i++) {
     var gender = Util.weighted(rand, [['M', 58], ['F', 42]]);
@@ -214,7 +220,9 @@ function seedStudentsAndApplications_(seed, cohort) {
     var maxYear = YEARS_BY_PROGRAMME[programme];
     var year = Util.weighted(rand, yearWeights_(maxYear));
     var cgpa = Util.round(Util.normal(rand, 7.2, 1.1, 4.0, 10.0), 2);
-    draft.push({ gender: gender, programme: programme, year: year, cgpa: cgpa, r: rand() });
+    var campus = Util.weighted(rand, campusWeights[gender] || campusWeights.M);
+    draft.push({ gender: gender, campus: campus, programme: programme,
+                 year: year, cgpa: cgpa, r: rand() });
   }
 
   // Merit rank: CGPA descending, ties broken by the seeded draw.
@@ -233,7 +241,7 @@ function seedStudentsAndApplications_(seed, cohort) {
     var name  = first + ' ' + last;
 
     var pin = pickPincode_(rand, geoIdx);
-    var dist = distanceForSeed_(pin, geoIdx);
+    var dist = distanceForSeed_(pin, geoIdx, d.campus);
 
     var category = Util.weighted(rand, [['GEN', 40], ['OBC', 27], ['SC', 15], ['ST', 7], ['EWS', 11]]);
     var isPwD = rand() < 0.03;
@@ -253,6 +261,7 @@ function seedStudentsAndApplications_(seed, cohort) {
       gender: d.gender,
       programme: d.programme,
       branch: Util.pick(rand, BRANCHES[d.programme]),
+      campus: d.campus,
       year: d.year,
       cgpa: d.cgpa,
       meritRank: d.meritRank,
@@ -272,13 +281,14 @@ function seedStudentsAndApplications_(seed, cohort) {
     if (!eligible) ineligible++;
 
     var notes = [];
-    if (dist < minDistance) notes.push('Home is ' + dist + ' km from campus, under the ' + minDistance + ' km minimum');
+    if (dist < minDistance) notes.push('Home is ' + dist + ' km from ' +
+      Geo.campusName(d.campus) + ', under the ' + minDistance + ' km minimum');
     if (d.cgpa < minCgpa) notes.push('CGPA ' + d.cgpa + ' is below the ' + minCgpa + ' minimum');
 
     applications.push({
       appId: appId,
       studentId: studentId,
-      campusPref: Util.weighted(rand, [['ANY', 50], ['DWARKA', 35], ['EDC', 15]]),
+      campus: d.campus,
       status: 'SUBMITTED',
       submittedAt: submittedAt_(rand),
       meritScore: 0,                       // computed by the allocator in Phase 2
@@ -291,8 +301,12 @@ function seedStudentsAndApplications_(seed, cohort) {
       updatedAt: new Date()
     });
 
-    // Ranked preferences, drawn from hostels matching the student's gender.
-    var eligibleHostels = hostels.filter(function (h) { return h.gender === d.gender; });
+    // Ranked preferences, drawn only from hostels the student could actually be
+    // allotted: their own gender AND their own campus. Both are hard partitions,
+    // so a preference outside either could never be granted.
+    var eligibleHostels = hostels.filter(function (h) {
+      return h.gender === d.gender && h.campus === d.campus;
+    });
     var options = [];
     eligibleHostels.forEach(function (h) {
       ['SINGLE', 'DOUBLE', 'TRIPLE'].forEach(function (rt) {
@@ -300,12 +314,9 @@ function seedStudentsAndApplications_(seed, cohort) {
       });
     });
 
-    // Bias preferences toward the student's stated campus and away from TRIPLE,
-    // which is how real preference sheets actually look.
-    var appCampus = applications[applications.length - 1].campusPref;
+    // Bias away from TRIPLE, which is how real preference sheets actually look.
     var scored = options.map(function (o) {
       var w = rand();
-      if (appCampus !== 'ANY' && o.campus === appCampus) w += 0.55;
       if (o.roomType === 'SINGLE') w += 0.30;
       if (o.roomType === 'DOUBLE') w += 0.15;
       return { o: o, w: w };
@@ -356,7 +367,6 @@ function makeLifestyle_(rand, appId) {
     sociability: Util.intBetween(rand, 1, 5),
     foodPref: Util.weighted(rand, [['VEG', 45], ['NONVEG', 40], ['EGG', 15]]),
     language: Util.pick(rand, LANGUAGES),
-    smokingTolerance: rand() < 0.18,
     guestsFrequency: Util.weighted(rand, [['NEVER', 30], ['SOMETIMES', 55], ['OFTEN', 15]])
   };
 }
@@ -386,16 +396,37 @@ function pickPincode_(rand, geoIdx) {
   return prefix + Util.pad(Util.intBetween(rand, 1, 99), 3);
 }
 
-function distanceForSeed_(pin, geoIdx) {
+function distanceForSeed_(pin, geoIdx, campus) {
   var loc = geoIdx[pin.substring(0, 3)];
   if (!loc) return -1;
+  var keys = CAMPUSES[campus] ? [campus] : Object.keys(CAMPUSES);
   var best = null;
-  Object.keys(CAMPUSES).forEach(function (k) {
+  keys.forEach(function (k) {
     var c = CAMPUSES[k];
     var km = Geo.haversine(loc.lat, loc.lng, c.lat, c.lng);
     if (best === null || km < best) best = km;
   });
   return Util.round(best, 1);
+}
+
+/**
+ * Per-gender campus split, derived from the inventory rather than hard-coded, so
+ * changing a hostel's size in HOSTEL_SPECS moves the demand with it.
+ * @return {{M: Array, F: Array}} weight pairs for Util.weighted
+ */
+function campusWeightsByGender_() {
+  var bedsPerFloorBlock = FLOOR_PATTERN.reduce(function (n, rt) { return n + CAPACITY[rt]; }, 0);
+  var tally = {};
+  HOSTEL_SPECS.forEach(function (h) {
+    var beds = h.blocks.length * h.floors * bedsPerFloorBlock;
+    tally[h.gender] = tally[h.gender] || {};
+    tally[h.gender][h.campus] = (tally[h.gender][h.campus] || 0) + beds;
+  });
+  var out = {};
+  Object.keys(tally).forEach(function (g) {
+    out[g] = Object.keys(tally[g]).map(function (c) { return [c, tally[g][c]]; });
+  });
+  return out;
 }
 
 function yearWeights_(maxYear) {

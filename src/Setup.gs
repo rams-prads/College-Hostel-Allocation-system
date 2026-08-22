@@ -14,9 +14,18 @@ function createDatabase(opts) {
   var ss = Db.ss();
   var created = [], skipped = [];
 
+  var drifted = [];
+
   SHEET_ORDER.forEach(function (tab, i) {
     var existing = ss.getSheetByName(tab);
-    if (existing && !opts.force) { skipped.push(tab); return; }
+    if (existing && !opts.force) {
+      // Skipping silently is the dangerous case. Db reads columns BY POSITION
+      // from the schema, so a sheet built against an older column list is not
+      // merely out of date - every row read from it is shifted and wrong. Say so.
+      if (headersDrifted_(existing, tab)) drifted.push(tab);
+      skipped.push(tab);
+      return;
+    }
     if (existing && opts.force) ss.deleteSheet(existing);
     buildSheet_(ss, tab, i);
     created.push(tab);
@@ -34,8 +43,22 @@ function createDatabase(opts) {
 
   var msg = 'Created: ' + (created.length ? created.join(', ') : 'none') +
             '\nSkipped (already existed): ' + (skipped.length ? skipped.join(', ') : 'none');
+  if (drifted.length) {
+    msg += '\n\n*** SCHEMA MISMATCH: ' + drifted.join(', ') + ' ***\n' +
+           'These sheets were built against an older column list. Data is read by ' +
+           'column position, so every row in them will be read incorrectly until they ' +
+           'are rebuilt. Run resetDatabase() and then seedAll().';
+  }
   Logger.log(msg);
-  return { created: created, skipped: skipped, message: msg };
+  return { created: created, skipped: skipped, drifted: drifted, message: msg };
+}
+
+/** Does an existing sheet's header row still match the schema? */
+function headersDrifted_(sh, tab) {
+  var expected = SCHEMA[tab].cols.map(function (c) { return c.name; });
+  if (sh.getLastColumn() < 1) return true;
+  var actual = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), expected.length)).getValues()[0];
+  return expected.some(function (name, i) { return actual[i] !== name; });
 }
 
 /** Nuke and rebuild. Destructive - confirm before calling. */

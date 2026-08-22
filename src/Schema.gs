@@ -58,6 +58,10 @@ var SCHEMA = {
       { name: 'gender',        type: T.ENUM, values: ['M', 'F', 'O'] },
       { name: 'programme',     type: T.ENUM, values: ['BTech', 'MTech', 'MBA', 'LLB', 'MCA', 'BBA', 'BCA'] },
       { name: 'branch',        type: T.STR },
+      // Campus is fixed at admission, not chosen at application time. A student
+      // admitted to Dwarka can only be housed in a Dwarka hostel, so this is a
+      // hard partition of the allocation alongside gender. See Allocator stage A.
+      { name: 'campus',        type: T.ENUM, values: ['DWARKA', 'EDC'] },
       { name: 'year',          type: T.INT },
       { name: 'cgpa',          type: T.NUM },
       // First-year applicants have no CGPA yet, so they are ranked on the
@@ -88,7 +92,9 @@ var SCHEMA = {
     cols: [
       { name: 'appId',            type: T.STR },
       { name: 'studentId',        type: T.STR },
-      { name: 'campusPref',       type: T.ENUM, values: ['DWARKA', 'EDC', 'ANY'] },
+      // Mirrored from the student record so the allocator and every report can
+      // partition by campus without a join. NOT a preference - see Students.campus.
+      { name: 'campus',           type: T.ENUM, values: ['DWARKA', 'EDC'] },
       { name: 'status',           type: T.ENUM, values: ['DRAFT', 'SUBMITTED', 'VERIFIED', 'REJECTED', 'ALLOTTED', 'WAITLISTED', 'WITHDRAWN', 'CANCELLED'] },
       { name: 'submittedAt',      type: T.DATE },
       { name: 'meritScore',       type: T.NUM },
@@ -125,7 +131,6 @@ var SCHEMA = {
       { name: 'sociability',      type: T.INT },
       { name: 'foodPref',         type: T.ENUM, values: ['VEG', 'NONVEG', 'EGG'] },
       { name: 'language',         type: T.STR },
-      { name: 'smokingTolerance', type: T.BOOL },
       { name: 'guestsFrequency',  type: T.ENUM, values: ['NEVER', 'SOMETIMES', 'OFTEN'] }
     ]
   },

@@ -184,9 +184,12 @@ var Grievance = (function () {
     }
 
     // --- check 1: nobody below you took a seat you were entitled to ---------
-    // The precise claim: among students of the same gender who could have used
-    // the same entitlement, none with a strictly lower merit score was allotted
-    // while you were not.
+    // The precise claim: among students who could have used the SAME BED - same
+    // gender, same campus - none with a strictly lower merit score was allotted
+    // while you were not. Comparing across a hard partition would raise false
+    // alarms: a lower-ranked East Delhi student holding an East Delhi bed has
+    // taken nothing from a Dwarka applicant, because that bed was never open to
+    // them. Flagging it would bury the real irregularities this check exists for.
     if (wait && !alloc) {
       var apps = Db.indexBy('Applications', 'appId');
       var stu = Db.indexBy('Students', 'studentId');
@@ -196,6 +199,7 @@ var Grievance = (function () {
         if (!other) return false;
         var os = stu[other.studentId];
         if (!os || os.gender !== student.gender) return false;
+        if (os.campus !== student.campus) return false;
         if (Number(other.meritScore) >= score) return false;
         // A lower-scoring student may legitimately hold a seat through a
         // reserved quota this student had no claim to.
@@ -246,6 +250,11 @@ var Grievance = (function () {
         f('GENDER_CORRECT', genderOk, genderOk
           ? 'You were placed in a hostel open to your gender.'
           : 'You appear to be placed in a hostel not open to your gender.');
+
+        var campusOk = !student.campus || hostel.campus === student.campus;
+        f('CAMPUS_CORRECT', campusOk, campusOk
+          ? 'You were placed in a hostel at the campus you are admitted to.'
+          : 'You appear to be placed at a campus you are not admitted to.');
       }
       if (app.needsAccessible && room) {
         f('ACCESSIBILITY_HONOURED', room.isAccessible, room.isAccessible

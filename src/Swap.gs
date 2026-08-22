@@ -62,13 +62,23 @@ var Swap = (function () {
       return { ok: false, checks: checks };
     }
 
-    // Gender partition: the allocator's one hard constraint. A swap that moved a
-    // student into the other gender's hostel would break it after the fact.
+    // The allocator's two hard constraints. A swap is the one route by which a
+    // student can change rooms after allocation, so it is also the one route by
+    // which either partition could be broken after the fact.
     var genderOk = (pb.hostel.gender === 'CO' || pb.hostel.gender === sa.gender) &&
                    (pa.hostel.gender === 'CO' || pa.hostel.gender === sb.gender);
     chk('GENDER', genderOk, genderOk
       ? 'Both hostels accept the incoming student.'
       : 'The swap would place a student in a hostel not open to their gender.');
+
+    // Campus is fixed at admission. Two consenting students cannot agree their
+    // way around it - the result would be a student living at a campus they do
+    // not attend, which no amount of mutual consent makes workable.
+    var campusOk = (!sa.campus || pb.hostel.campus === sa.campus) &&
+                   (!sb.campus || pa.hostel.campus === sb.campus);
+    chk('CAMPUS', campusOk, campusOk
+      ? 'Both students stay at the campus they are admitted to.'
+      : 'The swap would move a student to a campus they are not admitted to.');
 
     // Accessibility: a student who needs an accessible room must keep one, and
     // an accessible room must not be given up to someone who does not need it

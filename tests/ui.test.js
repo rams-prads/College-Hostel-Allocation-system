@@ -120,7 +120,7 @@ const CHROME = scriptOf('chrome.html');
  * Load chrome + a page script and report what happened.
  * A page that throws at load leaves #root empty, which is the bug this catches.
  */
-function renderPage(file, sessionEmail) {
+function renderPage(file, sessionEmail, after) {
   const nodes = freshDom();
   const errors = [];
   global.Session = { getActiveUser: () => ({ getEmail: () => sessionEmail }) };
@@ -128,7 +128,10 @@ function renderPage(file, sessionEmail) {
 
   let threw = null;
   try {
+    // Indirect eval, so the page's own functions and state land on the global
+    // object and `after` can drive the wizard the way a click would.
     (0, eval)(CHROME + '\n' + scriptOf(file));
+    if (after) (0, eval)(after);
   } catch (e) {
     threw = e.message;
   }
@@ -185,6 +188,38 @@ check('asks for gender, since hostels are single-gender',
 check('the wizard has all seven steps',
   (r.screen.match(/<li class="[^"]*"[^>]*onclick="goStep/g) || []).length === 7,
   (r.screen.match(/onclick="goStep/g) || []).length + ' steps');
+
+section('Campus is declared once, at registration');
+const atStep = name => 'step = STEPS.indexOf("' + name + '"); paint();';
+
+r = renderPage('apply.html', 'someone.brand.new@example.com', atStep('Course'));
+check('script survives stepping to the course page', !r.threw, r.threw || '');
+check('the course step asks which campus they are admitted to',
+  r.screen.indexOf('Campus you are admitted to') > 0);
+check('both campuses are offered',
+  r.screen.indexOf('Dwarka Campus') > 0 && r.screen.indexOf('East Delhi Campus') > 0);
+check('and it is presented as a fact, not a preference',
+  r.screen.indexOf('Fixed when you joined') > 0);
+
+r = renderPage('apply.html', 'someone.brand.new@example.com', atStep('Roommate'));
+check('script survives stepping to the roommate page', !r.threw, r.threw || '');
+check('the roommate questionnaire still renders',
+  r.screen.indexOf('go to sleep') > 0);
+check('it no longer asks about smoking', r.screen.toLowerCase().indexOf('smok') < 0,
+  'hostels are non-smoking - it is not a lifestyle preference to be matched on');
+
+section('Application form - the preference step');
+r = renderPage('apply.html', studentEmail, atStep('Preferences'));
+check('script survives stepping to the preference page', !r.threw, r.threw || '');
+check('no campus choice is offered', r.screen.indexOf('Campus preference') < 0,
+  'a student cannot choose the campus they were admitted to');
+check('the campus restriction is stated instead',
+  r.screen.indexOf('fixed by your admission') > 0);
+check('only the student\'s own campus appears in the options', (() => {
+  const other = student.campus === 'DWARKA' ? 'East Delhi Campus' : 'Dwarka Campus';
+  const mine = student.campus === 'DWARKA' ? 'Dwarka Campus' : 'East Delhi Campus';
+  return r.screen.indexOf(mine) > 0 && r.screen.split(other).length - 1 === 0;
+})(), 'offering an option that can never be granted is worse than offering none');
 
 section('Admin dashboard');
 r = renderPage('admin.html', 'admin@ipu.ac.in');

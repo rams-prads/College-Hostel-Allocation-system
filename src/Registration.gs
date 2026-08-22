@@ -12,6 +12,17 @@
 
 var PROGRAMME_YEARS = { BTech: 4, MTech: 2, MBA: 2, MCA: 2, LLB: 5, BBA: 3, BCA: 3 };
 
+/**
+ * A student is admitted to one campus and stays there. It is declared once,
+ * here, and is never offered again as a choice on the application form.
+ */
+var CAMPUS_OPTIONS = [
+  { code: 'DWARKA', label: 'Dwarka Campus',
+    note: 'Sector 16C, Dwarka - the main university campus.' },
+  { code: 'EDC', label: 'East Delhi Campus',
+    note: 'Surajmal Vihar, East Delhi.' }
+];
+
 var BRANCHES_BY_PROGRAMME = {
   BTech: ['Computer Science & Engineering', 'Information Technology',
           'Electronics & Communication', 'Electrical & Electronics',
@@ -38,6 +49,7 @@ function apiGetRegistrationOptions() {
       { code: 'ST',  label: 'Scheduled Tribe' },
       { code: 'EWS', label: 'Economically Weaker Section' }
     ],
+    campuses: CAMPUS_OPTIONS,
     pwdTypes: ['Locomotor', 'Visual', 'Hearing', 'Speech', 'Other'],
     bloodGroups: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', 'Not known'],
     minDistanceKm: Policy.value('eligibility', 'MIN_DISTANCE_KM', 30),
@@ -50,9 +62,10 @@ function apiGetRegistrationOptions() {
  * while they are still filling the form, rather than discovering it in a
  * rejection weeks later.
  */
-function apiLookupPincode(pincode) {
-  var geo = Geo.distanceFromHome(pincode);
+function apiLookupPincode(pincode, campus) {
+  var geo = Geo.distanceFromHome(pincode, campus);
   var minDist = Policy.value('eligibility', 'MIN_DISTANCE_KM', 30);
+  var where = campus ? ' from ' + Geo.campusName(campus) : ' from campus';
 
   if (!geo.resolved) {
     return {
@@ -69,9 +82,9 @@ function apiLookupPincode(pincode) {
     eligible: geo.km >= minDist,
     minDistanceKm: minDist,
     message: geo.km >= minDist
-      ? 'About ' + geo.km + ' km from campus (' + geo.district + ', ' + geo.state +
+      ? 'About ' + geo.km + ' km' + where + ' (' + geo.district + ', ' + geo.state +
         '). That is beyond the ' + minDist + ' km minimum, so distance will not block you.'
-      : 'About ' + geo.km + ' km from campus (' + geo.district + ', ' + geo.state +
+      : 'About ' + geo.km + ' km' + where + ' (' + geo.district + ', ' + geo.state +
         '). Hostel places are kept for students living more than ' + minDist +
         ' km away, so an application from this address is unlikely to succeed.'
   };
@@ -97,7 +110,7 @@ function apiRegisterStudent(payload) {
                     'If that is yours, contact the hostel office rather than registering again.');
   }
 
-  var geo = Geo.distanceFromHome(payload.homePincode);
+  var geo = Geo.distanceFromHome(payload.homePincode, payload.campus);
   var studentId = Db.nextId('STU');
 
   Db.append('Students', {
@@ -110,6 +123,7 @@ function apiRegisterStudent(payload) {
     gender: payload.gender,
     programme: payload.programme,
     branch: String(payload.branch || '').trim(),
+    campus: payload.campus,
     year: Number(payload.year),
     cgpa: Number(payload.cgpa) || 0,
     entranceRank: Number(payload.entranceRank) || 0,
@@ -132,7 +146,8 @@ function apiRegisterStudent(payload) {
 
   Ledger.append('STUDENT_REGISTERED', {
     studentId: studentId, email: s.email, enrollmentNo: payload.enrollmentNo,
-    programme: payload.programme, year: payload.year, selfDeclared: true
+    programme: payload.programme, campus: payload.campus, year: payload.year,
+    selfDeclared: true
   }, s.email);
 
   return { ok: true, studentId: studentId, distanceKm: geo.resolved ? geo.km : null };
@@ -157,6 +172,11 @@ function validateRegistration_(p) {
   if (['M', 'F', 'O'].indexOf(p.gender) < 0) e.push('Select your gender.');
   if (!PROGRAMME_YEARS[p.programme]) e.push('Select your programme.');
   if (!p.branch) e.push('Select your branch or specialisation.');
+  // Campus decides which hostels exist for this student at all, so a wrong or
+  // missing value is not a cosmetic error - it would leave them unallocatable.
+  if (['DWARKA', 'EDC'].indexOf(p.campus) < 0) {
+    e.push('Select the campus you are admitted to.');
+  }
 
   var maxYear = PROGRAMME_YEARS[p.programme] || 5;
   var year = Number(p.year);
