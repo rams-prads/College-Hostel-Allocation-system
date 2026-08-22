@@ -36,7 +36,24 @@ function onOpen() {
  * Routes: (default) student portal | apply | admin | verify
  */
 function doGet(e) {
+  // A template that throws while evaluating produces an EMPTY frame, not an
+  // error message - the exception dies inside the sandboxed iframe and the user
+  // sees a blank page with nothing to act on. Catching it here turns every
+  // server-side failure into something readable.
+  try {
+    return route_(e);
+  } catch (err) {
+    return errorPage_(err, e);
+  }
+}
+
+function route_(e) {
   var page = (e && e.parameter && e.parameter.page) || 'home';
+
+  // Self-diagnosis, deliberately free of includes, templates and client script,
+  // so it renders even when everything else is broken.
+  if (page === 'diag') return diagnosticPage_(e);
+
   var session = Auth.session();
 
   // The QR verification page is deliberately public - a warden at the gate
@@ -62,6 +79,93 @@ function doGet(e) {
   if (page === 'apply')  return render_('ui/apply',   'Hostel Application', { session: session });
 
   return render_('ui/student', 'My Hostel Application', { session: session });
+}
+
+/** A server-side failure, rendered so it can be read and reported. */
+function errorPage_(err, e) {
+  var page = (e && e.parameter && e.parameter.page) || 'home';
+  return HtmlService.createHtmlOutput(
+    '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:640px;' +
+    'margin:44px auto;padding:0 20px;color:#121c2e;line-height:1.55">' +
+    '<h2 style="margin:0 0 6px;color:#a52222">This page could not be built</h2>' +
+    '<p style="color:#6b7a90;margin:0 0 18px">The server hit an error while preparing the ' +
+    '<strong>' + page + '</strong> page.</p>' +
+    '<pre style="background:#f6f8fb;border:1px solid #dde4ed;border-radius:8px;padding:14px;' +
+    'font-size:12.5px;overflow-x:auto;white-space:pre-wrap">' +
+    String(err && err.message ? err.message : err) +
+    (err && err.stack ? '\n\n' + err.stack : '') + '</pre>' +
+    '<p style="font-size:13.5px">Open <strong>?page=diag</strong> on this same address for a ' +
+    'full check of the deployment.</p></div>'
+  ).setTitle('Error');
+}
+
+/**
+ * Deployment self-check. No includes, no templates, no client script - so it
+ * still renders when the thing that breaks the other pages is one of those.
+ */
+function diagnosticPage_(e) {
+  var lines = [];
+  function row(k, v, ok) {
+    lines.push('<tr><td style="padding:6px 14px 6px 0;color:#6b7a90;white-space:nowrap">' + k +
+      '</td><td style="padding:6px 0;font-weight:600' +
+      (ok === false ? ';color:#a52222' : (ok === true ? ';color:#0f7a4d' : '')) + '">' + v +
+      '</td></tr>');
+  }
+
+  var url = '';
+  try { url = ScriptApp.getService().getUrl() || '(none)'; } catch (err) { url = 'ERROR: ' + err.message; }
+  row('Web app URL from the server', url, url.indexOf('http') === 0);
+  row('This request arrived as', JSON.stringify((e && e.parameter) || {}));
+
+  var email = '';
+  try { email = Session.getActiveUser().getEmail() || '(not detected)'; }
+  catch (err) { email = 'ERROR: ' + err.message; }
+  row('Signed in as', email, email.indexOf('@') > 0);
+
+  var s = null;
+  try { s = Auth.session(); row('Administrator', s.isAdmin ? 'yes (' + s.role + ')' : 'no', s.isAdmin); }
+  catch (err) { row('Administrator', 'ERROR: ' + err.message, false); }
+  try { row('Student record', s && s.student ? s.student.name : 'none linked to this address'); }
+  catch (err) { row('Student record', 'ERROR: ' + err.message, false); }
+
+  // Can each interface file actually be read?
+  ['ui/styles', 'ui/chrome', 'ui/index', 'ui/student', 'ui/apply', 'ui/admin', 'ui/verify']
+    .forEach(function (f) {
+      try {
+        var n = HtmlService.createHtmlOutputFromFile(f).getContent().length;
+        row('File ' + f, n + ' bytes', n > 0);
+      } catch (err) {
+        row('File ' + f, 'MISSING or unreadable: ' + err.message, false);
+      }
+    });
+
+  // Can each page template actually be evaluated?
+  [['ui/student', 'Student portal'], ['ui/apply', 'Application form'],
+   ['ui/admin', 'Admin dashboard'], ['ui/verify', 'Verification page']]
+    .forEach(function (pair) {
+      try {
+        var t = HtmlService.createTemplateFromFile(pair[0]);
+        t.session = s; t.params = {};
+        var out = t.evaluate().getContent();
+        row('Renders: ' + pair[1], out.length + ' bytes', out.length > 500);
+      } catch (err) {
+        row('Renders: ' + pair[1], 'FAILS: ' + err.message, false);
+      }
+    });
+
+  return HtmlService.createHtmlOutput(
+    '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:760px;' +
+    'margin:40px auto;padding:0 20px;color:#121c2e;line-height:1.5">' +
+    '<h2 style="margin:0 0 4px">Deployment check</h2>' +
+    '<p style="color:#6b7a90;margin:0 0 20px;font-size:14px">Everything the portal needs in ' +
+    'order to render a page. Anything in red is the problem.</p>' +
+    '<table style="border-collapse:collapse;font-size:13.5px;width:100%">' + lines.join('') +
+    '</table>' +
+    '<p style="font-size:13px;color:#6b7a90;margin-top:22px">If the web app URL above does not ' +
+    'match the address in your browser, your deployment is serving an older version of the ' +
+    'code. In the Apps Script editor choose <strong>Deploy &rsaquo; Manage deployments</strong>, ' +
+    'edit the deployment, set <strong>Version: New version</strong> and deploy again.</p></div>'
+  ).setTitle('Deployment check');
 }
 
 /** Render a template with data bound to it. */
@@ -116,9 +220,20 @@ function htmlMessage_(title, body) {
   ).setTitle(title);
 }
 
-/** Absolute URL of this web app - used in emails and QR codes. */
+/**
+ * Absolute URL of this web app, used in emails, QR codes and every internal
+ * link.
+ *
+ * NEVER allowed to throw. It is called from inside page templates, and a
+ * template that throws renders an empty frame rather than an error - which is
+ * indistinguishable, from the outside, from the page simply not working.
+ */
 function webAppUrl() {
-  return ScriptApp.getService().getUrl();
+  try {
+    return ScriptApp.getService().getUrl() || '';
+  } catch (e) {
+    return '';
+  }
 }
 
 // ------------------------------------------------------------- menu callbacks
