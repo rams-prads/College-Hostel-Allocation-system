@@ -97,8 +97,15 @@ check('knobs are offered', knobs.length > 5, knobs.length + ' knobs');
 check('each knob carries its current value', knobs.every(k => k.value !== undefined));
 check('each knob has bounds and help',
   knobs.every(k => k.min !== undefined && k.max !== undefined && !!k.help));
-check('reservation and weight knobs are both present',
-  knobs.some(k => k.category === 'reservation') && knobs.some(k => k.category === 'weight'));
+check('the knobs are the levers the policy actually has',
+  knobs.some(k => k.category === 'reservation') && knobs.some(k => k.category === 'priority'),
+  'the brochure orders priority groups; it does not weight them against each other');
+check('every priority group is adjustable',
+  ['PWD', 'OUTSIDE_DELHI', 'PARENT_TRANSFERRED', 'DELHI']
+    .every(k => knobs.some(x => x.category === 'priority' && x.key === k)));
+check('no weight knobs are offered any more',
+  !knobs.some(k => k.category === 'weight'),
+  'offering a control that no longer affects anything is worse than offering none');
 
 section('Committing a simulation');
 const pwdBefore = Policy.value('reservation', 'PwD', 0);
@@ -307,11 +314,20 @@ section('A planted irregularity escalates instead of being papered over');
 // says everything was fine.
 const victim = Db.byId('Applications', wlApp);
 const victimStu = stuById[victim.studentId];
+// It has to be somebody in the SAME priority group. A student from a group
+// ahead of theirs was always going to be considered first whatever their marks,
+// so that is the policy working rather than an irregularity - and the audit is
+// right to say nothing about it.
 const plantTarget = Db.readAll('Allocations').find(a => {
   const app = appById[a.appId];
   const st = stuById[app.studentId];
-  return a.status === 'ACTIVE' && st.gender === victimStu.gender && a.quotaUsed === 'OPEN';
+  return a.status === 'ACTIVE' && st.gender === victimStu.gender &&
+         st.campus === victimStu.campus &&
+         (app.priorityTier || '') === (victim.priorityTier || '') &&
+         a.quotaUsed === 'OPEN';
 });
+check('a same-group comparison exists to plant into', !!plantTarget,
+  'group ' + victim.priorityTier);
 const originalScore = Db.byId('Applications', plantTarget.appId).meritScore;
 Db.update('Applications', plantTarget.appId,
   { meritScore: Number(victim.meritScore) - 0.05 });

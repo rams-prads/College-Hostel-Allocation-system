@@ -23,8 +23,12 @@ function asUser(email) {
 const VALID = {
   name: 'Riya Sharma', enrollmentNo: '04116403223', phone: '9876543210',
   dob: '2006-03-14', gender: 'F', programme: 'BTech',
-  branch: 'Computer Science & Engineering', campus: 'DWARKA',
-  year: 1, entranceRank: 1842,
+  branch: 'Computer Science & Engineering', campus: 'DWARKA', school: 'USICT',
+  year: 1,
+  // A first-year is ranked on the best five subjects of class 12, which is
+  // what the brochure says and what the form therefore has to ask for.
+  meritPercent: 88.4,
+  residenceCategory: 'OUTSIDE_DELHI', parentTransferred: false,
   category: 'OBC', isPwD: false,
   homeAddress: '12 Beltola Road, Beltola', homeCity: 'Guwahati', homePincode: '781028',
   guardianName: 'S. Sharma', guardianPhone: '9812345678',
@@ -87,8 +91,14 @@ check('enrolment number stored', row.enrollmentNo === VALID.enrollmentNo);
 check('the signed-in address is linked', row.email === 'riya.new@example.com',
   'the account, not anything typed into the form');
 check('programme and branch stored', row.programme === 'BTech' && !!row.branch);
-check('entrance rank stored for a first-year', Number(row.entranceRank) === 1842);
-check('no CGPA is invented for a first-year', Number(row.cgpa) === 0);
+check('the class 12 percentage is stored', Number(row.meritPercent) === 88.4);
+check('and recorded as coming from class 12', row.meritBasis === 'CLASS_12',
+  'a first-year has no university result to be ranked on yet');
+check('the admission category is stored', row.residenceCategory === 'OUTSIDE_DELHI',
+  'it decides which queue they are in, so it is the most consequential field on the form');
+check('a self-registering applicant is not marked a returning resident',
+  row.exResident === false,
+  're-admission runs from the office list of last session residents, not from a form');
 check('guardian contact stored', row.guardianName === 'S. Sharma');
 check('home state derived from the PIN code', row.homeState === 'Assam',
   'typed state is not trusted when the PIN resolves');
@@ -142,11 +152,16 @@ reject('an unknown programme is refused', { programme: 'PhD' }, 'programme');
 reject('a missing campus is refused', { campus: '' }, 'campus');
 reject('an invented campus is refused', { campus: 'ROHINI' }, 'campus');
 reject('year 6 of a four-year degree is refused', { year: 6 }, 'Year of study');
-reject('a first-year with no entrance rank is refused',
-  { year: 1, entranceRank: 0 }, 'entrance');
-reject('a later year with no CGPA is refused',
-  { year: 3, cgpa: 0, entranceRank: 0 }, 'CGPA');
-reject('a CGPA above 10 is refused', { year: 3, cgpa: 11 }, 'CGPA');
+reject('a first-year with no class 12 marks is refused',
+  { year: 1, meritPercent: 0 }, 'best five subjects');
+reject('a later year with no semester result is refused',
+  { year: 3, meritPercent: 0 }, 'preceding semester');
+reject('a percentage above 100 is refused', { year: 3, meritPercent: 104 }, 'percentage');
+reject('a missing admission category is refused',
+  { residenceCategory: '' }, 'Delhi or the outside-Delhi');
+reject('an outside-Delhi applicant cannot claim the parent-transfer priority',
+  { residenceCategory: 'OUTSIDE_DELHI', parentTransferred: true }, 'Delhi-category');
+reject('a missing school is refused', { school: '' }, 'School of Studies');
 reject('an unknown category is refused', { category: 'XYZ' }, 'category');
 reject('PwD without a type is refused', { isPwD: true, pwdType: '' }, 'disability');
 reject('a five-digit PIN code is refused', { homePincode: '12345' }, 'PIN code');
@@ -160,12 +175,17 @@ section('A continuing student registers on CGPA instead');
 asUser('senior@example.com');
 const senior = apiRegisterStudent(Object.assign({}, VALID, {
   name: 'Aditi Rao', enrollmentNo: '04116403999', gender: 'F', campus: 'EDC',
-  year: 3, cgpa: 8.4, entranceRank: 0, category: 'GEN'
+  school: 'USAR', year: 3, meritPercent: 76.5, category: 'GEN',
+  residenceCategory: 'DELHI', parentTransferred: true
 }));
 const seniorRow = Db.byId('Students', senior.studentId);
 check('a third-year registers successfully', !!senior.studentId);
-check('CGPA is stored', Number(seniorRow.cgpa) === 8.4);
-check('no entrance rank is required of them', Number(seniorRow.entranceRank) === 0);
+check('their semester result is stored', Number(seniorRow.meritPercent) === 76.5);
+check('and recorded as a semester result, not class 12',
+  seniorRow.meritBasis === 'SEMESTER');
+check('a Delhi applicant may claim the parent-transfer priority',
+  seniorRow.parentTransferred === true,
+  'which moves them from the fourth group to the third');
 
 section('Eligibility treats the two fairly');
 const elig = Eligibility.evaluateAll();
@@ -233,11 +253,13 @@ check('its id does not collide either',
   Db.readAll('Applications').filter(a => a.appId === saved.appId).length === 1);
 
 const ev = Eligibility.evaluateAll().byAppId[saved.appId];
-check('a first-year is NOT failed for having no CGPA', ev.eligible === true,
+check('a first-year is eligible on class 12 marks alone', ev.eligible === true,
   ev.reasons.filter(r => !r.ok).map(r => r.code).join(', '));
-check('and is told why that is fine',
-  ev.reasons.some(r => r.code === 'ELIG_PASS_ENTRANCE'));
-console.log('        ' + (ev.reasons.find(r => r.code === 'ELIG_PASS_ENTRANCE') || {}).text);
+check('and is told that neither distance nor marks bar them',
+  ev.reasons.some(r => r.code === 'ELIG_PASS_FRESH'));
+console.log('        ' + (ev.reasons.find(r => r.code === 'ELIG_PASS_FRESH') || {}).text);
+check('the class 12 basis is stated in the reasons',
+  ev.reasons.some(r => r.code === 'ELIG_PASS_MERIT' && /class 12/i.test(r.text)));
 
 section('Allocation ranks first-years on entrance rank');
 const run = Allocator.runAndCommit({ seed: 'GGSIPU-2026', runId: 'RUN-REG' });
@@ -248,23 +270,35 @@ check('the new student is in the run',
   'registered, applied, and then ignored would be the worst outcome');
 check('and gets a full explanation', !!view.explanation);
 
-const meritLine = view.explanation.groups
-  .reduce((a, g) => a.concat(g.items), [])
-  .find(i => i.code === 'MERIT_POSITION');
-check('the explanation names the basis used', !!meritLine &&
-  meritLine.text.indexOf('entrance rank') > 0,
-  'a first-year must not be told they were ranked on a CGPA they do not have');
+const items = view.explanation.groups.reduce((a, g) => a.concat(g.items), []);
+const tierLine = items.find(i => i.code === 'PRIORITY_GROUP');
+const meritLine = items.find(i => i.code === 'MERIT_POSITION');
+
+check('the explanation names the priority group first', !!tierLine);
+console.log('        ' + (tierLine ? tierLine.text : ''));
+check('and it is the outside-Delhi group, as declared',
+  !!tierLine && /outside-Delhi/.test(tierLine.text));
+check('the position names the measure that ordered it', !!meritLine &&
+  /class 12/.test(meritLine.text),
+  'a first-year must not be told they were ranked on a result they do not have');
 console.log('        ' + (meritLine ? meritLine.text : ''));
 
-check('every first-year in the run was scored on entrance rank', (() => {
+check('a first-year anywhere in the run is ranked on class 12', (() => {
   const stu = Db.indexBy('Students', 'studentId');
   const apps = Db.indexBy('Applications', 'appId');
   return run.allocations.concat(run.waitlist).every(x => {
     const s = stu[apps[x.appId].studentId];
-    if (Number(s.cgpa) >= 1) return true;
-    return x.candidate.meritBasis === 'ENTRANCE_RANK' ||
-           x.candidate.meritBasis === 'NOT_RECORDED';
+    if (Number(s.year) > 1) return true;
+    return s.meritBasis === 'CLASS_12' || s.meritBasis === 'NOT_RECORDED';
   });
+})());
+check('nobody is placed above their own priority group', (() => {
+  const order = run.allocations.concat(run.waitlist)
+    .filter(x => x.candidate).map(x => x.candidate.tierRank);
+  // Allotments are made in order, so the ranks must never go backwards within
+  // the allocated set followed by the waitlisted set.
+  const allocRanks = run.allocations.filter(x => x.candidate).map(x => x.candidate.tierRank);
+  return Math.max.apply(null, allocRanks) >= Math.min.apply(null, allocRanks) && order.length > 0;
 })());
 
 section('Nothing else broke');

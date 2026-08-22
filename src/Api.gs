@@ -243,6 +243,12 @@ function buildExplanation_(reasonCodes, alloc) {
 
   var groups = [
     { title: 'Eligibility',            prefixes: ['ELIG_'],                    items: [] },
+    // The priority group comes before the position within it, because which
+    // group you are in decides the outcome and the position only orders you
+    // inside it. A reason with no group here is silently dropped, which is how
+    // the most decisive fact about an allotment went missing from its own
+    // explanation the moment the policy changed.
+    { title: 'Your priority group',    prefixes: ['PRIORITY_GROUP'],           items: [] },
     { title: 'Your position',          prefixes: ['MERIT_POSITION'],           items: [] },
     { title: 'How your seat was awarded', prefixes: ['SEAT_', 'WAITLIST_'],    items: [] },
     { title: 'Your room preferences',  prefixes: ['PREF_', 'FALLBACK_', 'PARETO_'], items: [] },
@@ -250,6 +256,12 @@ function buildExplanation_(reasonCodes, alloc) {
     { title: 'Roommate matching',      prefixes: ['ROOMMATE_'],                items: [] },
     { title: 'Changes since allotment', prefixes: ['SWAP_', 'TRANSFER_'],      items: [] }
   ];
+
+  // Anything with no group of its own still gets shown. Dropping it silently is
+  // how a reason the engine took the trouble to record disappears from the
+  // explanation it was recorded for.
+  var other = { title: 'Other factors', prefixes: [], items: [] };
+  groups.push(other);
 
   trace.forEach(function (r) {
     for (var i = 0; i < groups.length; i++) {
@@ -259,6 +271,7 @@ function buildExplanation_(reasonCodes, alloc) {
         return;
       }
     }
+    other.items.push({ ok: r.ok, text: r.text, code: r.code, detail: r.detail });
   });
 
   var merit = trace.filter(function (r) { return r.code === 'MERIT_POSITION'; })[0];
@@ -324,7 +337,7 @@ function apiGetApplyForm() {
 }
 
 function roomTypeLabel_(rt) {
-  return { SINGLE: 'Single room', DOUBLE: '2-seater', TRIPLE: '3-seater' }[rt] || rt;
+  return { SINGLE: 'Single room', TRIPLE: '3-seater', QUAD: '4-seater' }[rt] || rt;
 }
 
 /**
@@ -343,7 +356,7 @@ function hostelOptions_(gender, campus) {
 
   var options = [];
   hostels.forEach(function (h) {
-    ['SINGLE', 'DOUBLE', 'TRIPLE'].forEach(function (rt) {
+    ['SINGLE', 'TRIPLE', 'QUAD'].forEach(function (rt) {
       var capacity = rooms.filter(function (r) {
         return r.hostelId === h.hostelId && r.roomType === rt && r.status === 'ACTIVE';
       }).length;

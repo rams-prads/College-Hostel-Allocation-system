@@ -35,7 +35,7 @@ var Allocator = (function () {
     var ctx = buildContext_(seed);
 
     stageA_partition(ctx);
-    stageB_score(ctx);
+    stageB_priority(ctx);
     stageC_order(ctx);
     stageD_quota(ctx);
     stageE_serialDictatorship(ctx);
@@ -149,8 +149,18 @@ var Allocator = (function () {
         category: student.category,
         isPwD: !!student.isPwD,
         needsAccessible: !!app.needsAccessible,
-        cgpa: Number(student.cgpa) || 0,
-        entranceRank: Number(student.entranceRank) || 0,
+
+        // Everything the priority order turns on. Read once here so stage B is
+        // pure sorting and the reader can see, in one place, exactly which
+        // facts about a person the allotment depends on.
+        residenceCategory: student.residenceCategory || 'DELHI',
+        parentTransferred: !!student.parentTransferred,
+        isForeign: !!student.isForeign,
+        school: student.school || '',
+        meritPercent: Number(student.meritPercent) || 0,
+        meritBasis: student.meritBasis || 'NOT_RECORDED',
+        admissionType: app.admissionType || 'FRESH',
+
         year: Number(student.year),
         distanceKm: Number(app.distanceKm),
         prefs: (ctx.prefsByApp[app.appId] || []).slice().sort(function (a, b) { return a.rank - b.rank; }),
@@ -161,111 +171,156 @@ var Allocator = (function () {
     return ctx.pool.length;
   }
 
-  // =========================================================== STAGE B: SCORE
+  // ========================================== STAGE B: PRIORITY AND MERIT
 
   /**
-   * Composite merit score in [0,1]. Every component is normalised over the
-   * eligible pool, so the score is relative to this year's applicants rather
-   * than to an arbitrary absolute scale.
+   * Place every candidate in a priority group, and record the merit figure
+   * that orders them inside it.
+   *
+   * This replaced a weighted composite score, and the difference is not a
+   * refinement - it is a different kind of decision. A weighted score lets a
+   * strong showing on one factor compensate for a weak one, so a Delhi
+   * applicant with excellent marks could outrank an outside-Delhi applicant
+   * with poor ones. The brochure does not permit that. It sets a strict order
+   * of groups, and a group is exhausted before the next is looked at at all:
+   *
+   *     1  disabled / handicapped applicants
+   *     2  outside-Delhi category, by merit
+   *     3  Delhi category whose parent was transferred out of Delhi, by merit
+   *     4  remaining Delhi category, by distance from campus
+   *
+   * No amount of merit moves anyone between those groups. Encoding it as
+   * weights would have produced results that looked reasonable and were not the
+   * policy, which is the worst failure available to a system like this.
+   *
+   * Merit is a percentage in both cases the brochure names - the result up to
+   * the preceding semester, or the best five subjects of class 12 for a
+   * first-year - so unlike a CGPA against an entrance rank the two are directly
+   * comparable and need no normalising.
    */
-  function stageB_score(ctx) {
-    var w = Policy.weights();
-    var distCap = Policy.value('capacity', 'DISTANCE_CAP_KM', 1500);
-
-    // A first-year applicant has no CGPA - they have not sat a university exam
-    // yet - so they are ranked on the entrance rank that admitted them. The two
-    // measures are not comparable on any common scale, so each group is
-    // normalised WITHIN ITSELF. A first-year at the top of their entrance list
-    // and a final-year at the top of the CGPA list both score 1 on merit, which
-    // is the only defensible way to place them in one queue.
-    var withCgpa = ctx.pool.filter(function (c) { return c.cgpa >= 1; });
-    var byEntrance = ctx.pool.filter(function (c) { return c.cgpa < 1; });
-
-    var minC = 0, maxC = 10;
-    if (withCgpa.length) {
-      var cgpas = withCgpa.map(function (c) { return c.cgpa; });
-      minC = Math.min.apply(null, cgpas);
-      maxC = Math.max.apply(null, cgpas);
-    }
-
-    var minR = 1, maxR = 1;
-    if (byEntrance.length) {
-      var ranks = byEntrance.map(function (c) { return c.entranceRank || 0; });
-      minR = Math.min.apply(null, ranks);
-      maxR = Math.max.apply(null, ranks);
-    }
+  function stageB_priority(ctx) {
+    var ranks = Policy.load().priority || {};
 
     ctx.pool.forEach(function (c) {
-      var merit, basis;
-      if (c.cgpa >= 1) {
-        merit = Util.normalise(c.cgpa, minC, maxC);
-        basis = 'CGPA';
-      } else if (c.entranceRank > 0) {
-        // A lower entrance rank is a better one, so the scale is inverted.
-        merit = 1 - Util.normalise(c.entranceRank, minR, maxR);
-        basis = 'ENTRANCE_RANK';
+      var tier, tierRank, orderBy;
+
+      if (c.isPwD) {
+        tier = 'PWD';
+        tierRank = Number(ranks.PWD) || 1;
+        orderBy = c.meritPercent;
+      } else if (c.residenceCategory === 'OUTSIDE_DELHI') {
+        tier = 'OUTSIDE_DELHI';
+        tierRank = Number(ranks.OUTSIDE_DELHI) || 2;
+        orderBy = c.meritPercent;
+      } else if (c.parentTransferred) {
+        tier = 'PARENT_TRANSFERRED';
+        tierRank = Number(ranks.PARENT_TRANSFERRED) || 3;
+        orderBy = c.meritPercent;
       } else {
-        // Neither recorded. Placed at the midpoint rather than at zero, so a
-        // missing figure does not silently act as a penalty.
-        merit = 0.5;
-        basis = 'NOT_RECORDED';
+        // The one group the brochure orders by distance rather than by marks:
+        // among Delhi students, the question is who has furthest to travel.
+        tier = 'DELHI';
+        tierRank = Number(ranks.DELHI) || 4;
+        orderBy = c.distanceKm;
       }
-      c.meritBasis = basis;
 
-      // Distance is capped rather than min-maxed: past ~1500 km the practical
-      // hardship stops increasing, and an uncapped scale would let a handful of
-      // very distant applicants compress everyone else into a narrow band.
-      var distance = Util.normalise(Math.min(c.distanceKm, distCap), 0, distCap);
+      c.tier = tier;
+      c.tierRank = tierRank;
+      c.orderBy = Number(orderBy) || 0;
+      c.orderedByDistance = (tier === 'DELHI');
 
-      var year = Util.normalise(c.year, 1, 5);
-      var special = (c.isPwD ? 1 : 0);
-
-      c.components = { merit: merit, distance: distance, year: year, special: special };
-      c.score = w.W_MERIT * merit + w.W_DISTANCE * distance +
-                w.W_YEAR * year + w.W_SPECIAL * special;
+      trace_(ctx, c.appId, reason('PRIORITY_GROUP', true, tierText_(c), {
+        tier: tier, tierRank: tierRank,
+        meritPercent: c.meritPercent, meritBasis: c.meritBasis,
+        distanceKm: c.distanceKm
+      }));
     });
-    ctx.weights = w;
+
     return ctx.pool.length;
+  }
+
+  /** Why this applicant is in this group, in the words the brochure uses. */
+  function tierText_(c) {
+    if (c.tier === 'PWD') {
+      return 'Placed in the first priority group. The hostel policy allots seats to ' +
+             'disabled and handicapped students ahead of every other applicant.';
+    }
+    if (c.tier === 'OUTSIDE_DELHI') {
+      return 'Placed in the second priority group, for applicants admitted in the ' +
+             'outside-Delhi category, who are ranked among themselves on ' +
+             meritPhrase_(c) + '.';
+    }
+    if (c.tier === 'PARENT_TRANSFERRED') {
+      return 'Placed in the third priority group: admitted in the Delhi category, but ' +
+             'with a parent transferred out of Delhi. This group is considered only ' +
+             'after outside-Delhi applicants, and is ranked on ' + meritPhrase_(c) + '.';
+    }
+    return 'Placed in the fourth priority group, for Delhi-category applicants. This ' +
+           'group is considered only if seats remain after the first three, and is ' +
+           'ordered by distance from campus rather than by marks — your home is ' +
+           (c.distanceKm >= 0 ? c.distanceKm + ' km away' : 'of unrecorded distance') + '.';
+  }
+
+  function meritPhrase_(c) {
+    if (c.meritBasis === 'CLASS_12') {
+      return 'the best five subjects of class 12 (' + c.meritPercent + '%), which is what ' +
+             'the policy uses for a first-year with no university result yet';
+    }
+    if (c.meritBasis === 'SEMESTER') {
+      return 'the result up to the preceding semester (' + c.meritPercent + '%)';
+    }
+    return 'academic merit, which is not recorded for you';
   }
 
   // =========================================================== STAGE C: ORDER
 
   /**
-   * Sort by score descending. Ties are broken by a hash of appId and the run
-   * seed - never by sheet order, which would silently advantage whoever applied
-   * first, and never by Math.random(), which would make the run irreproducible.
+   * Order the pool: by priority group first, then within the group.
+   *
+   * Ties are broken by a hash of appId and the run seed - never by sheet order,
+   * which would silently advantage whoever applied first, and never by
+   * Math.random(), which would make the run impossible to reproduce.
    */
   function stageC_order(ctx) {
     ctx.pool.forEach(function (c) { c.tiebreak = Util.hashUnit(c.appId + '|' + ctx.seed); });
+
     ctx.pool.sort(function (a, b) {
-      if (b.score !== a.score) return b.score - a.score;
+      if (a.tierRank !== b.tierRank) return a.tierRank - b.tierRank;
+      // Higher is better in both cases: a higher percentage, or a greater
+      // distance from campus for the group ordered on distance.
+      if (b.orderBy !== a.orderBy) return b.orderBy - a.orderBy;
       if (b.tiebreak !== a.tiebreak) return b.tiebreak - a.tiebreak;
       return a.appId < b.appId ? -1 : 1;
     });
 
+    // Position within the group is the number that means something to an
+    // applicant. Being 400th overall says little when the first three groups
+    // hold 380 people; being 20th of 260 in your own group says everything.
+    var counts = {}, seen = {};
+    ctx.pool.forEach(function (c) { counts[c.tier] = (counts[c.tier] || 0) + 1; });
+
     var n = ctx.pool.length;
     ctx.pool.forEach(function (c, i) {
       c.meritPosition = i + 1;
-      var w = ctx.weights;
-      var basisText = {
-        CGPA: 'ranked on your CGPA',
-        ENTRANCE_RANK: 'ranked on your entrance rank, since first-year applicants have no ' +
-                       'CGPA yet and are compared against each other',
-        NOT_RECORDED: 'no CGPA or entrance rank on record, so the academic component was ' +
-                      'scored at the midpoint rather than counted against you'
-      }[c.meritBasis] || '';
+      seen[c.tier] = (seen[c.tier] || 0) + 1;
+      c.tierPosition = seen[c.tier];
+      c.tierSize = counts[c.tier];
+
+      var measure = c.orderedByDistance
+        ? 'distance from campus (' + c.distanceKm + ' km)'
+        : (c.meritBasis === 'CLASS_12' ? 'class 12 best-five marks' : 'your latest result') +
+          ' (' + c.meritPercent + '%)';
+
       trace_(ctx, c.appId, reason('MERIT_POSITION', true,
-        'Merit position ' + (i + 1) + ' of ' + n + ' eligible applicants (score ' +
-        c.score.toFixed(4) + ')' + (basisText ? ' — ' + basisText : '') + '.',
+        'Position ' + c.tierPosition + ' of ' + c.tierSize + ' in your priority group, ' +
+        'ordered on ' + measure + '. Overall you are ' + (i + 1) + ' of ' + n +
+        ' once the groups ahead of yours are counted.',
         {
-          position: i + 1, of: n, score: Util.round(c.score, 4),
-          meritBasis: c.meritBasis,
-          breakdown: {
-            merit:    { value: Util.round(c.components.merit, 3),    weight: Util.round(w.W_MERIT, 3) },
-            distance: { value: Util.round(c.components.distance, 3), weight: Util.round(w.W_DISTANCE, 3) },
-            year:     { value: Util.round(c.components.year, 3),     weight: Util.round(w.W_YEAR, 3) },
-            special:  { value: Util.round(c.components.special, 3),  weight: Util.round(w.W_SPECIAL, 3) }
-          }
+          position: i + 1, of: n,
+          tier: c.tier, tierPosition: c.tierPosition, tierSize: c.tierSize,
+          orderedBy: c.orderedByDistance ? 'DISTANCE' : 'MERIT',
+          meritPercent: c.meritPercent, meritBasis: c.meritBasis,
+          distanceKm: c.distanceKm
         }));
     });
     return n;
@@ -638,7 +693,7 @@ var Allocator = (function () {
 
   /** Any legal bed, preferring smaller rooms. Used only after preferences fail. */
   function takeAnyBed_(ctx, pools, candidate, accessibleDemand) {
-    var order = ['SINGLE', 'DOUBLE', 'TRIPLE'];
+    var order = ['SINGLE', 'TRIPLE', 'QUAD'];
     var keys = Object.keys(pools).sort(function (a, b) {
       return order.indexOf(a.split('|')[1]) - order.indexOf(b.split('|')[1]);
     });
@@ -708,7 +763,7 @@ var Allocator = (function () {
   }
 
   function roomTypeLabel_(rt) {
-    return { SINGLE: 'single room', DOUBLE: '2-seater', TRIPLE: '3-seater' }[rt] || rt;
+    return { SINGLE: 'single room', TRIPLE: '3-seater', QUAD: '4-seater' }[rt] || rt;
   }
 
   // ==================================================== STAGE F: LOCAL SEARCH
@@ -801,7 +856,7 @@ var Allocator = (function () {
     Object.keys(byBucket).forEach(function (key) {
       var group = byBucket[key];
       var roomType = key.split('|')[1];
-      var capacity = { SINGLE: 1, DOUBLE: 2, TRIPLE: 3 }[roomType];
+      var capacity = { SINGLE: 1, TRIPLE: 3, QUAD: 4 }[roomType];
       if (capacity <= 1 || group.length < 2) return;
 
       // Rooms currently in play, and the bed slots inside them.
@@ -934,14 +989,21 @@ var Allocator = (function () {
     var allocated = {}, waitlisted = {};
     result.allocations.forEach(function (a) { allocated[a.appId] = true; });
     result.waitlist.forEach(function (w) { waitlisted[w.appId] = true; });
-    var scoreByApp = {};
+    // meritScore now carries the percentage the policy actually ranks on,
+    // not a composite of weighted components. Alongside it goes the priority
+    // group, because the percentage means nothing without knowing which queue
+    // it was competing in.
+    var scoreByApp = {}, tierByApp = {};
     result.allocations.concat(result.waitlist).forEach(function (x) {
-      if (x.candidate) scoreByApp[x.appId] = Util.round(x.candidate.score, 4);
+      if (!x.candidate) return;
+      scoreByApp[x.appId] = Util.round(Number(x.candidate.meritPercent) || 0, 2);
+      tierByApp[x.appId] = x.candidate.tier || '';
     });
 
     var apps = Db.readAll('Applications');
     apps.forEach(function (a) {
       if (scoreByApp[a.appId] !== undefined) a.meritScore = scoreByApp[a.appId];
+      if (tierByApp[a.appId] !== undefined) a.priorityTier = tierByApp[a.appId];
       if (allocated[a.appId]) a.status = 'ALLOTTED';
       else if (waitlisted[a.appId]) a.status = 'WAITLISTED';
       a.updatedAt = now;
@@ -980,7 +1042,7 @@ var Allocator = (function () {
     commit: commit,
     // exposed for tests and the simulator
     _stages: {
-      partition: stageA_partition, score: stageB_score, order: stageC_order,
+      partition: stageA_partition, priority: stageB_priority, order: stageC_order,
       quota: stageD_quota, allocate: stageE_serialDictatorship,
       localSearch: stageF_localSearch, roommates: stageG_roommates,
       waitlist: stageH_waitlist

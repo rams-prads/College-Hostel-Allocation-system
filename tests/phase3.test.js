@@ -42,10 +42,30 @@ check('everyone is asked for address proof',
   [firstYearGen, seniorGen, firstYearSC, seniorPwdOBC].every(s =>
     types(s).includes('ADDRESS_PROOF')),
   'distance gates eligibility and carries score weight');
-check('a PwD OBC senior needs exactly four documents',
-  types(seniorPwdOBC).length === 4, types(seniorPwdOBC).join(', '));
-check('a GEN first-year needs exactly two',
-  types(firstYearGen).length === 2, types(firstYearGen).join(', '));
+check('a PwD OBC senior is asked for both certificates they are claiming on',
+  types(seniorPwdOBC).indexOf('PWD_CERT') >= 0 &&
+  types(seniorPwdOBC).indexOf('CATEGORY_CERT') >= 0,
+  types(seniorPwdOBC).join(', '));
+check('a General first-year is asked for neither, because they claim neither',
+  types(firstYearGen).indexOf('PWD_CERT') < 0 &&
+  types(firstYearGen).indexOf('CATEGORY_CERT') < 0,
+  types(firstYearGen).join(', '));
+check('a General first-year is asked for less than a claiming senior',
+  types(firstYearGen).length < types(seniorPwdOBC).length,
+  types(firstYearGen).length + ' vs ' + types(seniorPwdOBC).length);
+check('the marksheet is asked of everyone',
+  types(firstYearGen).indexOf('MARKSHEET') >= 0 &&
+  types(seniorPwdOBC).indexOf('MARKSHEET') >= 0,
+  'the priority list is built from those marks');
+check('a first-year gives the admission slip, a continuing student the ID card',
+  types(firstYearGen).indexOf('ADMISSION_LETTER') >= 0 &&
+  types(seniorPwdOBC).indexOf('ID_CARD') >= 0);
+check('a transfer order is asked for only where that priority is claimed', (() => {
+  const claimer = Object.assign({}, firstYearGen,
+    { residenceCategory: 'DELHI', parentTransferred: true });
+  return Documents.requiredFor(claimer).some(d => d.docType === 'TRANSFER_CERT') &&
+         types(firstYearGen).indexOf('TRANSFER_CERT') < 0;
+})());
 check('the category certificate names the actual category', (() => {
   const d = Documents.requiredFor(firstYearSC).find(x => x.docType === 'CATEGORY_CERT');
   return d.label.indexOf('SC') === 0;
@@ -107,7 +127,8 @@ check('options never cross the campus partition', (() => {
 })(), 'a student admitted to one campus can only be housed there');
 check('every option has real rooms behind it', form.options.every(o => o.rooms > 0));
 check('the document list matches this student',
-  form.documents.length === Documents.requiredFor(target).length);
+  form.documents.length ===
+  Documents.requiredFor(target, Db.findOne('Applications', { studentId: target.studentId })).length);
 check('an existing application is returned as a draft', !!form.draft);
 check('the draft preserves the saved preference order', (() => {
   const saved = Db.where('Preferences', { appId: form.draft.appId })
@@ -168,14 +189,21 @@ expectReject('duplicate preferences are rejected', {
 expectReject('submitting with no preferences is rejected', {
   preferences: [], lifestyle: goodLifestyle, submit: true
 });
-const overLimit = Number(Db.cfg('MAX_PREFERENCES', 5)) + 1;
-check('this campus offers enough hostels to exceed the preference limit',
-  form.options.length >= overLimit,
-  form.options.length + ' options vs a limit of ' + (overLimit - 1));
-expectReject('too many preferences are rejected', {
-  preferences: form.options.slice(0, overLimit).map(o => o.key),
+// A campus has one hostel per gender and three room types, so the menu is
+// three long and the limit is three. Testing the cap therefore means lowering
+// it rather than inventing choices that do not exist.
+check('the limit matches the menu, so nothing unreachable is offered',
+  Number(Db.cfg('MAX_PREFERENCES', 0)) === form.options.length,
+  form.options.length + ' options, limit ' + Db.cfg('MAX_PREFERENCES', 0));
+
+Db.setCfg('MAX_PREFERENCES', '2');
+Db.invalidate('Config');
+expectReject('more preferences than the limit are rejected', {
+  preferences: form.options.slice(0, 3).map(o => o.key),
   lifestyle: goodLifestyle, submit: true
 });
+Db.setCfg('MAX_PREFERENCES', '3');
+Db.invalidate('Config');
 expectReject('an incomplete roommate questionnaire is rejected on submit', {
   preferences: goodPrefs, lifestyle: { sleepTime: 'LATE' }, submit: true
 });
@@ -238,9 +266,15 @@ check('explanation has grouped sections', view.explanation.groups.length >= 3,
   view.explanation.groups.map(g => g.title).join(', '));
 check('every explanation item has readable text',
   view.explanation.groups.every(g => g.items.every(i => i.text && i.text.length > 15)));
-check('explanation includes the score breakdown', !!view.explanation.meritDetail);
-check('score breakdown covers all four factors',
-  Object.keys(view.explanation.meritDetail.breakdown).length === 4);
+check('the explanation names the priority group the applicant was placed in', (() => {
+  const items = view.explanation.groups.reduce((a, g) => a.concat(g.items), []);
+  return items.some(i => i.code === 'PRIORITY_GROUP');
+})(), 'which group you are in is the single most decisive fact about the outcome');
+check('and the position within that group', (() => {
+  const items = view.explanation.groups.reduce((a, g) => a.concat(g.items), []);
+  const m = items.find(i => i.code === 'MERIT_POSITION');
+  return m && /in your priority group/.test(m.text);
+})());
 check('preferences are returned with hostel names',
   view.preferences.length > 0 && !!view.preferences[0].hostelName);
 check('documents are returned', view.documents.length > 0);

@@ -41,7 +41,8 @@ var SCHEMA = {
       // nowhere else is not enough - existing sheets carry the old dropdown and
       // must have it refreshed. See repairValidation().
       { name: 'category',      type: T.ENUM,
-        values: ['reservation', 'eligibility', 'weight', 'capacity', 'roommate', 'identity'] },
+        values: ['reservation', 'eligibility', 'weight', 'capacity', 'roommate', 'identity',
+                 'priority'] },
       { name: 'key',           type: T.STR },
       // Text, not a number, even though nearly every rule is numeric.
       //
@@ -75,11 +76,43 @@ var SCHEMA = {
       // hard partition of the allocation alongside gender. See Allocator stage A.
       { name: 'campus',        type: T.ENUM, values: ['DWARKA', 'EDC'] },
       { name: 'year',          type: T.INT },
-      { name: 'cgpa',          type: T.NUM },
-      // First-year applicants have no CGPA yet, so they are ranked on the
-      // entrance rank that admitted them. See Allocator stage B.
-      { name: 'entranceRank',  type: T.INT },
+      // Which University School of Studies. The brochure restricts hostel
+      // eligibility to regular full-time students of the schools on that campus.
+      { name: 'school',        type: T.STR },
+
+      // THE field the allotment policy turns on. The brochure's priority order
+      // is: disabled first, then OUTSIDE DELHI candidates on merit, then Delhi
+      // candidates whose parents were transferred out of Delhi, then remaining
+      // Delhi candidates by distance. This is an admission category recorded at
+      // entry to the university - it is not derived from the address, and a
+      // student living far away is not automatically "outside Delhi".
+      { name: 'residenceCategory', type: T.ENUM, values: ['DELHI', 'OUTSIDE_DELHI'] },
+      // Delhi-category applicant whose parent has been transferred out of Delhi
+      // (Central/State Govt, PSU or autonomous body only). Third priority, and
+      // it needs the transfer certificate to be claimed.
+      { name: 'parentTransferred', type: T.BOOL },
+      // Foreign students draw on a separate 5% of seats, spread evenly across
+      // the schools so no one school absorbs the whole allowance.
+      { name: 'isForeign',     type: T.BOOL },
+
+      // Merit, as the brochure defines it: the result up to the preceding
+      // semester, or - for a first-year with no university result yet - the
+      // best five subjects of class 12. Both are percentages, so unlike a CGPA
+      // and an entrance rank they sit on one scale and need no normalising.
+      { name: 'meritPercent',  type: T.NUM },
+      { name: 'meritBasis',    type: T.ENUM, values: ['CLASS_12', 'SEMESTER', 'NOT_RECORDED'] },
       { name: 'meritRank',     type: T.INT },
+
+      // Re-admission conditions, which apply only to a returning resident.
+      { name: 'exResident',    type: T.BOOL },
+      { name: 'promoted',      type: T.BOOL },
+      { name: 'detained',      type: T.BOOL },
+      { name: 'disciplinaryFlag', type: T.BOOL },
+      { name: 'attendancePct', type: T.NUM },
+      // The session they first took a hostel seat in. The fee schedule differs
+      // by intake year, so a 2023-24 entrant pays a different rate to a new one.
+      { name: 'firstAdmittedSession', type: T.STR },
+
       { name: 'category',      type: T.ENUM, values: ['GEN', 'OBC', 'SC', 'ST', 'EWS'] },
       { name: 'isPwD',         type: T.BOOL },
       { name: 'pwdType',       type: T.STR },
@@ -107,6 +140,14 @@ var SCHEMA = {
       // Mirrored from the student record so the allocator and every report can
       // partition by campus without a join. NOT a preference - see Students.campus.
       { name: 'campus',           type: T.ENUM, values: ['DWARKA', 'EDC'] },
+      // The brochure runs two intakes with different windows, documents and
+      // fees. Re-admission of existing residents closes BEFORE fresh allotment
+      // opens, which is why it is a separate stream and not a flag on a form.
+      { name: 'admissionType',    type: T.ENUM, values: ['FRESH', 'READMISSION'] },
+      // Which priority group this applicant was placed in, recorded so the
+      // decision can be read back months later. See Allocator stage C.
+      { name: 'priorityTier',     type: T.ENUM,
+        values: ['', 'PWD', 'OUTSIDE_DELHI', 'PARENT_TRANSFERRED', 'DELHI', 'FOREIGN', 'READMISSION'] },
       { name: 'status',           type: T.ENUM, values: ['DRAFT', 'SUBMITTED', 'VERIFIED', 'REJECTED', 'ALLOTTED', 'WAITLISTED', 'WITHDRAWN', 'CANCELLED'] },
       { name: 'submittedAt',      type: T.DATE },
       { name: 'meritScore',       type: T.NUM },
@@ -127,7 +168,7 @@ var SCHEMA = {
       { name: 'appId',    type: T.STR },
       { name: 'rank',     type: T.INT },
       { name: 'hostelId', type: T.STR },
-      { name: 'roomType', type: T.ENUM, values: ['SINGLE', 'DOUBLE', 'TRIPLE'] }
+      { name: 'roomType', type: T.ENUM, values: ['SINGLE', 'TRIPLE', 'QUAD'] }
     ]
   },
 
@@ -171,7 +212,9 @@ var SCHEMA = {
       { name: 'floor',        type: T.INT },
       { name: 'roomNo',       type: T.STR },
       { name: 'capacity',     type: T.INT },
-      { name: 'roomType',     type: T.ENUM, values: ['SINGLE', 'DOUBLE', 'TRIPLE'] },
+      // The EDC brochure lists single, triple and four-seater rooms. There is
+      // no two-seater, and a single room is reserved for PG and PhD students.
+      { name: 'roomType',     type: T.ENUM, values: ['SINGLE', 'TRIPLE', 'QUAD'] },
       { name: 'isAccessible', type: T.BOOL },
       { name: 'status',       type: T.ENUM, values: ['ACTIVE', 'MAINTENANCE', 'BLOCKED'] }
     ]
@@ -318,7 +361,11 @@ var SCHEMA = {
     cols: [
       { name: 'docId',      type: T.STR },
       { name: 'appId',      type: T.STR },
-      { name: 'docType',    type: T.ENUM, values: ['ADMISSION_LETTER', 'ID_CARD', 'CATEGORY_CERT', 'PWD_CERT', 'ADDRESS_PROOF'] },
+      { name: 'docType',    type: T.ENUM,
+        values: ['ADMISSION_LETTER', 'ID_CARD', 'MARKSHEET', 'ACADEMIC_FEE_PROOF',
+                 'CATEGORY_CERT', 'PWD_CERT', 'TRANSFER_CERT', 'ADDRESS_PROOF',
+                 'AADHAAR_PARENT', 'LOCAL_GUARDIAN', 'MEDICAL_CERT',
+                 'ANTI_RAGGING', 'RULES_UNDERTAKING'] },
       { name: 'status',     type: T.ENUM, values: ['REQUIRED', 'UPLOADED', 'VERIFIED', 'REJECTED', 'WAIVED'] },
       { name: 'driveFileId',type: T.STR },
       { name: 'fileName',   type: T.STR },

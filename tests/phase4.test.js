@@ -262,7 +262,8 @@ check('allotted count matches the run',
   ov.counts.allotted + ' vs ' + run.allocations.length);
 check('capacity accounting balances',
   ov.capacity.occupied + ov.capacity.vacant === ov.capacity.beds);
-check('per-hostel occupancy is reported', ov.occupancy.length === 6);
+check('per-hostel occupancy is reported', ov.occupancy.length === 4,
+  ov.occupancy.length + ' hostels');
 check('occupancy percentages are sane',
   ov.occupancy.every(h => h.pct >= 0 && h.pct <= 100));
 check('every hostel accounts for all its beds',

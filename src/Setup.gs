@@ -485,12 +485,25 @@ function seedConfig_() {
     { key: 'INSTITUTION_NAME',     value: 'Guru Gobind Singh Indraprastha University', notes: '' },
     { key: 'INSTITUTION_SHORT',    value: 'GGSIPU', notes: '' },
     { key: 'APPLICATIONS_OPEN',    value: 'TRUE',  notes: 'Set FALSE to close the intake form' },
-    { key: 'MAX_PREFERENCES',      value: '5',     notes: 'How many ranked choices a student may give' },
+    { key: 'MAX_PREFERENCES',      value: '3',     notes: 'How many ranked choices a student may give. A campus has one hostel per gender and three room types, so three is the whole menu.' },
     { key: 'EMAIL_ENABLED',        value: 'FALSE', notes: 'Keep FALSE while testing so no real mail goes out' },
     { key: 'EMAIL_DAILY_CAP',      value: '90',    notes: 'Stay under the free-tier Gmail quota of 100/day' },
     { key: 'LETTER_FOLDER_ID',     value: '',      notes: 'Drive folder for generated allotment letters' },
     { key: 'SUPPORT_EMAIL',        value: 'hostel@ipu.ac.in', notes: 'Shown on letters and notifications' },
     { key: 'GRIEVANCE_SLA_DAYS',   value: '7',     notes: 'Working days to resolve a grievance' },
+
+    // Fees, from the EDC brochure. Held as settings rather than in code so the
+    // office can update them each session without a developer.
+    { key: 'FEE_HOSTEL_SINGLE',    value: '35000', notes: 'Annual hostel fee, single seater (non-refundable)' },
+    { key: 'FEE_HOSTEL_TRIPLE',    value: '30000', notes: 'Annual hostel fee, triple seater (non-refundable)' },
+    { key: 'FEE_HOSTEL_QUAD',      value: '25000', notes: 'Annual hostel fee, four seater (non-refundable)' },
+    { key: 'FEE_HOSTEL_SECURITY',  value: '5000',  notes: 'Hostel security (refundable)' },
+    { key: 'FEE_ADMISSION_FRESH',  value: '1000',  notes: 'Admission charge, fresh admission' },
+    { key: 'FEE_ADMISSION_READM',  value: '500',   notes: 'Admission charge, re-admission' },
+    { key: 'FEE_MESS_SECURITY',    value: '5000',  notes: 'Mess security (refundable), fresh admission only' },
+    { key: 'FEE_MESS_MAINTENANCE', value: '1000',  notes: 'Mess maintenance (non-refundable)' },
+    { key: 'FEE_MESS_ADVANCE',     value: '54000', notes: 'Advance mess charge, adjusted against actual use' },
+    { key: 'FEE_WELFARE',          value: '4000',  notes: 'Annual welfare charge (non-refundable)' },
     { key: 'ALLOW_DEMO_LINKS',     value: 'FALSE', notes: 'Read-only student links that work without sign-in. For demos only - switch back off afterwards.' },
     { key: 'LOGO_URL',             value: 'https://www.ipu.ac.in/images/logo.png',
       notes: 'University crest shown in the masthead. Any public image URL, or a Drive file shared "anyone with the link". Blank falls back to the IPU monogram.' },
@@ -528,19 +541,36 @@ function seedPolicy_() {
     ['POL-RES-EWS', 'reservation', 'EWS', 10,   'Economically Weaker Section'],
     ['POL-RES-PWD', 'reservation', 'PwD', 5,    'Horizontal reservation - also forces accessible rooms'],
 
-    // Eligibility thresholds.
-    ['POL-ELG-DIST', 'eligibility', 'MIN_DISTANCE_KM', 30,  'Students living nearer than this are normally ineligible'],
-    ['POL-ELG-CGPA', 'eligibility', 'MIN_CGPA',        5.0, 'Minimum CGPA to retain hostel eligibility'],
-    ['POL-ELG-ATTN', 'eligibility', 'MIN_ATTENDANCE',  0,   'Set above 0 to enforce an attendance floor'],
+    // Eligibility. The brochure sets NO minimum distance and NO minimum CGPA
+    // for a fresh applicant - a Delhi student is eligible, simply last in the
+    // priority order. The conditions it does set apply to RE-ADMISSION.
+    ['POL-ELG-ATTN',  'eligibility', 'MIN_ATTENDANCE_PCT', 75,
+     'Brochure rule 33: below this, in USS and hostel aggregate, no residency next session'],
+    ['POL-ELG-PROMO', 'eligibility', 'REQUIRE_PROMOTION', 1,
+     'A year-back student is not eligible for re-admission'],
 
-    // Scoring weights - must sum to 1.0. TUNE THESE WITH THE HOSTEL OFFICE.
-    ['POL-WGT-MERIT', 'weight', 'W_MERIT',    0.45, 'Academic merit / entrance rank'],
-    ['POL-WGT-DIST',  'weight', 'W_DISTANCE', 0.30, 'Distance from hometown - farther scores higher'],
-    ['POL-WGT-YEAR',  'weight', 'W_YEAR',     0.15, 'Seniority by academic year'],
-    ['POL-WGT-SPEC',  'weight', 'W_SPECIAL',  0.10, 'Special / medical need'],
+    // The priority order for a fresh allotment, exactly as the brochure states
+    // it. These are RANKS, not weights: a lower number is considered first and
+    // is exhausted before the next is looked at. There is no trade-off between
+    // them, which is the whole point - an applicant cannot make up for being in
+    // a later group by being stronger on something else.
+    ['POL-PRI-PWD',      'priority', 'PWD',                1,
+     'Disabled/handicapped students, ahead of everyone'],
+    ['POL-PRI-OD',       'priority', 'OUTSIDE_DELHI',      2,
+     'Outside Delhi category, ordered by merit'],
+    ['POL-PRI-TRANSFER', 'priority', 'PARENT_TRANSFERRED', 3,
+     'Delhi category whose parent was transferred out of Delhi (Govt/PSU only)'],
+    ['POL-PRI-DELHI',    'priority', 'DELHI',              4,
+     'Remaining Delhi category, ordered by distance from campus'],
+
+    // Seats set aside, spread evenly across the schools.
+    ['POL-CAP-FOREIGN', 'capacity', 'FOREIGN_QUOTA_PCT', 5,
+     'Brochure: up to 5% of seats may be offered to foreign students, equally across schools'],
 
     // Capacity policy.
     ['POL-CAP-BUFFER',  'capacity', 'VACANCY_BUFFER_PCT', 2,  'Beds held back for emergencies and transfers'],
+    ['POL-CAP-SINGLE',  'capacity', 'SINGLE_ROOM_PG_ONLY', 1,
+     'Brochure: single rooms are for PG and PhD students. 0 opens them to everyone.'],
     ['POL-CAP-CHURN',   'capacity', 'HISTORIC_CHURN_PCT', 8,  'Historical withdrawal rate - drives waitlist ETA'],
 
     // Roommate compatibility weights - must sum to 1.0.

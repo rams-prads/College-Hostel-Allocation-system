@@ -16,6 +16,12 @@ var PROGRAMME_YEARS = { BTech: 4, MTech: 2, MBA: 2, MCA: 2, LLB: 5, BBA: 3, BCA:
  * A student is admitted to one campus and stays there. It is declared once,
  * here, and is never offered again as a choice on the application form.
  */
+/** The schools on each campus. Hostel eligibility follows the school. */
+var SCHOOLS_BY_CAMPUS = {
+  EDC:    ['USAR', 'USDI', 'USAP', 'USMC'],
+  DWARKA: ['USICT', 'USMS', 'USLLS', 'USBAS']
+};
+
 var CAMPUS_OPTIONS = [
   { code: 'DWARKA', label: 'Dwarka Campus',
     note: 'Sector 16C, Dwarka - the main university campus.' },
@@ -50,6 +56,15 @@ function apiGetRegistrationOptions() {
       { code: 'EWS', label: 'Economically Weaker Section' }
     ],
     campuses: CAMPUS_OPTIONS,
+    schools: SCHOOLS_BY_CAMPUS,
+    residenceCategories: [
+      { code: 'OUTSIDE_DELHI', label: 'Outside Delhi',
+        note: 'You were admitted against the outside-Delhi quota. Second priority for a ' +
+              'hostel seat, ranked among yourselves on marks.' },
+      { code: 'DELHI', label: 'Delhi',
+        note: 'You were admitted against the Delhi quota. Considered after the outside-Delhi ' +
+              'applicants, and ordered by how far your home is from campus.' }
+    ],
     pwdTypes: ['Locomotor', 'Visual', 'Hearing', 'Speech', 'Other'],
     bloodGroups: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', 'Not known'],
     minDistanceKm: Policy.value('eligibility', 'MIN_DISTANCE_KM', 30),
@@ -124,10 +139,25 @@ function apiRegisterStudent(payload) {
     programme: payload.programme,
     branch: String(payload.branch || '').trim(),
     campus: payload.campus,
+    school: String(payload.school || '').trim(),
     year: Number(payload.year),
-    cgpa: Number(payload.cgpa) || 0,
-    entranceRank: Number(payload.entranceRank) || 0,
+
+    // What the allotment order actually turns on.
+    residenceCategory: payload.residenceCategory,
+    parentTransferred: payload.residenceCategory === 'DELHI' && !!payload.parentTransferred,
+    isForeign: !!payload.isForeign,
+    meritPercent: Number(payload.meritPercent) || 0,
+    meritBasis: Number(payload.year) <= 1 ? 'CLASS_12' : 'SEMESTER',
     meritRank: 0,
+
+    // A self-registering applicant is by definition not a returning resident;
+    // re-admission runs from the office's own list of last session's residents.
+    exResident: false,
+    promoted: true,
+    detained: false,
+    disciplinaryFlag: false,
+    attendancePct: 0,
+    firstAdmittedSession: String(Db.cfg('ACADEMIC_YEAR', '2026')),
     category: payload.category,
     isPwD: !!payload.isPwD,
     pwdType: payload.isPwD ? String(payload.pwdType || '') : '',
@@ -185,15 +215,27 @@ function validateRegistration_(p) {
            (p.programme || 'this programme') + '.');
   }
 
-  // A first-year has no CGPA to be ranked on; everyone else must have one.
-  if (year === 1) {
-    if (!(Number(p.entranceRank) > 0)) {
-      e.push('First-year applicants must give their entrance or admission rank, because ' +
-             'there is no CGPA to rank them on yet.');
-    }
-  } else if (!(Number(p.cgpa) > 0 && Number(p.cgpa) <= 10)) {
-    e.push('Enter your current CGPA on a scale of 0 to 10.');
+  // The one figure the priority order ranks on, and the brochure defines it
+  // differently for a first-year: best five subjects of class 12, because there
+  // is no university result yet. Both are percentages.
+  var merit = Number(p.meritPercent);
+  if (!(merit > 0 && merit <= 100)) {
+    e.push(year === 1
+      ? 'Enter the percentage of your best five subjects in class 12. It is what your ' +
+        'application is ranked on until you have a university result.'
+      : 'Enter your result up to the preceding semester, as a percentage.');
   }
+
+  // The admission category, which decides which queue you are in at all. It is
+  // not derived from the address: a student may live far away and still have
+  // been admitted in the Delhi category.
+  if (['DELHI', 'OUTSIDE_DELHI'].indexOf(p.residenceCategory) < 0) {
+    e.push('Select whether you were admitted in the Delhi or the outside-Delhi category.');
+  }
+  if (p.residenceCategory === 'OUTSIDE_DELHI' && p.parentTransferred) {
+    e.push('The parent-transfer priority applies only to Delhi-category applicants.');
+  }
+  if (!p.school) e.push('Select your University School of Studies.');
 
   if (['GEN', 'OBC', 'SC', 'ST', 'EWS'].indexOf(p.category) < 0) e.push('Select your category.');
   if (p.isPwD && !p.pwdType) {

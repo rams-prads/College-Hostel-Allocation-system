@@ -126,7 +126,7 @@ var Letters = (function () {
                 'alt="Verification QR code" style="display:block;margin:0 auto">';
     var issued = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'd MMMM yyyy');
 
-    var roomLabel = { SINGLE: 'Single occupancy', DOUBLE: 'Double occupancy (2-seater)',
+    var roomLabel = { SINGLE: 'Single occupancy', QUAD: 'Four-seater',
                       TRIPLE: 'Triple occupancy (3-seater)' }[d.room.roomType] || d.room.roomType;
     var campusLabel = { DWARKA: 'Dwarka Campus', EDC: 'East Delhi Campus' }[d.hostel.campus] ||
                       d.hostel.campus;

@@ -30,10 +30,28 @@ check('reason text is human-readable, not a bare code',
   Object.keys(elig.byAppId).every(k =>
     elig.byAppId[k].reasons.every(r => typeof r.text === 'string' && r.text.length > 20)));
 
-const distFail = elig.rejected.filter(id =>
-  elig.byAppId[id].reasons.some(r => r.code === 'ELIG_FAIL_DISTANCE'));
-check('the min-distance rule rejects people', distFail.length > 0, distFail.length + ' rejected on distance');
-console.log('        sample: "' + elig.byAppId[distFail[0]].reasons.find(r => !r.ok).text + '"');
+// Nobody is rejected for living close by, or for low marks. The brochure
+// imposes neither on a fresh applicant - both decide POSITION, not entry.
+check('nobody is rejected for living too near',
+  elig.rejected.every(id =>
+    !elig.byAppId[id].reasons.some(r => r.code === 'ELIG_FAIL_DISTANCE')),
+  'a Delhi student is eligible; they are simply last in the priority order');
+check('nobody is rejected for low marks',
+  elig.rejected.every(id =>
+    !elig.byAppId[id].reasons.some(r => r.code === 'ELIG_FAIL_CGPA')));
+
+// What DOES reject somebody is failing a re-admission condition.
+const readmitFail = elig.rejected.filter(id => elig.byAppId[id].reasons.some(r =>
+  ['ELIG_FAIL_ATTENDANCE', 'ELIG_FAIL_NOT_PROMOTED', 'ELIG_FAIL_DETAINED',
+   'ELIG_FAIL_DISCIPLINE'].indexOf(r.code) >= 0));
+check('the re-admission conditions reject people', readmitFail.length > 0,
+  readmitFail.length + ' rejected on a re-admission rule');
+console.log('        sample: "' +
+  elig.byAppId[readmitFail[0]].reasons.find(r => !r.ok).text + '"');
+check('and only a returning resident is tested on them', (() => {
+  const apps = Db.indexBy('Applications', 'appId');
+  return readmitFail.every(id => apps[id].admissionType === 'READMISSION');
+})(), 'a fresh applicant has no attendance or promotion record to fail on');
 
 section('Policy snapshot');
 const h1 = Policy.snapshotHash();
@@ -245,8 +263,14 @@ console.log('        lowest allocated score ' + minAlloc.toFixed(4) +
             ', highest waitlisted score ' + maxWait.toFixed(4));
 console.log('        (overlap is expected and correct: reserved quotas admit lower scores ' +
             'once open seats run out)');
-check('waitlist is ordered by merit',
-  r.waitlist.every((w, i) => i === 0 || r.waitlist[i - 1].candidate.score >= w.candidate.score));
+check('the waiting list follows the same order as the allotment', (() => {
+  return r.waitlist.every((w, i) => {
+    if (i === 0) return true;
+    const prev = r.waitlist[i - 1].candidate, cur = w.candidate;
+    if (prev.tierRank !== cur.tierRank) return prev.tierRank < cur.tierRank;
+    return prev.orderBy >= cur.orderBy;
+  });
+})(), 'priority group first, then the measure that orders that group');
 check('waitlist positions are 1..N contiguous',
   r.waitlist.every((w, i) => w.position === i + 1));
 check('ETA probability decreases down the list',
@@ -358,16 +382,32 @@ console.log('        ledger: seed=' + payload.seed + ' policyHash=' + payload.po
 section('Policy changes actually change the outcome');
 // The what-if simulator in Phase 5 depends on this being true.
 const before = Allocator.run({ seed: 'GGSIPU-2026', runId: 'POL-A' });
-Db.readAll('Policy').forEach(p => {
-  if (p.category === 'weight' && p.key === 'W_DISTANCE') Db.update('Policy', p.ruleId, { value: 0.9 });
-  if (p.category === 'weight' && p.key === 'W_MERIT') Db.update('Policy', p.ruleId, { value: 0.05 });
-});
+
+// Swap the second and fourth groups: consider Delhi applicants before
+// outside-Delhi ones. This is the policy lever that exists now - there are no
+// weights to nudge, because the brochure does not trade the groups off against
+// each other at all.
+Db.update('Policy', 'POL-PRI-OD', { value: 4 });
+Db.update('Policy', 'POL-PRI-DELHI', { value: 2 });
 Policy.invalidate();
 const after = Allocator.run({ seed: 'GGSIPU-2026', runId: 'POL-B' });
-check('changing weights changes who gets in',
+
+check('changing the priority order changes who gets in',
   JSON.stringify(before.allocations.map(a => a.appId).sort()) !==
   JSON.stringify(after.allocations.map(a => a.appId).sort()));
-check('changing weights changes the policy hash', before.policyHash !== after.policyHash);
+check('changing it changes the policy hash', before.policyHash !== after.policyHash);
+check('and it changes it in the direction asked for', (() => {
+  const stu = Db.indexBy('Students', 'studentId');
+  const apps = Db.indexBy('Applications', 'appId');
+  const delhiShare = run => run.allocations.filter(a =>
+    stu[apps[a.appId].studentId].residenceCategory === 'DELHI').length / run.allocations.length;
+  return delhiShare(after) > delhiShare(before);
+})(), 'promoting the Delhi group must seat more Delhi students, or the lever is not connected');
+
+// Put it back, so later sections run against the documented policy.
+Db.update('Policy', 'POL-PRI-OD', { value: 2 });
+Db.update('Policy', 'POL-PRI-DELHI', { value: 4 });
+Policy.invalidate();
 const moved = after.allocations.filter(a =>
   !before.allocations.some(b => b.appId === a.appId)).length;
 console.log('        distance-heavy weighting moved ' + moved + ' students into allocation');

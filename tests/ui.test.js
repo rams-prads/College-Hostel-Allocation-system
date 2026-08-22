@@ -213,6 +213,24 @@ const atStep = name => 'step = STEPS.indexOf("' + name + '"); paint();';
 
 r = renderPage('apply.html', 'someone.brand.new@example.com', atStep('Course'));
 check('script survives stepping to the course page', !r.threw, r.threw || '');
+check('the course step asks the admission category', (() => {
+  return r.screen.indexOf('Admission category') > 0 &&
+         r.screen.indexOf('Outside Delhi') > 0;
+})(), 'it decides which queue the applicant is in, and no marks move anyone between queues');
+check('and asks a first-year for their class 12 best five', (() => {
+  // The marks field only appears once a year of study is chosen, so choose one.
+  const t = renderPage('apply.html', 'someone.brand.new@example.com',
+    'step = STEPS.indexOf("Course"); reg.programme = "BTech"; reg.year = 1; paint();');
+  return t.screen.indexOf('best five subjects') > 0;
+})(), 'which is what the brochure ranks a first-year on');
+check('and a continuing student for their last semester result', (() => {
+  const t = renderPage('apply.html', 'someone.brand.new@example.com',
+    'step = STEPS.indexOf("Course"); reg.programme = "BTech"; reg.year = 3; paint();');
+  return t.screen.indexOf('preceding semester') > 0;
+})());
+check('it no longer asks for a CGPA or an entrance rank',
+  r.screen.indexOf('CGPA') < 0 && r.screen.indexOf('Entrance') < 0,
+  'the brochure ranks on a percentage, and asking for a figure nobody uses wastes the applicant');
 check('the course step asks which campus they are admitted to',
   r.screen.indexOf('Campus you are admitted to') > 0);
 check('both campuses are offered',

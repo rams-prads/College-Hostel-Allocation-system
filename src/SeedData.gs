@@ -17,30 +17,47 @@
  */
 
 var DEFAULT_SEED = 'GGSIPU-2026';
-var DEFAULT_COHORT = 900;
+// More applicants than beds, which is the situation the whole system exists
+// for. The four hostels hold 1,110; a cohort that fitted would make every
+// allocation trivially correct and prove nothing about the priority order.
+var DEFAULT_COHORT = 1400;
 
 /**
- * Hostel inventory. Room counts are chosen to yield ~756 beds against ~900
- * applicants. Every hostel gets accessible ground-floor rooms.
+ * Hostel inventory.
+ *
+ * EDC Boys is the real thing, taken from the 2025-26 admission brochure: 38
+ * single rooms, 54 triple and 16 four-seaters, 264 seats in total. The single
+ * rooms are the ones the brochure reserves for PG and PhD students.
+ *
+ * The other three are shaped the same way at plausible sizes, because the
+ * brochure covers one hostel and the system covers four. Swapping in real
+ * counts is an edit to this table and nothing else.
  */
 var HOSTEL_SPECS = [
-  { hostelId: 'DW-BH-A', name: 'Dwarka Boys Hostel A',   campus: 'DWARKA', gender: 'M',
-    warden: 'Dr. A. Sharma',  blocks: ['A', 'B'], floors: 4, roomsPerFloor: 8 },
-  { hostelId: 'DW-BH-B', name: 'Dwarka Boys Hostel B',   campus: 'DWARKA', gender: 'M',
-    warden: 'Dr. R. Verma',   blocks: ['A', 'B'], floors: 4, roomsPerFloor: 8 },
-  { hostelId: 'ED-BH-1', name: 'East Delhi Boys Block 1', campus: 'EDC',   gender: 'M',
-    warden: 'Dr. S. Khan',    blocks: ['A', 'B'], floors: 3, roomsPerFloor: 8 },
-  { hostelId: 'DW-GH-A', name: 'Dwarka Girls Hostel A',  campus: 'DWARKA', gender: 'F',
-    warden: 'Dr. M. Iyer',    blocks: ['A', 'B'], floors: 4, roomsPerFloor: 8 },
-  { hostelId: 'DW-GH-B', name: 'Dwarka Girls Hostel B',  campus: 'DWARKA', gender: 'F',
-    warden: 'Dr. P. Nair',    blocks: ['A', 'B'], floors: 3, roomsPerFloor: 8 },
-  { hostelId: 'ED-GH-1', name: 'East Delhi Girls Block 1', campus: 'EDC',  gender: 'F',
-    warden: 'Dr. K. Gupta',   blocks: ['A', 'B'], floors: 3, roomsPerFloor: 8 }
+  { hostelId: 'ED-BH-1', name: 'EDC Boys Hostel',       campus: 'EDC',    gender: 'M',
+    warden: 'Dr. Ravi Butola',
+    rooms: { SINGLE: 38, TRIPLE: 54, QUAD: 16 } },
+  { hostelId: 'ED-GH-1', name: 'EDC Girls Hostel',      campus: 'EDC',    gender: 'F',
+    warden: 'Dr. K. Gupta',
+    rooms: { SINGLE: 30, TRIPLE: 48, QUAD: 14 } },
+  { hostelId: 'DW-BH-A', name: 'Dwarka Boys Hostel A',  campus: 'DWARKA', gender: 'M',
+    warden: 'Dr. A. Sharma',
+    rooms: { SINGLE: 40, TRIPLE: 70, QUAD: 20 } },
+  { hostelId: 'DW-GH-A', name: 'Dwarka Girls Hostel A', campus: 'DWARKA', gender: 'F',
+    warden: 'Dr. M. Iyer',
+    rooms: { SINGLE: 34, TRIPLE: 60, QUAD: 18 } }
 ];
 
-/** Room-type pattern repeated across each block-floor of 8 rooms: 18 beds. */
-var FLOOR_PATTERN = ['SINGLE', 'DOUBLE', 'DOUBLE', 'DOUBLE', 'DOUBLE', 'TRIPLE', 'TRIPLE', 'TRIPLE'];
-var CAPACITY = { SINGLE: 1, DOUBLE: 2, TRIPLE: 3 };
+var CAPACITY = { SINGLE: 1, TRIPLE: 3, QUAD: 4 };
+
+/** Which schools sit on which campus. Hostel eligibility follows the school. */
+var SCHOOLS = {
+  EDC:    ['USAR', 'USDI', 'USAP', 'USMC'],
+  DWARKA: ['USICT', 'USMS', 'USLLS', 'USBAS']
+};
+
+/** Programmes the brochure treats as PG or PhD, for the single-room rule. */
+var PG_PROGRAMMES = { MTech: 1, MBA: 1, MCA: 1, PhD: 1 };
 
 var PROGRAMMES = [
   ['BTech', 45], ['MBA', 15], ['MCA', 10], ['LLB', 12], ['MTech', 8], ['BBA', 5], ['BCA', 5]
@@ -152,31 +169,43 @@ function seedInventory_() {
       warden: h.warden, contact: h.hostelId.toLowerCase() + '@ipu.ac.in', active: true
     });
 
-    h.blocks.forEach(function (block) {
-      for (var floor = 1; floor <= h.floors; floor++) {
-        for (var i = 0; i < h.roomsPerFloor; i++) {
-          var roomType = FLOOR_PATTERN[i % FLOOR_PATTERN.length];
-          var cap = CAPACITY[roomType];
-          var roomNo = block + floor + Util.pad(i + 1, 2);
-          var roomId = h.hostelId + '-' + roomNo;
+    // Rooms are laid out from the counts the brochure gives, four to a floor
+    // block, singles first so the PG floor is contiguous the way a real hostel
+    // allocates it.
+    var order = ['SINGLE', 'TRIPLE', 'QUAD'];
+    var n = 0;
+    order.forEach(function (roomType) {
+      var count = (h.rooms || {})[roomType] || 0;
+      var cap = CAPACITY[roomType];
 
-          // Ground-floor rooms are the accessible stock: step-free access and
-          // adapted washrooms. PwD applicants are pinned here by the allocator.
-          var isAccessible = (floor === 1 && i < 4);
+      for (var i = 0; i < count; i++) {
+        n++;
+        // The first three rooms of EVERY type sit on the ground floor and are
+        // the accessible stock: step-free access and an adapted washroom. Doing
+        // it per type rather than per corridor matters - if only the singles
+        // were accessible, a PwD applicant who is not PG could not be housed at
+        // all, which is the opposite of a first-priority group.
+        var isAccessible = (i < 3);
+        var floor = isAccessible ? 1 : Math.floor((n - 1) / 12) + 1;
+        var block = String.fromCharCode(65 + Math.floor((n - 1) / 60));
+        // Numbered from a hostel-wide running count, not from position on a
+        // floor: pulling the accessible rooms down to the ground floor made two
+        // rooms share a number and, through that, two beds share an id.
+        var roomNo = block + Util.pad(n, 3);
+        var roomId = h.hostelId + '-' + roomNo;
 
-          rooms.push({
-            roomId: roomId, hostelId: h.hostelId, block: block, floor: floor,
-            roomNo: roomNo, capacity: cap, roomType: roomType,
-            isAccessible: isAccessible, status: 'ACTIVE'
+        rooms.push({
+          roomId: roomId, hostelId: h.hostelId, block: block, floor: floor,
+          roomNo: roomNo, capacity: cap, roomType: roomType,
+          isAccessible: isAccessible, status: 'ACTIVE'
+        });
+
+        for (var b = 1; b <= cap; b++) {
+          beds.push({
+            bedId: roomId + '-' + b, roomId: roomId, bedNo: b,
+            status: 'VACANT', occupantAppId: ''
           });
-
-          for (var b = 1; b <= cap; b++) {
-            beds.push({
-              bedId: roomId + '-' + b, roomId: roomId, bedNo: b,
-              status: 'VACANT', occupantAppId: ''
-            });
-            bedsByGender[h.gender]++;
-          }
+          bedsByGender[h.gender]++;
         }
       }
     });
@@ -199,8 +228,6 @@ function seedStudentsAndApplications_(seed, cohort) {
   var geoIdx = buildSeedGeoIndex_();
   var hostels = HOSTEL_SPECS;
   var maxPrefs = Number(Db.cfg('MAX_PREFERENCES', 5));
-  var minDistance = policyValue_('eligibility', 'MIN_DISTANCE_KM', 30);
-  var minCgpa = policyValue_('eligibility', 'MIN_CGPA', 5.0);
 
   var students = [], applications = [], preferences = [], lifestyles = [];
   var byGender = { M: 0, F: 0 };
@@ -219,15 +246,39 @@ function seedStudentsAndApplications_(seed, cohort) {
     var programme = Util.weighted(rand, PROGRAMMES);
     var maxYear = YEARS_BY_PROGRAMME[programme];
     var year = Util.weighted(rand, yearWeights_(maxYear));
-    var cgpa = Util.round(Util.normal(rand, 7.2, 1.1, 4.0, 10.0), 2);
     var campus = Util.weighted(rand, campusWeights[gender] || campusWeights.M);
-    draft.push({ gender: gender, campus: campus, programme: programme,
-                 year: year, cgpa: cgpa, r: rand() });
+
+    // The figure the policy ranks on: a percentage either way, so a first-year
+    // and a final-year sit on one scale without any normalising.
+    var meritPercent = Util.round(Util.normal(rand, 72, 11, 40, 99), 2);
+    var meritBasis = year <= 1 ? 'CLASS_12' : 'SEMESTER';
+
+    // Roughly two in three hostel applicants are admitted outside Delhi, which
+    // is what makes the priority order bite: the second group is large enough
+    // to consume most of the seats before the Delhi groups are reached at all.
+    var residenceCategory = Util.weighted(rand, [['OUTSIDE_DELHI', 66], ['DELHI', 34]]);
+    // Of the Delhi-category applicants, a minority have a parent posted out of
+    // Delhi and can claim the third group instead of the fourth.
+    var parentTransferred = residenceCategory === 'DELHI' && rand() < 0.18;
+
+    draft.push({
+      gender: gender, campus: campus, programme: programme, year: year,
+      meritPercent: meritPercent, meritBasis: meritBasis,
+      residenceCategory: residenceCategory, parentTransferred: parentTransferred,
+      isForeign: rand() < 0.03,
+      // A returning resident, with the conditions re-admission actually tests.
+      exResident: year > 1 && rand() < 0.55,
+      promoted: rand() > 0.04,
+      detained: rand() < 0.02,
+      disciplinaryFlag: rand() < 0.015,
+      attendancePct: Util.round(Util.normal(rand, 84, 9, 45, 100), 1),
+      r: rand()
+    });
   }
 
-  // Merit rank: CGPA descending, ties broken by the seeded draw.
+  // Merit rank: percentage descending, ties broken by the seeded draw.
   var ranked = draft.slice().sort(function (a, b) {
-    return b.cgpa - a.cgpa || a.r - b.r;
+    return b.meritPercent - a.meritPercent || a.r - b.r;
   });
   ranked.forEach(function (d, idx) { d.meritRank = idx + 1; });
 
@@ -262,9 +313,23 @@ function seedStudentsAndApplications_(seed, cohort) {
       programme: d.programme,
       branch: Util.pick(rand, BRANCHES[d.programme]),
       campus: d.campus,
+      school: Util.pick(rand, SCHOOLS[d.campus] || SCHOOLS.EDC),
       year: d.year,
-      cgpa: d.cgpa,
+
+      residenceCategory: d.residenceCategory,
+      parentTransferred: d.parentTransferred,
+      isForeign: d.isForeign,
+      meritPercent: d.meritPercent,
+      meritBasis: d.meritBasis,
       meritRank: d.meritRank,
+
+      exResident: d.exResident,
+      promoted: d.promoted,
+      detained: d.detained,
+      disciplinaryFlag: d.disciplinaryFlag,
+      attendancePct: d.attendancePct,
+      firstAdmittedSession: d.exResident ? '2024-25' : '2025-26',
+
       category: category,
       isPwD: isPwD,
       pwdType: pwdType,
@@ -275,20 +340,33 @@ function seedStudentsAndApplications_(seed, cohort) {
 
     byGender[d.gender]++;
 
-    // Eligibility is evaluated properly by Eligibility.gs in Phase 2. Here we
-    // only pre-compute the obvious flags so the seed data is self-consistent.
-    var eligible = dist >= minDistance && d.cgpa >= minCgpa;
-    if (!eligible) ineligible++;
-
+    // Eligibility is evaluated properly by Eligibility.gs. Here we only
+    // pre-compute the obvious flags so the seed data is self-consistent.
+    //
+    // Note what is NOT here: no distance floor and no marks floor. The brochure
+    // imposes neither on a fresh applicant. What can make somebody ineligible
+    // is failing a RE-ADMISSION condition.
     var notes = [];
-    if (dist < minDistance) notes.push('Home is ' + dist + ' km from ' +
-      Geo.campusName(d.campus) + ', under the ' + minDistance + ' km minimum');
-    if (d.cgpa < minCgpa) notes.push('CGPA ' + d.cgpa + ' is below the ' + minCgpa + ' minimum');
+    var eligible = true;
+    if (d.exResident) {
+      if (d.detained) { eligible = false; notes.push('Detained from university examinations'); }
+      if (!d.promoted) { eligible = false; notes.push('Not promoted to the next session'); }
+      if (d.disciplinaryFlag) { eligible = false; notes.push('Disciplinary notice in the preceding session'); }
+      if (d.attendancePct < 75) {
+        eligible = false;
+        notes.push('Attendance ' + d.attendancePct + '% is below the 75% required');
+      }
+    }
+    if (!eligible) ineligible++;
 
     applications.push({
       appId: appId,
       studentId: studentId,
       campus: d.campus,
+      // An ex-resident returns through re-admission, which the brochure runs as
+      // a separate window that closes before fresh allotment opens.
+      admissionType: d.exResident ? 'READMISSION' : 'FRESH',
+      priorityTier: '',
       status: 'SUBMITTED',
       submittedAt: submittedAt_(rand),
       meritScore: 0,                       // computed by the allocator in Phase 2
@@ -307,18 +385,22 @@ function seedStudentsAndApplications_(seed, cohort) {
     var eligibleHostels = hostels.filter(function (h) {
       return h.gender === d.gender && h.campus === d.campus;
     });
+    // A single room is for PG and PhD students, so it is not offered to anyone
+    // else - a preference that could never be granted is not a preference.
+    var isPg = !!PG_PROGRAMMES[d.programme];
     var options = [];
     eligibleHostels.forEach(function (h) {
-      ['SINGLE', 'DOUBLE', 'TRIPLE'].forEach(function (rt) {
+      ['SINGLE', 'TRIPLE', 'QUAD'].forEach(function (rt) {
+        if (rt === 'SINGLE' && !isPg) return;
         options.push({ hostelId: h.hostelId, roomType: rt, campus: h.campus });
       });
     });
 
-    // Bias away from TRIPLE, which is how real preference sheets actually look.
+    // Bias toward the smaller room, which is how real preference sheets look.
     var scored = options.map(function (o) {
       var w = rand();
-      if (o.roomType === 'SINGLE') w += 0.30;
-      if (o.roomType === 'DOUBLE') w += 0.15;
+      if (o.roomType === 'SINGLE') w += 0.35;
+      if (o.roomType === 'TRIPLE') w += 0.15;
       return { o: o, w: w };
     }).sort(function (a, b) { return b.w - a.w; });
 
@@ -415,10 +497,10 @@ function distanceForSeed_(pin, geoIdx, campus) {
  * @return {{M: Array, F: Array}} weight pairs for Util.weighted
  */
 function campusWeightsByGender_() {
-  var bedsPerFloorBlock = FLOOR_PATTERN.reduce(function (n, rt) { return n + CAPACITY[rt]; }, 0);
   var tally = {};
   HOSTEL_SPECS.forEach(function (h) {
-    var beds = h.blocks.length * h.floors * bedsPerFloorBlock;
+    var beds = 0;
+    Object.keys(h.rooms).forEach(function (rt) { beds += h.rooms[rt] * CAPACITY[rt]; });
     tally[h.gender] = tally[h.gender] || {};
     tally[h.gender][h.campus] = (tally[h.gender][h.campus] || 0) + beds;
   });

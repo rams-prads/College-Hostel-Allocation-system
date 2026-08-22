@@ -230,12 +230,19 @@ var Simulator = (function () {
     add('reservation', 'OBC', 'OBC reservation %', 0, 50, 0.5, 'Vertical reservation for Other Backward Classes.');
     add('reservation', 'EWS', 'EWS reservation %', 0, 50, 0.5, 'Vertical reservation for Economically Weaker Section.');
     add('reservation', 'PwD', 'PwD reservation %', 0, 20, 0.5, 'Horizontal minimum, carved out of the open share.');
-    add('weight', 'W_MERIT',    'Weight: academic merit',    0, 1, 0.05, 'How much CGPA drives the merit score.');
-    add('weight', 'W_DISTANCE', 'Weight: distance from home',0, 1, 0.05, 'How much living far away drives the merit score.');
-    add('weight', 'W_YEAR',     'Weight: seniority',         0, 1, 0.05, 'How much year of study drives the merit score.');
-    add('weight', 'W_SPECIAL',  'Weight: special need',      0, 1, 0.05, 'How much a declared special need drives the score.');
-    add('eligibility', 'MIN_DISTANCE_KM', 'Minimum distance (km)', 0, 200, 5, 'Applicants living nearer than this are not eligible.');
-    add('eligibility', 'MIN_CGPA',        'Minimum CGPA',          0, 10, 0.25, 'Academic floor for hostel eligibility.');
+    // The levers that exist under the real policy. There are no weights: the
+    // brochure sets an ORDER of groups and exhausts one before looking at the
+    // next, so the only thing to change is the order itself.
+    add('priority', 'PWD',                'Priority: disabled applicants',      1, 4, 1,
+        'Where disabled and handicapped applicants sit in the order. 1 is considered first.');
+    add('priority', 'OUTSIDE_DELHI',      'Priority: outside Delhi',            1, 4, 1,
+        'Where outside-Delhi applicants sit. Lower is considered first.');
+    add('priority', 'PARENT_TRANSFERRED', 'Priority: parent transferred out',   1, 4, 1,
+        'Delhi applicants whose parent was posted out of Delhi.');
+    add('priority', 'DELHI',              'Priority: Delhi category',           1, 4, 1,
+        'Remaining Delhi applicants, ordered by distance from campus.');
+    add('eligibility', 'MIN_ATTENDANCE_PCT', 'Re-admission attendance floor (%)', 0, 100, 5,
+        'Below this, a returning resident is refused a seat for the next session.');
     add('capacity', 'VACANCY_BUFFER_PCT', 'Vacancy buffer %',      0, 20, 1, 'Beds held back per hostel for emergencies and transfers.');
     return out.filter(function (k) { return k.value !== undefined; });
   }

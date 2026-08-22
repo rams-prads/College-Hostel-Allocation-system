@@ -24,9 +24,8 @@ var Eligibility = (function () {
    */
   function evaluate(app, student, prefCount) {
     var reasons = [];
-    var minDist = Policy.value('eligibility', 'MIN_DISTANCE_KM', 30);
-    var minCgpa = Policy.value('eligibility', 'MIN_CGPA', 5.0);
-    var minAttendance = Policy.value('eligibility', 'MIN_ATTENDANCE', 0);
+    var minAttendance = Number(Policy.value('eligibility', 'MIN_ATTENDANCE_PCT', 75));
+    var requirePromotion = Number(Policy.value('eligibility', 'REQUIRE_PROMOTION', 1));
     var requireDocs = Policy.value('eligibility', 'REQUIRE_DOC_VERIFIED', 0);
 
     // --- application state -------------------------------------------------
@@ -37,55 +36,92 @@ var Eligibility = (function () {
       return { eligible: false, reasons: reasons };
     }
 
-    // --- distance from home ------------------------------------------------
-    var dist = Number(app.distanceKm);
-    if (dist < 0) {
-      reasons.push(reason('ELIG_FAIL_DISTANCE_UNKNOWN', false,
-        'Home PIN code could not be located, so distance from campus could not be verified.',
-        { pincode: student.homePincode }));
-    } else if (dist < minDist) {
-      reasons.push(reason('ELIG_FAIL_DISTANCE', false,
-        'Home is ' + dist + ' km from campus, below the ' + minDist + ' km minimum for hostel eligibility.',
-        { distanceKm: dist, minimum: minDist }));
+    // --- who may apply at all ----------------------------------------------
+    // Only regular full-time students of a school on that campus. This is the
+    // brochure's own limit and the reason campus is a hard partition.
+    if (!student.campus) {
+      reasons.push(reason('ELIG_FAIL_NO_CAMPUS', false,
+        'No campus is recorded against your student record, so eligibility cannot be established.'));
     } else {
-      reasons.push(reason('ELIG_PASS_DISTANCE', true,
-        'Home is ' + dist + ' km from campus (' + student.homeState + '), above the ' + minDist + ' km minimum.',
-        { distanceKm: dist, minimum: minDist }));
+      reasons.push(reason('ELIG_PASS_ENROLLED', true,
+        'Enrolled at ' + Geo.campusName(student.campus) +
+        (student.school ? ' (' + student.school + ')' : '') +
+        ', where hostel accommodation is offered to regular full-time students.'));
     }
 
-    // --- academic standing -------------------------------------------------
-    // A first-year applicant has no CGPA: they have not sat a university exam
-    // yet. Testing them against a CGPA floor rejects the entire incoming intake,
-    // who are also the group most likely to need a hostel place. They are
-    // assessed on the entrance rank they were admitted on instead.
-    var cgpa = Number(student.cgpa) || 0;
-    var entrance = Number(student.entranceRank) || 0;
+    // --- RE-ADMISSION: the conditions the brochure actually imposes ---------
+    //
+    // There is no minimum distance and no minimum CGPA for a fresh applicant.
+    // A Delhi student living ten minutes away is eligible - simply last in the
+    // priority order. The conditions below exist, and they apply to somebody
+    // returning for another session.
+    if (app.admissionType === 'READMISSION') {
+      if (!student.exResident) {
+        reasons.push(reason('ELIG_FAIL_NOT_RESIDENT', false,
+          'Re-admission is open only to residents of the preceding academic session.'));
+      } else {
+        reasons.push(reason('ELIG_PASS_RESIDENT', true,
+          'You were a resident in the preceding academic session, so you may seek re-admission.'));
+      }
 
-    if (cgpa <= 0 && entrance > 0) {
-      reasons.push(reason('ELIG_PASS_ENTRANCE', true,
-        'No CGPA yet, as expected in your first year. You are assessed on your entrance rank of ' +
-        entrance + ' instead, against other first-year applicants.',
-        { entranceRank: entrance }));
-    } else if (cgpa <= 0 && Number(student.year) <= 1) {
-      reasons.push(reason('ELIG_WARN_NO_ACADEMIC', true,
-        'Neither a CGPA nor an entrance rank is on record. Your academic score is set at the ' +
-        'midpoint rather than counted against you; the hostel office may ask you to confirm it.',
-        { cgpa: cgpa, entranceRank: entrance }));
-    } else if (cgpa < minCgpa) {
-      reasons.push(reason('ELIG_FAIL_CGPA', false,
-        'CGPA ' + cgpa.toFixed(2) + ' is below the ' + minCgpa.toFixed(1) + ' minimum.',
-        { cgpa: cgpa, minimum: minCgpa }));
+      if (student.detained) {
+        reasons.push(reason('ELIG_FAIL_DETAINED', false,
+          'A student detained from appearing in university examinations ceases to be a ' +
+          'bona-fide resident and cannot be re-admitted.'));
+      }
+
+      if (requirePromotion && student.promoted === false) {
+        reasons.push(reason('ELIG_FAIL_NOT_PROMOTED', false,
+          'Re-admission requires promotion to the next academic session. A year-back case ' +
+          'is not eligible.'));
+      } else if (requirePromotion) {
+        reasons.push(reason('ELIG_PASS_PROMOTED', true,
+          'Promoted to the next academic session.'));
+      }
+
+      if (student.disciplinaryFlag) {
+        reasons.push(reason('ELIG_FAIL_DISCIPLINE', false,
+          'A disciplinary notice from the preceding session bars re-admission.'));
+      }
+
+      var att = Number(student.attendancePct);
+      if (isFinite(att) && att > 0) {
+        if (att < minAttendance) {
+          reasons.push(reason('ELIG_FAIL_ATTENDANCE', false,
+            'Attendance of ' + att + '% across your school and the hostel is below the ' +
+            minAttendance + '% the rules require for residency in the next session.',
+            { attendancePct: att, minimum: minAttendance }));
+        } else {
+          reasons.push(reason('ELIG_PASS_ATTENDANCE', true,
+            'Attendance of ' + att + '% meets the ' + minAttendance + '% requirement.',
+            { attendancePct: att, minimum: minAttendance }));
+        }
+      }
     } else {
-      reasons.push(reason('ELIG_PASS_CGPA', true,
-        'CGPA ' + cgpa.toFixed(2) + ' meets the ' + minCgpa.toFixed(1) + ' minimum.',
-        { cgpa: cgpa, minimum: minCgpa }));
+      // Fresh applicants: say plainly that neither of the two things people
+      // most often assume will disqualify them actually does.
+      reasons.push(reason('ELIG_PASS_FRESH', true,
+        'A fresh application. There is no minimum distance and no minimum marks to apply ' +
+        '\u2014 how far you live and what you scored decide your position in the queue, ' +
+        'not whether you are allowed in it.'));
     }
 
-    if (minAttendance > 0) {
-      // Attendance is not in the current dataset; the rule is wired but inert
-      // until the registry supplies the column. Documented rather than faked.
-      reasons.push(reason('ELIG_SKIP_ATTENDANCE', true,
-        'Attendance rule is configured but no attendance data is available; check skipped.'));
+    // --- the figure the queue is ordered on ---------------------------------
+    var merit = Number(student.meritPercent) || 0;
+    if (merit > 0) {
+      reasons.push(reason('ELIG_PASS_MERIT', true,
+        (student.meritBasis === 'CLASS_12'
+          ? 'Class 12 best-five marks of ' + merit + '% recorded, which is what a first-year ' +
+            'applicant is ranked on.'
+          : 'Result up to the preceding semester recorded as ' + merit + '%.'),
+        { meritPercent: merit, basis: student.meritBasis }));
+    } else if (student.residenceCategory !== 'DELHI' || student.parentTransferred) {
+      // Only groups ordered BY merit need it. A Delhi applicant is ordered by
+      // distance, so a missing percentage costs them nothing.
+      reasons.push(reason('ELIG_WARN_NO_MERIT', true,
+        'No marks are on record. Your group is ranked on marks, so the hostel office will ' +
+        'ask for them before the list is finalised.',
+        { meritPercent: 0 }));
     }
 
     // --- documents ---------------------------------------------------------

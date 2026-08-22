@@ -13,7 +13,24 @@ check('Policy seeded', Db.readAll('Policy').length > 0);
 
 const wsum = Db.where('Policy', { category: 'weight' })
   .reduce((s, r) => s + Number(r.value), 0);
-check('scoring weights sum to 1.0', Math.abs(wsum - 1) < 1e-9, 'sum=' + wsum);
+// The weighted score is gone. The brochure sets a strict order of priority
+// groups, and a group is exhausted before the next is considered - there is no
+// trade-off between them to weight.
+check('the priority order is complete and strictly ordered', (() => {
+  const ranks = Db.where('Policy', { category: 'priority' })
+    .map(r => Number(r.value)).sort((a, b) => a - b);
+  return ranks.length === 4 && JSON.stringify(ranks) === JSON.stringify([1, 2, 3, 4]);
+})(), JSON.stringify(Db.where('Policy', { category: 'priority' }).map(r => r.key + '=' + r.value)));
+check('disabled applicants come first',
+  Number(Policy.value('priority', 'PWD', 99)) === 1);
+check('outside-Delhi applicants come before Delhi ones',
+  Number(Policy.value('priority', 'OUTSIDE_DELHI', 99)) <
+  Number(Policy.value('priority', 'DELHI', 0)));
+check('no minimum distance bars a fresh applicant',
+  Policy.value('eligibility', 'MIN_DISTANCE_KM', null) === null,
+  'the brochure sets none - a Delhi student is eligible, simply last in the queue');
+check('no minimum marks bar one either',
+  Policy.value('eligibility', 'MIN_CGPA', null) === null);
 
 const rmsum = Db.where('Policy', { category: 'roommate' })
   .reduce((s, r) => s + Number(r.value), 0);
@@ -66,8 +83,18 @@ const elapsed = Date.now() - t0;
 console.log('        generated in ' + elapsed + ' ms');
 check('generation is fast enough for Apps Script', elapsed < 20000, elapsed + ' ms');
 check('pincode table written', s.pincodePrefixes > 100, s.pincodePrefixes + ' prefixes');
-check('hostels created', s.hostels === 6, s.hostels + '');
-check('students created', s.students === 900, s.students + '');
+check('hostels created', s.hostels === 4, s.hostels + '');
+check('the EDC boys hostel matches the brochure exactly', (() => {
+  const rooms = Db.where('Rooms', { hostelId: 'ED-BH-1' });
+  const by = {};
+  rooms.forEach(r => { by[r.roomType] = (by[r.roomType] || 0) + 1; });
+  const seats = rooms.reduce((n, r) => n + Number(r.capacity), 0);
+  return by.SINGLE === 38 && by.TRIPLE === 54 && by.QUAD === 16 && seats === 264;
+})(), '38 single + 54 triple + 16 four-seater = 264 seats');
+check('there is no two-seater anywhere',
+  Db.readAll('Rooms').every(r => r.roomType !== 'DOUBLE'),
+  'the brochure lists single, triple and four-seater only');
+check('students created', s.students === 1400, s.students + '');
 console.log('        ' + s.beds + ' beds / ' + s.rooms + ' rooms / ' + s.hostels + ' hostels');
 console.log('        beds by gender: ' + JSON.stringify(s.bedsByGender));
 console.log('        applicants by gender: ' + JSON.stringify(s.applicantsByGender));
@@ -164,13 +191,25 @@ check('BTech is the largest programme',
 check('all five categories present', Object.keys(cat).length === 5, JSON.stringify(cat));
 check('PwD share is roughly 3%', pwd / students.length > 0.01 && pwd / students.length < 0.06,
   (100 * pwd / students.length).toFixed(1) + '%');
-check('CGPA stays in range', students.every(x => x.cgpa >= 4 && x.cgpa <= 10));
+check('merit is a percentage, in range',
+  students.every(x => x.meritPercent >= 40 && x.meritPercent <= 99));
+check('a first-year is ranked on class 12, everyone else on their last semester',
+  students.every(x => x.meritBasis === (Number(x.year) <= 1 ? 'CLASS_12' : 'SEMESTER')),
+  'the brochure names both, and they are both percentages so they compare directly');
+check('most applicants are admitted outside Delhi', (() => {
+  const od = students.filter(x => x.residenceCategory === 'OUTSIDE_DELHI').length;
+  return od > students.length * 0.5;
+})(), 'which is what makes the priority order bite');
+check('only Delhi-category students can claim a parent transfer',
+  students.every(x => !x.parentTransferred || x.residenceCategory === 'DELHI'));
 check('merit ranks are a permutation of 1..N',
   new Set(students.map(x => x.meritRank)).size === students.length &&
   Math.max(...students.map(x => x.meritRank)) === students.length);
-check('merit rank agrees with CGPA order', (() => {
+check('merit rank agrees with the percentage order', (() => {
   const sorted = students.slice().sort((x, y) => x.meritRank - y.meritRank);
-  for (let i = 1; i < sorted.length; i++) if (sorted[i].cgpa > sorted[i - 1].cgpa) return false;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].meritPercent > sorted[i - 1].meritPercent) return false;
+  }
   return true;
 })());
 

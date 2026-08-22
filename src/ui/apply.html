@@ -48,7 +48,8 @@
 
   var reg = {
     name:'', enrollmentNo:'', phone:'', dob:'', gender:'',
-    programme:'', branch:'', campus:'', year:'', cgpa:'', entranceRank:'',
+    programme:'', branch:'', campus:'', school:'', year:'',
+    meritPercent:'', residenceCategory:'', parentTransferred:false,
     category:'', isPwD:false, pwdType:'',
     homeAddress:'', homeCity:'', homePincode:'', homeState:'',
     guardianName:'', guardianPhone:'', guardianEmail:'',
@@ -226,15 +227,14 @@
 
     var academic = '';
     if (String(reg.year) === '1') {
-      academic = text('entranceRank', 'Entrance / admission rank',
-        { type: 'number', placeholder: 'e.g. 1842',
-          help: 'First-year applicants have no CGPA yet, so the rank you were admitted on is ' +
-                'used instead. First-years are only ever compared against other first-years.' });
+      academic = text('meritPercent', 'Class 12 marks — best five subjects (%)',
+        { type: 'number', placeholder: 'e.g. 88.4',
+          help: 'The hostel policy ranks first-year applicants on the best five subjects of ' +
+                'class 12, because there is no university result yet.' });
     } else if (reg.year) {
-      academic = text('cgpa', 'Current CGPA',
-        { type: 'number', placeholder: '0.00 to 10.00',
-          help: 'Your latest cumulative grade point average out of 10. The minimum for hostel ' +
-                'eligibility is ' + REG.minCgpa + '.' });
+      academic = text('meritPercent', 'Result up to the preceding semester (%)',
+        { type: 'number', placeholder: 'e.g. 76.5',
+          help: 'The percentage the hostel policy ranks continuing students on.' });
     }
 
     var picked = REG.campuses.filter(function (c) { return c.code === reg.campus; })[0];
@@ -259,6 +259,41 @@
       '</div>' +
       (prog ? '<div class="fieldrow">' +
         select('year', 'Year of study', years, { rerender: true }) + academic + '</div>' : '') +
+      '<div class="divider"></div>' +
+      (prog ? select('school', 'University School of Studies',
+        (REG.schools || {})[reg.campus] || [],
+        { help: 'A hostel seat is offered to regular full-time students of the schools on ' +
+                'your own campus.' }) : '') +
+
+      // The single most consequential answer on the form. It decides which
+      // queue the applicant is in, and no amount of marks moves anyone between
+      // queues - so it is asked plainly, with what each one means.
+      '<label class="field"><span class="lab">Admission category ' +
+        '<span class="req">*</span></span>' +
+        '<div class="seg">' + (REG.residenceCategories || []).map(function (c) {
+          return '<button type="button" aria-pressed="' + (reg.residenceCategory === c.code) +
+            '" onclick="setReg(&quot;residenceCategory&quot;,&quot;' + c.code +
+            '&quot;);paintStep()">' + esc(c.label) + '</button>';
+        }).join('') + '</div>' +
+        '<span class="help">' + esc((REG.residenceCategories || [])
+          .filter(function (c) { return c.code === reg.residenceCategory; })
+          .map(function (c) { return c.note; })[0] ||
+          'Whether you were admitted against the Delhi or the outside-Delhi quota. This is ' +
+          'the category on your admission record, not where you happen to live.') +
+        '</span></label>' +
+
+      (reg.residenceCategory === 'DELHI'
+        ? '<label style="display:flex;gap:11px;align-items:flex-start;cursor:pointer;' +
+          'margin-bottom:13px"><input type="checkbox" style="width:auto;margin-top:3px" ' +
+          (reg.parentTransferred ? 'checked ' : '') +
+          'onchange="reg.parentTransferred=this.checked;paintStep()">' +
+          '<span><span style="font-weight:600;font-size:14px">A parent of mine has been ' +
+          'transferred out of Delhi</span><span class="help">Central or State Government, a ' +
+          'PSU, or an autonomous body under Government only. This moves you ahead of other ' +
+          'Delhi-category applicants, and the transfer order is required at verification.' +
+          '</span></span></label>'
+        : '') +
+
       '<div class="divider"></div>' +
       select('category', 'Category', REG.categories,
         { help: 'Reserved places are allotted on this. Unless you select General you will need ' +
@@ -375,8 +410,11 @@
           rv('Campus', campusLabel(reg.campus)) +
           rv('Programme', reg.programme + (reg.branch ? ' — ' + reg.branch : '')) +
           rv('Year of study', reg.year ? 'Year ' + reg.year : '') +
-          rv(String(reg.year) === '1' ? 'Entrance rank' : 'CGPA',
-             String(reg.year) === '1' ? reg.entranceRank : reg.cgpa) +
+          rv(String(reg.year) === '1' ? 'Class 12 (best five)' : 'Latest result',
+             reg.meritPercent ? reg.meritPercent + '%' : '') +
+          rv('Admission category', label('residence', reg.residenceCategory)) +
+          rv('School', reg.school) +
+          (reg.parentTransferred ? rv('Parent transferred out of Delhi', 'Yes') : '') +
           rv('Category', reg.category + (reg.isPwD ? ' · PwD (' + reg.pwdType + ')' : '')) +
           rv('Home', [reg.homeCity, reg.homePincode].filter(Boolean).join(' ')) +
           rv('Distance from campus',
@@ -422,10 +460,13 @@
       if (!reg.programme) miss.push('your programme');
       if (!reg.branch) miss.push('your branch');
       if (!reg.year) miss.push('your year of study');
-      if (String(reg.year) === '1' && !(Number(reg.entranceRank) > 0)) {
-        miss.push('your entrance rank');
+      if (!reg.school) miss.push('your school of studies');
+      if (!reg.residenceCategory) miss.push('your admission category');
+      if (!(Number(reg.meritPercent) > 0 && Number(reg.meritPercent) <= 100)) {
+        miss.push(String(reg.year) === '1'
+          ? 'your class 12 best-five percentage'
+          : 'your result up to the preceding semester');
       }
-      if (reg.year && String(reg.year) !== '1' && !(Number(reg.cgpa) > 0)) miss.push('your CGPA');
       if (!reg.category) miss.push('your category');
       if (reg.isPwD && !reg.pwdType) miss.push('the type of disability');
     }

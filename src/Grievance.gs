@@ -197,6 +197,7 @@ var Grievance = (function () {
     if (wait && !alloc) {
       var apps = Db.indexBy('Applications', 'appId');
       var stu = Db.indexBy('Students', 'studentId');
+      var myTier = app.priorityTier || '';
       var overtaken = Db.readAll('Allocations').filter(function (a) {
         if (a.status !== 'ACTIVE') return false;
         var other = apps[a.appId];
@@ -204,6 +205,13 @@ var Grievance = (function () {
         var os = stu[other.studentId];
         if (!os || os.gender !== student.gender) return false;
         if (os.campus !== student.campus) return false;
+
+        // Only somebody in the SAME priority group can have taken a seat this
+        // applicant was entitled to. A student in a group ahead of theirs was
+        // always going to be considered first, whatever their marks - that is
+        // the policy working, not an irregularity, and flagging it would bury
+        // the real ones under several hundred false alarms.
+        if ((other.priorityTier || '') !== myTier) return false;
         if (Number(other.meritScore) >= score) return false;
         // A lower-scoring student may legitimately hold a seat through a
         // reserved quota this student had no claim to.
