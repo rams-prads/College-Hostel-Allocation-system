@@ -133,6 +133,72 @@ check('a hash with a letter in it was never at risk',
   asStoredBySheets('a3f9c2', null) === 'a3f9c2',
   'which is why only the genesis row ever broke, and only on real sheets');
 
+// ============================================ what the sheet itself refuses
+section('Nothing is written that the sheet would reject');
+
+// An ENUM column becomes a dropdown set to refuse anything outside its list.
+// Adding a category in code and not in the schema does not fail a unit test -
+// it fails on a real spreadsheet, at the next read, with a stack pointing
+// somewhere else entirely, because Apps Script defers the write.
+seedConfig_();
+seedPolicy_();
+seedAll();
+
+const enumBreaches = [];
+SHEET_ORDER.forEach(tab => {
+  const cols = SCHEMA[tab].cols.filter(c => c.type === T.ENUM && c.values);
+  if (!cols.length) return;
+  let rows;
+  try { rows = Db.readAll(tab); } catch (e) { return; }
+  rows.forEach(r => {
+    cols.forEach(c => {
+      const v = r[c.name];
+      if (v === '' || v === null || v === undefined) return;
+      if (c.values.indexOf(v) < 0) {
+        enumBreaches.push(tab + '.' + c.name + ' = ' + JSON.stringify(v));
+      }
+    });
+  });
+});
+check('every seeded value is inside its column\'s allowed list',
+  enumBreaches.length === 0,
+  enumBreaches.slice(0, 5).join(' | '));
+
+check('every policy category the seeder uses is declared',
+  Db.readAll('Policy').every(r =>
+    SCHEMA.Policy.cols.filter(c => c.name === 'category')[0].values.indexOf(r.category) >= 0),
+  'the identity rules were written into a sheet whose dropdown had never heard of them');
+
+// ============================================= values that are not numbers
+section('A rule that is not a number survives the round trip');
+
+/** What Db.decode does, which the in-memory store does not model. */
+function decodeAs(type, value) {
+  if (value === '' || value === null || value === undefined) {
+    return type === T.BOOL ? false : (type === T.JSON ? null : '');
+  }
+  switch (type) {
+    case T.NUM:  return Number(value);
+    case T.INT:  return parseInt(value, 10);
+    case T.BOOL: return value === true || value === 'TRUE' || value === 'true' || value === 1;
+    default:     return value;
+  }
+}
+
+const PATTERN = '^\\d{11}$';
+check('a numeric column would have destroyed the enrolment pattern',
+  isNaN(decodeAs(T.NUM, PATTERN)),
+  'this is why Policy.value is text: Number() runs before Policy ever sees the row');
+check('the text column returns it intact',
+  decodeAs(T.STR, PATTERN) === PATTERN);
+check('and a numeric rule still reads as a number',
+  Policy.value('reservation', 'SC', null) === 15,
+  typeof Policy.value('reservation', 'SC', null));
+check('the pattern reaches Identity as a pattern',
+  typeof Policy.value('identity', 'ENROLMENT_PATTERN', '') === 'string' &&
+  Policy.value('identity', 'ENROLMENT_PATTERN', '').indexOf('\\d') >= 0,
+  String(Policy.value('identity', 'ENROLMENT_PATTERN', '')));
+
 // ================================================= settings on an old sheet
 section('A setting added later still reaches an existing sheet');
 

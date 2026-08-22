@@ -36,9 +36,21 @@ var SCHEMA = {
     pk: 'ruleId',
     cols: [
       { name: 'ruleId',        type: T.STR },
-      { name: 'category',      type: T.ENUM, values: ['reservation', 'eligibility', 'weight', 'capacity', 'roommate'] },
+      // Every category a rule may belong to. The sheet gets a dropdown built
+      // from this list and REFUSES anything else, so adding a category here and
+      // nowhere else is not enough - existing sheets carry the old dropdown and
+      // must have it refreshed. See repairValidation().
+      { name: 'category',      type: T.ENUM,
+        values: ['reservation', 'eligibility', 'weight', 'capacity', 'roommate', 'identity'] },
       { name: 'key',           type: T.STR },
-      { name: 'value',         type: T.NUM },
+      // Text, not a number, even though nearly every rule is numeric.
+      //
+      // Db.decode coerces a T.NUM column with Number() before anything else
+      // sees it, which turned the one non-numeric rule - the enrolment-number
+      // pattern - into NaN on the way out of the sheet. Policy.load converts
+      // numeric-looking values back to numbers, so the arithmetic rules are
+      // unaffected and a rule that is a pattern survives being one.
+      { name: 'value',         type: T.STR },
       { name: 'effectiveFrom', type: T.DATE },
       { name: 'active',        type: T.BOOL },
       { name: 'notes',         type: T.STR }

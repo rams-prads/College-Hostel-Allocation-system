@@ -27,6 +27,16 @@ function setupEverything() {
 
   out.push('Running as: ' + (me || '(unknown)'));
 
+  // BEFORE anything writes. A sheet built against an older schema still carries
+  // the dropdown it was created with, and the first write of a newly allowed
+  // value is rejected by the sheet itself.
+  try {
+    var val = repairValidation();
+    out.push(val.message);
+  } catch (e) {
+    out.push('Could not refresh dropdowns: ' + e.message);
+  }
+
   // Build anything missing, migrate anything out of date, destroy nothing.
   var built = createDatabase();
   out.push(built.created.length ? 'Created tabs: ' + built.created.join(', ')
@@ -211,6 +221,53 @@ function migrateSchema() {
   }
   Logger.log(msg);
   return { created: created, added: added, unsafe: unsafe, message: msg };
+}
+
+/**
+ * Re-apply the schema's data validation and formatting to sheets that already
+ * exist.
+ *
+ * A sheet carries the dropdown it was BUILT with. Adding a value to an ENUM in
+ * the schema does nothing for an installation created before it: the old list is
+ * still on the sheet, still set to reject anything outside it, and the next write
+ * of the new value throws - which is what "category must be one of: reservation,
+ * eligibility, weight, capacity, roommate" was.
+ *
+ * Worse, the throw surfaces at the next read rather than at the write, because
+ * Apps Script defers the flush, so the stack points at whatever happened to run
+ * afterwards. Refreshing the rules is the fix; running it before anything writes
+ * is what makes the fix land.
+ */
+function repairValidation() {
+  var ss = Db.ss();
+  var refreshed = [];
+
+  SHEET_ORDER.forEach(function (tab) {
+    var sh = ss.getSheetByName(tab);
+    if (!sh) return;
+    var rows = Math.max(sh.getMaxRows() - 1, 1);
+    var touched = 0;
+
+    SCHEMA[tab].cols.forEach(function (col, i) {
+      if (col.type !== T.ENUM || !col.values) return;
+      try {
+        sh.getRange(2, i + 1, rows, 1).setDataValidation(
+          SpreadsheetApp.newDataValidation()
+            .requireValueInList(col.values, true)
+            .setAllowInvalid(false)
+            .setHelpText(col.name + ' must be one of: ' + col.values.join(', '))
+            .build()
+        );
+        touched++;
+      } catch (e) { /* one column must not stop the rest */ }
+    });
+
+    if (touched) refreshed.push(tab + '(' + touched + ')');
+  });
+
+  Db.invalidate();
+  return { refreshed: refreshed,
+           message: 'Dropdowns refreshed: ' + (refreshed.join(', ') || 'none') };
 }
 
 /**
