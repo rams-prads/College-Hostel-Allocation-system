@@ -70,7 +70,13 @@ function route_(e) {
   }
   if (page === 'verify') return render_('ui/verify', 'Verify Allotment', { params: params });
 
-  if (!session.email) return render_('ui/index', 'Hostel Portal', { session: session, needsLogin: true });
+  if (!session.email) {
+    return render_('ui/index', 'Hostel Portal', {
+      session: session,
+      needsLogin: true,
+      authError: session.authError || ''
+    });
+  }
 
   if (page === 'admin') {
     if (!session.isAdmin) return accessDenied_(session);
@@ -120,7 +126,25 @@ function diagnosticPage_(e) {
   var email = '';
   try { email = Session.getActiveUser().getEmail() || '(not detected)'; }
   catch (err) { email = 'ERROR: ' + err.message; }
-  row('Signed in as', email, email.indexOf('@') > 0);
+  row('Signed in as (active user)', email, email.indexOf('@') > 0);
+
+  // The decisive pair. Under "Execute as: me" the EFFECTIVE user is always the
+  // owner. If that resolves but the ACTIVE user is blank, the script is running
+  // fine and simply cannot see who the visitor is - which means the deployment
+  // is set to "Anyone, even anonymous", or the visitor's Google account sits
+  // outside the owner's domain. Neither is a code fault, and without this row
+  // both look like a broken page.
+  var effective = '';
+  try { effective = Session.getEffectiveUser().getEmail() || '(not detected)'; }
+  catch (err) { effective = 'ERROR: ' + err.message; }
+  row('Running as (effective user)', effective, effective.indexOf('@') > 0);
+
+  if (email.indexOf('@') < 0 && effective.indexOf('@') > 0) {
+    row('Diagnosis',
+      'The script runs, but cannot identify the visitor. Set the deployment\'s ' +
+      '"Who has access" to <strong>Anyone with a Google account</strong> ' +
+      '(not "Anyone"), then deploy a NEW VERSION.', false);
+  }
 
   var s = null;
   try { s = Auth.session(); row('Administrator', s.isAdmin ? 'yes (' + s.role + ')' : 'no', s.isAdmin); }

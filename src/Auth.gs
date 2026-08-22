@@ -21,11 +21,20 @@ var Auth = (function () {
 
   function session() {
     var email = '';
-    try { email = Session.getActiveUser().getEmail() || ''; } catch (e) { email = ''; }
+    var authError = '';
+    try {
+      email = Session.getActiveUser().getEmail() || '';
+    } catch (e) {
+      // Swallowing this made an authorisation failure and an anonymous visitor
+      // render the identical dead end, which is a miserable thing to diagnose.
+      email = '';
+      authError = e.message || String(e);
+    }
     var key = norm_(email);
 
     var s = {
       email: email,
+      authError: authError,
       name: '',
       isAdmin: false,
       role: 'GUEST',

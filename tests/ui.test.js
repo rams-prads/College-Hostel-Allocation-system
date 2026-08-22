@@ -112,6 +112,8 @@ function scriptOf(file) {
   // page; stand in placeholders so the script parses here.
   return blocks.join('\n')
     .replace(/<\?=\s*webAppUrl\(\)\s*\?>/g, 'https://script.example/exec')
+    // Server-side conditionals that resolve to a plain string, not an object.
+    .replace(/<\?=\s*\(typeof[\s\S]*?\?>/g, '')
     .replace(/<\?!?=[\s\S]*?\?>/g, '({})');
 }
 
@@ -296,6 +298,19 @@ r = renderPage('index.html', '');
 check('script runs without throwing', !r.threw, r.threw || '');
 check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
 check('something rendered', r.screen.length > 200, r.screen.length + ' bytes');
+check('it offers a way to actually sign in',
+  /<a[^>]+class="btn"/.test(r.screen) || /<button/.test(r.screen),
+  'this page shipped with no button on it - a page whose only job is to get ' +
+  'the visitor somewhere must give them something to press');
+check('the sign-in link goes through Google and comes back here',
+  r.screen.indexOf('accounts.google.com') > 0 &&
+  r.screen.indexOf('continue=') > 0);
+check('it escapes the iframe', r.screen.indexOf('target="_top"') > 0,
+  'a sign-in opened inside the sandbox frame goes nowhere');
+check('no spurious error banner when nothing failed',
+  r.screen.indexOf('could not check who you are') < 0);
+check('it tells an administrator where to look',
+  r.screen.indexOf('page=diag') > 0);
 
 section('Non-admin is refused the dashboard cleanly');
 r = renderPage('admin.html', studentEmail);
