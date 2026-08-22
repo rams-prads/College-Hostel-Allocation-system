@@ -98,6 +98,15 @@ function seedAll(opts) {
   var cohort = opts.cohort || DEFAULT_COHORT;
   var t0 = new Date().getTime();
 
+  // Every tab below is written in full by this function, so any of them whose
+  // columns no longer match the schema is rebuilt first. Writing into a sheet
+  // that is one column out of step does not fail cleanly - it fails as a
+  // validation error about a column nobody touched.
+  var rebuilt = ensureSeedTabs_([
+    'PincodeGeo', 'Hostels', 'Rooms', 'Beds',
+    'Students', 'Applications', 'Preferences', 'Lifestyle'
+  ]);
+
   var geo   = seedPincodeGeo_();
   var inv   = seedInventory_();
   var people = seedStudentsAndApplications_(seed, cohort);
@@ -113,6 +122,7 @@ function seedAll(opts) {
 
   var summary = {
     seed: seed,
+    rebuiltTabs: rebuilt,
     pincodePrefixes: geo,
     hostels: inv.hostels,
     rooms: inv.rooms,

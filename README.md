@@ -75,7 +75,7 @@ node tests/ui.test.js         # 134 checks: every page renders, links escape the
 node tests/phase8.test.js     # 107 checks: identity verification and upload hardening
 node tests/phase9.test.js     # 59 checks: email-code sign-in, session tokens, dispatcher
 node tests/phase10.test.js    # 54 checks: reading documents, materiality, auto-clearing
-node tests/sheets.test.js     # 37 checks: spreadsheet round-trip, ledger repair
+node tests/sheets.test.js     # 41 checks: spreadsheet round-trip, ledger repair
 node tests/harness.js         # 19 checks: schema contract, ledger, tamper detection
 ```
 

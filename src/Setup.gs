@@ -370,6 +370,54 @@ function repairLedger() {
   };
 }
 
+/**
+ * Delete a sheet and build it again from the current schema.
+ *
+ * Only safe for a tab whose contents are disposable, which is why the only
+ * caller is the seeder - every tab it touches it was going to overwrite in full
+ * anyway. Nothing else in the project may call this.
+ */
+function rebuildTab_(tab) {
+  var ss = Db.ss();
+  var existing = ss.getSheetByName(tab);
+  var pos = SHEET_ORDER.indexOf(tab);
+  if (existing) ss.deleteSheet(existing);
+  buildSheet_(ss, tab, pos < 0 ? ss.getSheets().length : pos);
+  Db.invalidate(tab);
+}
+
+/**
+ * Make sure the tabs the seeder is about to fill have the columns the seeder
+ * thinks they have.
+ *
+ * Db writes BY COLUMN POSITION. A schema change that inserts a column leaves an
+ * existing sheet one place out of step, and the seeder then writes each value
+ * into its neighbour's column - so an admission category lands in the column
+ * holding SC/ST/OBC and the spreadsheet rejects it. The error that surfaces
+ * ("category must be one of: GEN, OBC, SC, ST, EWS") describes the symptom and
+ * says nothing about the cause, which is a whole sheet shifted sideways.
+ *
+ * These tabs hold generated data and the seeder replaces all of it, so the
+ * honest fix is to rebuild any that have drifted rather than to write into them
+ * and hope.
+ */
+function ensureSeedTabs_(tabs) {
+  var rebuilt = [];
+  try {
+    var ss = Db.ss();
+    tabs.forEach(function (tab) {
+      var sh = ss.getSheetByName(tab);
+      if (!sh) { rebuildTab_(tab); rebuilt.push(tab); return; }
+      if (headersDrifted_(sh, tab)) { rebuildTab_(tab); rebuilt.push(tab); }
+    });
+  } catch (e) {
+    // No real spreadsheet (the offline harness). Nothing to align.
+    return [];
+  }
+  if (rebuilt.length) Logger.log('Rebuilt for the current schema: ' + rebuilt.join(', '));
+  return rebuilt;
+}
+
 /** Does an existing sheet's header row still match the schema? */
 function headersDrifted_(sh, tab) {
   var expected = SCHEMA[tab].cols.map(function (c) { return c.name; });

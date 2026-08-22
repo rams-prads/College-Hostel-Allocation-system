@@ -133,6 +133,50 @@ check('a hash with a letter in it was never at risk',
   asStoredBySheets('a3f9c2', null) === 'a3f9c2',
   'which is why only the genesis row ever broke, and only on real sheets');
 
+// ================================== a sheet left over from an older schema
+section('Seeding onto a sheet built for the previous schema');
+
+// What actually happened: the Students schema gained columns, the sheet still
+// had the old ones, and Db writes BY POSITION - so every value went into its
+// neighbour's column. The admission category landed in the column holding
+// SC/ST/OBC and the spreadsheet rejected it. The error named a column nobody
+// had touched and said nothing about the sheet being a column out of step.
+check('a shifted write puts a value in the wrong column entirely', (() => {
+  const cols = SCHEMA.Students.cols.map(c => c.name);
+  const cat = cols.indexOf('category');
+  const res = cols.indexOf('residenceCategory');
+  // residenceCategory sits BEFORE category, so a sheet missing it shifts every
+  // later value one place left - straight into the column with the dropdown.
+  return res >= 0 && cat > res;
+})(), 'this is the shape of the fault, not an incidental detail');
+
+check('the drift check notices a missing column', (() => {
+  // A header row from before the change: the same columns, minus the new ones.
+  const now = SCHEMA.Students.cols.map(c => c.name);
+  const before = now.filter(n =>
+    ['residenceCategory', 'parentTransferred', 'isForeign',
+     'meritPercent', 'meritBasis', 'school'].indexOf(n) < 0);
+  return JSON.stringify(before) !== JSON.stringify(now) &&
+         before.length < now.length;
+})());
+
+check('the seeder rebuilds rather than writing into a shifted sheet', (() => {
+  const src = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'src', 'SeedData.gs'), 'utf8');
+  return /ensureSeedTabs_\(\[/.test(src) &&
+         /'Students'/.test(src.slice(src.indexOf('ensureSeedTabs_([')));
+})(), 'seeding replaces these tabs in full, so rebuilding one costs nothing');
+
+check('it rebuilds only tabs whose contents it was going to replace', (() => {
+  const src = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'src', 'SeedData.gs'), 'utf8');
+  const list = src.slice(src.indexOf('ensureSeedTabs_(['),
+                         src.indexOf(']);', src.indexOf('ensureSeedTabs_([')));
+  // Never the ledger, never Config, never Policy, never Admins - those hold
+  // things nobody can regenerate.
+  return !/AuditLog|'Config'|'Policy'|'Admins'|'Identity'|'Documents'/.test(list);
+})(), 'rebuilding a tab that holds real records would destroy them');
+
 // ============================================ what the sheet itself refuses
 section('Nothing is written that the sheet would reject');
 
