@@ -218,7 +218,18 @@ function buildExplanation_(reasonCodes, alloc) {
 function apiGetApplyForm() {
   var s = Auth.session();
   if (!s.email) return { signedIn: false };
-  if (!s.student) return { signedIn: true, unregistered: true };
+
+  // Not in the registry. The form opens on registration rather than refusing.
+  if (!s.student) {
+    return {
+      signedIn: true,
+      needsRegistration: true,
+      email: s.email,
+      applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
+      registration: apiGetRegistrationOptions(),
+      maxPreferences: Number(Db.cfg('MAX_PREFERENCES', 5))
+    };
+  }
 
   var hostels = Db.readAll('Hostels').filter(function (h) {
     return h.active && (h.gender === s.student.gender || h.gender === 'CO');

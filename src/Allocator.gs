@@ -140,7 +140,8 @@ var Allocator = (function () {
         category: student.category,
         isPwD: !!student.isPwD,
         needsAccessible: !!app.needsAccessible,
-        cgpa: Number(student.cgpa),
+        cgpa: Number(student.cgpa) || 0,
+        entranceRank: Number(student.entranceRank) || 0,
         year: Number(student.year),
         distanceKm: Number(app.distanceKm),
         prefs: (ctx.prefsByApp[app.appId] || []).slice().sort(function (a, b) { return a.rank - b.rank; }),
@@ -162,11 +163,45 @@ var Allocator = (function () {
     var w = Policy.weights();
     var distCap = Policy.value('capacity', 'DISTANCE_CAP_KM', 1500);
 
-    var cgpas = ctx.pool.map(function (c) { return c.cgpa; });
-    var minC = Math.min.apply(null, cgpas), maxC = Math.max.apply(null, cgpas);
+    // A first-year applicant has no CGPA - they have not sat a university exam
+    // yet - so they are ranked on the entrance rank that admitted them. The two
+    // measures are not comparable on any common scale, so each group is
+    // normalised WITHIN ITSELF. A first-year at the top of their entrance list
+    // and a final-year at the top of the CGPA list both score 1 on merit, which
+    // is the only defensible way to place them in one queue.
+    var withCgpa = ctx.pool.filter(function (c) { return c.cgpa >= 1; });
+    var byEntrance = ctx.pool.filter(function (c) { return c.cgpa < 1; });
+
+    var minC = 0, maxC = 10;
+    if (withCgpa.length) {
+      var cgpas = withCgpa.map(function (c) { return c.cgpa; });
+      minC = Math.min.apply(null, cgpas);
+      maxC = Math.max.apply(null, cgpas);
+    }
+
+    var minR = 1, maxR = 1;
+    if (byEntrance.length) {
+      var ranks = byEntrance.map(function (c) { return c.entranceRank || 0; });
+      minR = Math.min.apply(null, ranks);
+      maxR = Math.max.apply(null, ranks);
+    }
 
     ctx.pool.forEach(function (c) {
-      var merit = Util.normalise(c.cgpa, minC, maxC);
+      var merit, basis;
+      if (c.cgpa >= 1) {
+        merit = Util.normalise(c.cgpa, minC, maxC);
+        basis = 'CGPA';
+      } else if (c.entranceRank > 0) {
+        // A lower entrance rank is a better one, so the scale is inverted.
+        merit = 1 - Util.normalise(c.entranceRank, minR, maxR);
+        basis = 'ENTRANCE_RANK';
+      } else {
+        // Neither recorded. Placed at the midpoint rather than at zero, so a
+        // missing figure does not silently act as a penalty.
+        merit = 0.5;
+        basis = 'NOT_RECORDED';
+      }
+      c.meritBasis = basis;
 
       // Distance is capped rather than min-maxed: past ~1500 km the practical
       // hardship stops increasing, and an uncapped scale would let a handful of
@@ -203,11 +238,19 @@ var Allocator = (function () {
     ctx.pool.forEach(function (c, i) {
       c.meritPosition = i + 1;
       var w = ctx.weights;
+      var basisText = {
+        CGPA: 'ranked on your CGPA',
+        ENTRANCE_RANK: 'ranked on your entrance rank, since first-year applicants have no ' +
+                       'CGPA yet and are compared against each other',
+        NOT_RECORDED: 'no CGPA or entrance rank on record, so the academic component was ' +
+                      'scored at the midpoint rather than counted against you'
+      }[c.meritBasis] || '';
       trace_(ctx, c.appId, reason('MERIT_POSITION', true,
         'Merit position ' + (i + 1) + ' of ' + n + ' eligible applicants (score ' +
-        c.score.toFixed(4) + ').',
+        c.score.toFixed(4) + ')' + (basisText ? ' — ' + basisText : '') + '.',
         {
           position: i + 1, of: n, score: Util.round(c.score, 4),
+          meritBasis: c.meritBasis,
           breakdown: {
             merit:    { value: Util.round(c.components.merit, 3),    weight: Util.round(w.W_MERIT, 3) },
             distance: { value: Util.round(c.components.distance, 3), weight: Util.round(w.W_DISTANCE, 3) },

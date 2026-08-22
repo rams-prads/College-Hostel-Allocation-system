@@ -88,6 +88,12 @@ function seedAll(opts) {
   Db.invalidate();
   Geo.invalidate();
 
+  // The generator writes its own ids rather than calling Db.nextId, so the
+  // sequence counters have to be moved past them. Otherwise the first student
+  // to register afterwards is issued an id that is already taken.
+  PropertiesService.getScriptProperties().setProperty('SEQ_STU', String(cohort));
+  PropertiesService.getScriptProperties().setProperty('SEQ_APP', String(cohort));
+
   var summary = {
     seed: seed,
     pincodePrefixes: geo,

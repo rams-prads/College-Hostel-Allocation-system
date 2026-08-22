@@ -39,9 +39,14 @@
     });
 
     if (v.unregistered) {
-      el('root').innerHTML = card('', emptyState('&#128100;', 'No student record found',
-        'The address ' + v.email + ' is not linked to a student record. ' +
-        'Please contact the hostel office at ' + v.supportEmail + '.'));
+      el('root').innerHTML = card('',
+        '<div class="empty"><div class="big">&#128075;</div>' +
+        '<h3 style="margin:0 0 6px">Welcome — let\u2019s get you registered</h3>' +
+        '<p class="small" style="max-width:460px;display:inline-block;margin:0 0 18px">' +
+        'We have no record for <strong>' + esc(v.email) + '</strong> yet. Register your ' +
+        'details once and you can apply for a hostel place straight away.</p><br>' +
+        '<a class="btn" href="' + appUrl('?page=apply') + '" target="_top">' +
+        'Register and apply</a></div>');
       return;
     }
 

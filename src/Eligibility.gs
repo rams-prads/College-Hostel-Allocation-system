@@ -54,8 +54,24 @@ var Eligibility = (function () {
     }
 
     // --- academic standing -------------------------------------------------
-    var cgpa = Number(student.cgpa);
-    if (cgpa < minCgpa) {
+    // A first-year applicant has no CGPA: they have not sat a university exam
+    // yet. Testing them against a CGPA floor rejects the entire incoming intake,
+    // who are also the group most likely to need a hostel place. They are
+    // assessed on the entrance rank they were admitted on instead.
+    var cgpa = Number(student.cgpa) || 0;
+    var entrance = Number(student.entranceRank) || 0;
+
+    if (cgpa <= 0 && entrance > 0) {
+      reasons.push(reason('ELIG_PASS_ENTRANCE', true,
+        'No CGPA yet, as expected in your first year. You are assessed on your entrance rank of ' +
+        entrance + ' instead, against other first-year applicants.',
+        { entranceRank: entrance }));
+    } else if (cgpa <= 0 && Number(student.year) <= 1) {
+      reasons.push(reason('ELIG_WARN_NO_ACADEMIC', true,
+        'Neither a CGPA nor an entrance rank is on record. Your academic score is set at the ' +
+        'midpoint rather than counted against you; the hostel office may ask you to confirm it.',
+        { cgpa: cgpa, entranceRank: entrance }));
+    } else if (cgpa < minCgpa) {
       reasons.push(reason('ELIG_FAIL_CGPA', false,
         'CGPA ' + cgpa.toFixed(2) + ' is below the ' + minCgpa.toFixed(1) + ' minimum.',
         { cgpa: cgpa, minimum: minCgpa }));

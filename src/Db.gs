@@ -192,16 +192,47 @@ var Db = (function () {
 
   // ----------------------------------------------------------------- id + misc
 
-  /** Prefixed sequential id, e.g. nextId('APP') -> 'APP-2026-0001'. */
+  // Which tab each id prefix lives in, so a generated id can be checked against
+  // what already exists.
+  var ID_TABLE = {
+    STU: ['Students', 'studentId'],
+    APP: ['Applications', 'appId'],
+    GRV: ['Grievances', 'ticketId'],
+    SWP: ['Transfers', 'reqId']
+  };
+
+  /**
+   * Prefixed sequential id, e.g. nextId('APP') -> 'APP-2026-0001'.
+   *
+   * The counter alone is not enough. Seeded demo data writes its own ids
+   * directly without advancing it, so a freshly registered student was handed
+   * an id that already belonged to someone else - and silently aliased their
+   * record. Every candidate is now checked against the table it will be written
+   * to before it is issued.
+   */
   function nextId(prefix) {
     var props = PropertiesService.getScriptProperties();
     var key = 'SEQ_' + prefix;
     var lock = LockService.getScriptLock();
     lock.waitLock(10000);
     try {
-      var n = parseInt(props.getProperty(key) || '0', 10) + 1;
+      var taken = {};
+      var spec = ID_TABLE[prefix];
+      if (spec) {
+        try {
+          readAll(spec[0], { fresh: true }).forEach(function (r) { taken[r[spec[1]]] = true; });
+        } catch (e) { /* tab may not exist yet during setup */ }
+      }
+
+      var n = parseInt(props.getProperty(key) || '0', 10);
+      var id;
+      do {
+        n++;
+        id = prefix + '-' + cfg('ACADEMIC_YEAR', '2026') + '-' + padLeft(n, 4);
+      } while (taken[id]);
+
       props.setProperty(key, String(n));
-      return prefix + '-' + cfg('ACADEMIC_YEAR', '2026') + '-' + padLeft(n, 4);
+      return id;
     } finally {
       lock.releaseLock();
     }

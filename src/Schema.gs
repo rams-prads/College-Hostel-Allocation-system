@@ -54,18 +54,31 @@ var SCHEMA = {
       { name: 'enrollmentNo',  type: T.STR },
       { name: 'email',         type: T.STR },
       { name: 'phone',         type: T.STR },
+      { name: 'dob',           type: T.STR },
       { name: 'gender',        type: T.ENUM, values: ['M', 'F', 'O'] },
       { name: 'programme',     type: T.ENUM, values: ['BTech', 'MTech', 'MBA', 'LLB', 'MCA', 'BBA', 'BCA'] },
       { name: 'branch',        type: T.STR },
       { name: 'year',          type: T.INT },
       { name: 'cgpa',          type: T.NUM },
+      // First-year applicants have no CGPA yet, so they are ranked on the
+      // entrance rank that admitted them. See Allocator stage B.
+      { name: 'entranceRank',  type: T.INT },
       { name: 'meritRank',     type: T.INT },
       { name: 'category',      type: T.ENUM, values: ['GEN', 'OBC', 'SC', 'ST', 'EWS'] },
       { name: 'isPwD',         type: T.BOOL },
       { name: 'pwdType',       type: T.STR },
+      { name: 'homeAddress',   type: T.STR },
+      { name: 'homeCity',      type: T.STR },
       { name: 'homePincode',   type: T.STR },
       { name: 'homeState',     type: T.STR },
-      { name: 'guardianEmail', type: T.STR }
+      { name: 'guardianName',  type: T.STR },
+      { name: 'guardianPhone', type: T.STR },
+      { name: 'guardianEmail', type: T.STR },
+      { name: 'bloodGroup',    type: T.STR },
+      { name: 'medicalNotes',  type: T.STR },
+      // Self-registered records are unverified until documents are checked.
+      { name: 'selfDeclared',  type: T.BOOL },
+      { name: 'registeredAt',  type: T.DATE }
     ]
   },
 

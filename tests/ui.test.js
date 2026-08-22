@@ -132,10 +132,16 @@ function renderPage(file, sessionEmail) {
   } catch (e) {
     threw = e.message;
   }
+  // The stub does not nest nodes the way a browser does, so "what is on screen"
+  // is every node's content, not just the outermost one.
+  let all = '';
+  Object.keys(nodes).forEach(function (k) { all += nodes[k].innerHTML || ''; });
+
   return {
     threw, errors,
     root: (nodes.root || {}).innerHTML || '',
     chrome: (nodes.chrome || {}).innerHTML || '',
+    screen: all,
     nodes
   };
 }
@@ -150,40 +156,57 @@ let r = renderPage('student.html', studentEmail);
 check('script runs without throwing', !r.threw, r.threw || '');
 check('no unhandled server errors', r.errors.length === 0, r.errors.join('; '));
 check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
-check('the page body rendered', r.root.length > 800, r.root.length + ' bytes');
-check('the allotment hero is present', r.root.indexOf('Your allotment') > 0);
-check('the explanation panel is present', r.root.indexOf('Why you got this result') > 0);
+check('the page body rendered', r.screen.length > 800, r.screen.length + ' bytes');
+check('the allotment hero is present', r.screen.indexOf('Your allotment') > 0);
+check('the explanation panel is present', r.screen.indexOf('Why you got this result') > 0);
 
-section('Application form');
+section('Application form - returning student');
 r = renderPage('apply.html', studentEmail);
 check('script runs without throwing', !r.threw, r.threw || '');
 check('no unhandled server errors', r.errors.length === 0, r.errors.join('; '));
 check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
-check('the form body rendered', r.root.length > 800, r.root.length + ' bytes');
-check('preference chooser is present', r.root.indexOf('Room preferences') > 0);
-check('roommate questionnaire is present', r.root.indexOf('Roommate questionnaire') > 0);
+check('the form body rendered', r.screen.length > 1200, r.screen.length + ' bytes');
+check('opens on the preference step', r.screen.indexOf('Room preferences') > 0);
+check('shows the step indicator', r.screen.indexOf('class="wiz"') > 0);
+check('a returning student is not asked to register again',
+  r.screen.indexOf('registers you') < 0);
+
+section('Application form - brand new student');
+r = renderPage('apply.html', 'someone.brand.new@example.com');
+check('script runs without throwing', !r.threw, r.threw || '');
+check('no unhandled server errors', r.errors.length === 0, r.errors.join('; '));
+check('registration is offered rather than a dead end',
+  r.screen.indexOf('registers you') > 0,
+  'a student not in the registry must still be able to apply');
+check('opens on personal details', r.screen.indexOf('About you') > 0);
+check('asks for an enrolment number', r.screen.indexOf('enrolment number') > 0);
+check('asks for gender, since hostels are single-gender',
+  r.screen.indexOf('Gender') > 0);
+check('the wizard has all seven steps',
+  (r.screen.match(/<li class="[^"]*"[^>]*onclick="goStep/g) || []).length === 7,
+  (r.screen.match(/onclick="goStep/g) || []).length + ' steps');
 
 section('Admin dashboard');
 r = renderPage('admin.html', 'admin@ipu.ac.in');
 check('script runs without throwing', !r.threw, r.threw || '');
 check('no unhandled server errors', r.errors.length === 0, r.errors.join('; '));
 check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
-check('the dashboard body rendered', r.root.length > 1500, r.root.length + ' bytes');
-check('summary tiles are present', r.root.indexOf('Rooms allotted') > 0);
-check('ledger status is present', r.root.indexOf('Audit ledger') > 0);
-check('occupancy table is present', r.root.indexOf('Occupancy') > 0);
+check('the dashboard body rendered', r.screen.length > 1500, r.screen.length + ' bytes');
+check('summary tiles are present', r.screen.indexOf('Rooms allotted') > 0);
+check('ledger status is present', r.screen.indexOf('Audit ledger') > 0);
+check('occupancy table is present', r.screen.indexOf('Occupancy') > 0);
 
 section('Verification page');
 r = renderPage('verify.html', '');
 check('script runs without throwing', !r.threw, r.threw || '');
 check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
-check('something rendered', r.root.length > 200, r.root.length + ' bytes');
+check('something rendered', r.screen.length > 200, r.screen.length + ' bytes');
 
 section('Sign-in page');
 r = renderPage('index.html', '');
 check('script runs without throwing', !r.threw, r.threw || '');
 check('the masthead rendered', r.chrome.indexOf('masthead') > 0);
-check('something rendered', r.root.length > 200, r.root.length + ' bytes');
+check('something rendered', r.screen.length > 200, r.screen.length + ' bytes');
 
 section('Non-admin is refused the dashboard cleanly');
 r = renderPage('admin.html', studentEmail);
