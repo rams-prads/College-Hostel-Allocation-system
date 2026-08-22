@@ -18,9 +18,12 @@
 
 var DEFAULT_SEED = 'GGSIPU-2026';
 // More applicants than beds, which is the situation the whole system exists
-// for. The four hostels hold 1,110; a cohort that fitted would make every
-// allocation trivially correct and prove nothing about the priority order.
-var DEFAULT_COHORT = 1400;
+// for. The two EDC hostels hold 494 between them against a sanctioned intake of
+// just over 1,000 a year, so a hostel-seeking cohort of this size is realistic
+// and leaves a waiting list long enough for the priority order to decide
+// something. A cohort that fitted would make every allocation trivially correct
+// and prove nothing.
+var DEFAULT_COHORT = 1000;
 
 /**
  * Hostel inventory.
@@ -34,44 +37,21 @@ var DEFAULT_COHORT = 1400;
  * counts is an edit to this table and nothing else.
  */
 var HOSTEL_SPECS = [
-  { hostelId: 'ED-BH-1', name: 'EDC Boys Hostel',       campus: 'EDC',    gender: 'M',
+  { hostelId: 'ED-BH-1', name: 'EDC Boys Hostel',  campus: 'EDC', gender: 'M',
     warden: 'Dr. Ravi Butola',
     rooms: { SINGLE: 38, TRIPLE: 54, QUAD: 16 } },
-  { hostelId: 'ED-GH-1', name: 'EDC Girls Hostel',      campus: 'EDC',    gender: 'F',
+  { hostelId: 'ED-GH-1', name: 'EDC Girls Hostel', campus: 'EDC', gender: 'F',
     warden: 'Dr. K. Gupta',
-    rooms: { SINGLE: 30, TRIPLE: 48, QUAD: 14 } },
-  { hostelId: 'DW-BH-A', name: 'Dwarka Boys Hostel A',  campus: 'DWARKA', gender: 'M',
-    warden: 'Dr. A. Sharma',
-    rooms: { SINGLE: 40, TRIPLE: 70, QUAD: 20 } },
-  { hostelId: 'DW-GH-A', name: 'Dwarka Girls Hostel A', campus: 'DWARKA', gender: 'F',
-    warden: 'Dr. M. Iyer',
-    rooms: { SINGLE: 34, TRIPLE: 60, QUAD: 18 } }
+    rooms: { SINGLE: 30, TRIPLE: 48, QUAD: 14 } }
 ];
 
 var CAPACITY = { SINGLE: 1, TRIPLE: 3, QUAD: 4 };
 
-/** Which schools sit on which campus. Hostel eligibility follows the school. */
-var SCHOOLS = {
-  EDC:    ['USAR', 'USDI', 'USAP', 'USMC'],
-  DWARKA: ['USICT', 'USMS', 'USLLS', 'USBAS']
-};
+// Schools, and which programmes belong to them, come from Catalogue.gs.
 
-/** Programmes the brochure treats as PG or PhD, for the single-room rule. */
-var PG_PROGRAMMES = { MTech: 1, MBA: 1, MCA: 1, PhD: 1 };
-
-var PROGRAMMES = [
-  ['BTech', 45], ['MBA', 15], ['MCA', 10], ['LLB', 12], ['MTech', 8], ['BBA', 5], ['BCA', 5]
-];
-var BRANCHES = {
-  BTech: ['CSE', 'IT', 'ECE', 'EEE', 'Mechanical', 'Civil'],
-  MTech: ['CSE', 'VLSI', 'Structural', 'Power Systems'],
-  MBA:   ['Finance', 'Marketing', 'HR', 'Operations'],
-  LLB:   ['Law'],
-  MCA:   ['Computer Applications'],
-  BBA:   ['General', 'Banking'],
-  BCA:   ['Computer Applications']
-};
-var YEARS_BY_PROGRAMME = { BTech: 4, MTech: 2, MBA: 2, MCA: 2, LLB: 5, BBA: 3, BCA: 3 };
+// Programmes, branches, durations and sanctioned intake all come from
+// Catalogue.gs, which holds the real EDC course table. There is no second copy
+// here: a course list in two places is a course list that disagrees with itself.
 
 var FIRST_M = ['Aarav','Vivaan','Aditya','Arjun','Rohan','Kabir','Ishaan','Rahul','Ankit','Siddharth',
                'Karan','Nikhil','Manish','Rajat','Sameer','Varun','Yash','Harsh','Devansh','Tanmay',
@@ -249,19 +229,28 @@ function seedStudentsAndApplications_(seed, cohort) {
   // supply would flatter the allocator: it would look efficient simply because
   // one campus had spare beds and nobody who could use them.
   var campusWeights = campusWeightsByGender_();
+  var intakeWeights = Catalogue.intakeWeights();
 
   var draft = [];
   for (var i = 0; i < cohort; i++) {
     var gender = Util.weighted(rand, [['M', 58], ['F', 42]]);
-    var programme = Util.weighted(rand, PROGRAMMES);
-    var maxYear = YEARS_BY_PROGRAMME[programme];
-    var year = Util.weighted(rand, yearWeights_(maxYear));
+    // Drawn in proportion to sanctioned intake, so the cohort has the shape of
+    // the real one: USAR dominates, design and architecture are small, the
+    // lateral-entry streams are a handful. Uniform weights would give a
+    // twelve-seat lateral stream the same footprint as a 480-seat one.
+    var pick = Util.weighted(rand, intakeWeights).split('|');
+    var programme = pick[0];
+    var branch = pick[1];
+
+    var entry = Catalogue.entryYear(programme);
+    var maxYear = Catalogue.years(programme) + entry - 1;
+    var year = Util.weighted(rand, yearWeights_(maxYear, entry));
     var campus = Util.weighted(rand, campusWeights[gender] || campusWeights.M);
 
     // The figure the policy ranks on: a percentage either way, so a first-year
     // and a final-year sit on one scale without any normalising.
     var meritPercent = Util.round(Util.normal(rand, 72, 11, 40, 99), 2);
-    var meritBasis = year <= 1 ? 'CLASS_12' : 'SEMESTER';
+    var meritBasis = year <= entry ? 'CLASS_12' : 'SEMESTER';
 
     // Roughly two in three hostel applicants are admitted outside Delhi, which
     // is what makes the priority order bite: the second group is large enough
@@ -272,7 +261,7 @@ function seedStudentsAndApplications_(seed, cohort) {
     var parentTransferred = residenceCategory === 'DELHI' && rand() < 0.18;
 
     draft.push({
-      gender: gender, campus: campus, programme: programme, year: year,
+      gender: gender, campus: campus, programme: programme, branch: branch, year: year,
       meritPercent: meritPercent, meritBasis: meritBasis,
       residenceCategory: residenceCategory, parentTransferred: parentTransferred,
       isForeign: rand() < 0.03,
@@ -321,9 +310,11 @@ function seedStudentsAndApplications_(seed, cohort) {
       phone: '9' + Util.pad(Util.intBetween(rand, 100000000, 999999999), 9).substring(0, 9),
       gender: d.gender,
       programme: d.programme,
-      branch: Util.pick(rand, BRANCHES[d.programme]),
+      branch: d.branch,
       campus: d.campus,
-      school: Util.pick(rand, SCHOOLS[d.campus] || SCHOOLS.EDC),
+      // Derived, never drawn: a programme belongs to exactly one school, so
+      // asking for both is asking for two answers that can disagree.
+      school: Catalogue.schoolOf(d.programme),
       year: d.year,
 
       residenceCategory: d.residenceCategory,
@@ -397,7 +388,7 @@ function seedStudentsAndApplications_(seed, cohort) {
     });
     // A single room is for PG and PhD students, so it is not offered to anyone
     // else - a preference that could never be granted is not a preference.
-    var isPg = !!PG_PROGRAMMES[d.programme];
+    var isPg = Catalogue.isPgOrPhd(d.programme, d.year);
     var options = [];
     eligibleHostels.forEach(function (h) {
       ['SINGLE', 'TRIPLE', 'QUAD'].forEach(function (rt) {
@@ -521,10 +512,18 @@ function campusWeightsByGender_() {
   return out;
 }
 
-function yearWeights_(maxYear) {
+/**
+ * Which year of a programme a student is in.
+ *
+ * Weighted toward the earlier years, because applicants thin out as cohorts
+ * move through - and starting at `entry` rather than 1, because a lateral-entry
+ * student enters in the second year and never has a first.
+ */
+function yearWeights_(maxYear, entry) {
+  entry = entry || 1;
   var base = [45, 25, 18, 8, 4];
   var out = [];
-  for (var y = 1; y <= maxYear; y++) out.push([y, base[y - 1] || 3]);
+  for (var y = entry; y <= maxYear; y++) out.push([y, base[y - entry] || 3]);
   return out;
 }
 
@@ -547,12 +546,17 @@ function yearWeights_(maxYear) {
  */
 function enrollmentNo_(programme, campus, n, yearOfStudy) {
   var institute = campus === 'EDC' ? '164' : '041';
-  var codes = { BTech: '010', MTech: '020', MBA: '030',
-                MCA: '040', LLB: '050', BBA: '060', BCA: '070' };
+
+  // The university's own CET code for the programme, where it has one. Using
+  // the real code means an enrolment number carries the same information the
+  // real one does instead of a made-up mapping.
+  var p = Catalogue.byCode(programme);
+  var cet = p && p.cet ? String(p.cet).replace(/\D/g, '') : '';
+  var code = Util.pad(Number(cet.substring(0, 3)) || 0, 3);
+
   var academicYear = Number(Db.cfg('ACADEMIC_YEAR', '2026'));
   var admitted = academicYear - Number(yearOfStudy) + 1;
-  return institute + (codes[programme] || '000') +
-         Util.pad(n % 1000, 3) + Util.pad(admitted % 100, 2);
+  return institute + code + Util.pad(n % 1000, 3) + Util.pad(admitted % 100, 2);
 }
 
 /** Applications trickle in over a four-week window. */

@@ -22,8 +22,8 @@ function asUser(email) {
 
 const VALID = {
   name: 'Riya Sharma', enrollmentNo: '04116403223', phone: '9876543210',
-  dob: '2006-03-14', gender: 'F', programme: 'BTech',
-  branch: 'Computer Science & Engineering', campus: 'DWARKA', school: 'USICT',
+  dob: '2006-03-14', gender: 'F', programme: 'BTMT',
+  branch: 'Automation & Robotics', campus: 'EDC',
   year: 1,
   // A first-year is ranked on the best five subjects of class 12, which is
   // what the brochure says and what the form therefore has to ask for.
@@ -41,8 +41,17 @@ let form = apiGetApplyForm();
 check('registration is offered', form.needsRegistration === true);
 check('the signed-in address comes back', form.email === 'riya.new@example.com');
 check('programme list is supplied', form.registration.programmes.length >= 5);
-check('every programme declares its branches and duration',
-  form.registration.programmes.every(p => p.branches.length > 0 && p.years >= 2));
+check('every programme declares its branches, school and year range',
+  form.registration.programmes.every(p =>
+    p.branches.length > 0 && p.school && p.lastYear >= p.entryYear));
+check('the school comes with the programme, so the form never asks twice',
+  form.registration.programmes.every(p => !!p.schoolName));
+check('the lateral-entry programmes start in the second year',
+  form.registration.programmes.filter(p => /^LE-/.test(p.code))
+    .every(p => p.entryYear === 2),
+  'a lateral entrant has no first year, and offering one would create a student who cannot be');
+check('the real course codes are shown',
+  form.registration.programmes.some(p => /CET 131/.test(p.label)));
 check('all five categories are offered', form.registration.categories.length === 5);
 check('both campuses are offered, each explained',
   form.registration.campuses.length === 2 &&
@@ -90,7 +99,9 @@ check('name stored', row.name === VALID.name);
 check('enrolment number stored', row.enrollmentNo === VALID.enrollmentNo);
 check('the signed-in address is linked', row.email === 'riya.new@example.com',
   'the account, not anything typed into the form');
-check('programme and branch stored', row.programme === 'BTech' && !!row.branch);
+check('programme and branch stored', row.programme === 'BTMT' && !!row.branch);
+check('the school was derived from the programme',
+  row.school === 'USAR' && row.school === Catalogue.schoolOf(row.programme));
 check('the class 12 percentage is stored', Number(row.meritPercent) === 88.4);
 check('and recorded as coming from class 12', row.meritBasis === 'CLASS_12',
   'a first-year has no university result to be ranked on yet');
@@ -102,7 +113,7 @@ check('a self-registering applicant is not marked a returning resident',
 check('guardian contact stored', row.guardianName === 'S. Sharma');
 check('home state derived from the PIN code', row.homeState === 'Assam',
   'typed state is not trusted when the PIN resolves');
-check('campus is stored on the student record', row.campus === 'DWARKA');
+check('campus is stored on the student record', row.campus === 'EDC');
 check('the record is flagged as self-declared', row.selfDeclared === true,
   'it is a claim until documents verify it');
 check('registration is written to the ledger',
@@ -161,7 +172,7 @@ reject('a missing admission category is refused',
   { residenceCategory: '' }, 'Delhi or the outside-Delhi');
 reject('an outside-Delhi applicant cannot claim the parent-transfer priority',
   { residenceCategory: 'OUTSIDE_DELHI', parentTransferred: true }, 'Delhi-category');
-reject('a missing school is refused', { school: '' }, 'School of Studies');
+
 reject('an unknown category is refused', { category: 'XYZ' }, 'category');
 reject('PwD without a type is refused', { isPwD: true, pwdType: '' }, 'disability');
 reject('a five-digit PIN code is refused', { homePincode: '12345' }, 'PIN code');
@@ -175,7 +186,7 @@ section('A continuing student registers on CGPA instead');
 asUser('senior@example.com');
 const senior = apiRegisterStudent(Object.assign({}, VALID, {
   name: 'Aditi Rao', enrollmentNo: '04116403999', gender: 'F', campus: 'EDC',
-  school: 'USAR', year: 3, meritPercent: 76.5, category: 'GEN',
+  year: 3, meritPercent: 76.5, category: 'GEN',
   residenceCategory: 'DELHI', parentTransferred: true
 }));
 const seniorRow = Db.byId('Students', senior.studentId);
@@ -198,14 +209,14 @@ check('only same-gender hostels are offered', (() => {
   const hostels = Db.indexBy('Hostels', 'hostelId');
   return applyForm.options.every(o => hostels[o.hostelId].gender === 'F');
 })());
-check('only her own campus is offered', applyForm.options.every(o => o.campus === 'DWARKA'),
-  'campus is fixed at admission, so the other campus is not an option');
-check('the East Delhi student sees a different list', (() => {
-  asUser('senior@example.com');
-  const theirs = apiGetApplyForm();
-  asUser('riya.new@example.com');
-  return theirs.options.length > 0 && theirs.options.every(o => o.campus === 'EDC');
-})());
+check('only her own campus is offered', applyForm.options.every(o => o.campus === 'EDC'),
+  'campus is fixed at admission, so another campus is not an option');
+check('a single room is not offered to an undergraduate', (() => {
+  // She is a first-year on the dual degree, so the brochure's single rooms are
+  // not hers to ask for.
+  return applyForm.options.every(o => o.roomType !== 'SINGLE') ||
+         Catalogue.isPgOrPhd('BTMT', 1);
+})(), 'single rooms are for PG and PhD students');
 
 // A registering student has no record for the server to read a campus from, so
 // the options arrive through a second call once they have declared both.
@@ -224,20 +235,25 @@ check('a registrant must declare both before options exist', (() => {
   return threw === 2;
 })());
 check('an existing record overrides what the browser claims',
-  apiGetHostelOptions('M', 'EDC').every(o => o.campus === 'DWARKA'),
-  'Riya is a Dwarka student; asking for East Delhi must not change that');
+  apiGetHostelOptions('M', 'DWARKA').every(o => o.campus === 'EDC'),
+  'Riya is an EDC student; asking for another campus must not change that');
 
-// The other campus's hostels must be refused even when posted directly.
+// A hostel at another campus must be refused even when posted directly.
+// Seeded data is one campus, so the other one is constructed.
 let crossCampus = false;
+const alien = Db.readAll('Hostels').filter(h => h.gender === 'F')[0];
+Db.update('Hostels', alien.hostelId, { campus: 'DWARKA' });
+Db.invalidate('Hostels');
 try {
-  const alien = Db.readAll('Hostels').filter(h => h.gender === 'F' && h.campus === 'EDC')[0];
   apiSaveApplication({
-    needsAccessible: false, preferences: [alien.hostelId + '|DOUBLE'],
+    needsAccessible: false, preferences: [alien.hostelId + '|TRIPLE'],
     lifestyle: { sleepTime: 'LATE', wakeTime: 'LATE', studyStyle: 'QUIET', foodPref: 'VEG' },
     submit: true
   });
 } catch (e) { crossCampus = true; }
-check('a hostel at the other campus is refused on submit', crossCampus);
+Db.update('Hostels', alien.hostelId, { campus: 'EDC' });
+Db.invalidate('Hostels');
+check('a hostel at another campus is refused on submit', crossCampus);
 
 const saved = apiSaveApplication({
   needsAccessible: false,
@@ -248,7 +264,7 @@ const saved = apiSaveApplication({
   submit: true
 });
 check('the application is created', saved.status === 'SUBMITTED');
-check('the application mirrors her campus', Db.byId('Applications', saved.appId).campus === 'DWARKA');
+check('the application mirrors her campus', Db.byId('Applications', saved.appId).campus === 'EDC');
 check('its id does not collide either',
   Db.readAll('Applications').filter(a => a.appId === saved.appId).length === 1);
 

@@ -69,7 +69,11 @@ var SCHEMA = {
       { name: 'phone',         type: T.STR },
       { name: 'dob',           type: T.STR },
       { name: 'gender',        type: T.ENUM, values: ['M', 'F', 'O'] },
-      { name: 'programme',     type: T.ENUM, values: ['BTech', 'MTech', 'MBA', 'LLB', 'MCA', 'BBA', 'BCA'] },
+      // Text, not a dropdown. The course list lives in Catalogue.gs and changes
+      // when the university changes it; a dropdown baked into the sheet would
+      // be a second copy that has to be hand-synced and will not be. Validity
+      // is checked against the catalogue where a programme is accepted.
+      { name: 'programme',     type: T.STR },
       { name: 'branch',        type: T.STR },
       // Campus is fixed at admission, not chosen at application time. A student
       // admitted to Dwarka can only be housed in a Dwarka hostel, so this is a

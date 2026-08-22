@@ -146,7 +146,9 @@ try { apiAdminFindStudent('a'); } catch (e) { searchBlocked = true; }
 check('a student cannot search the register', searchBlocked);
 
 global.Session = { getActiveUser: () => ({ getEmail: () => 'admin@ipu.ac.in' }) };
-const found = apiAdminFindStudent(byCode.ARJUN.name.split(' ')[0]);
+// The full name, not the first: search caps its results, and a common first
+// name in a thousand-student cohort pushes the intended match off the end.
+const found = apiAdminFindStudent(byCode.ARJUN.name);
 check('search finds a character by name', found.some(r => r.appId === byCode.ARJUN.appId),
   found.length + ' results');
 check('search works by application id',

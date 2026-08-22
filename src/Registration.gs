@@ -10,7 +10,9 @@
  * evidence, and nothing here bypasses that.
  */
 
-var PROGRAMME_YEARS = { BTech: 4, MTech: 2, MBA: 2, MCA: 2, LLB: 5, BBA: 3, BCA: 3 };
+// Programmes, branches, durations and the school each belongs to all come from
+// Catalogue.gs, which holds the real EDC course table. Nothing about a course
+// is described twice.
 
 /**
  * A student is admitted to one campus and stays there. It is declared once,
@@ -45,8 +47,21 @@ var BRANCHES_BY_PROGRAMME = {
 /** Reference data the registration step needs. */
 function apiGetRegistrationOptions() {
   return {
-    programmes: Object.keys(PROGRAMME_YEARS).map(function (p) {
-      return { code: p, years: PROGRAMME_YEARS[p], branches: BRANCHES_BY_PROGRAMME[p] };
+    // One entry per programme, carrying everything the form needs to render it
+    // and everything it needs to validate against.
+    programmes: Catalogue.programmes().map(function (p) {
+      return {
+        code: p.code,
+        label: p.name + (p.cet ? ' (CET ' + p.cet + ')' : ''),
+        name: p.name,
+        school: p.school,
+        schoolName: Catalogue.schoolName(p.school),
+        entryYear: p.entryYear || 1,
+        lastYear: (p.entryYear || 1) + p.years - 1,
+        isPg: p.level === 'PG' || p.level === 'PHD' || p.level === 'PG_DIPLOMA',
+        note: p.note || '',
+        branches: p.branches.map(function (b) { return b.name; })
+      };
     }),
     categories: [
       { code: 'GEN', label: 'General' },
@@ -56,7 +71,11 @@ function apiGetRegistrationOptions() {
       { code: 'EWS', label: 'Economically Weaker Section' }
     ],
     campuses: CAMPUS_OPTIONS,
-    schools: SCHOOLS_BY_CAMPUS,
+    // Kept for display only. Which school a student belongs to is decided by
+    // the programme they name, never asked for separately.
+    schools: Catalogue.schools().map(function (c) {
+      return { code: c, label: Catalogue.schoolName(c) };
+    }),
     residenceCategories: [
       { code: 'OUTSIDE_DELHI', label: 'Outside Delhi',
         note: 'You were admitted against the outside-Delhi quota. Second priority for a ' +
@@ -139,7 +158,10 @@ function apiRegisterStudent(payload) {
     programme: payload.programme,
     branch: String(payload.branch || '').trim(),
     campus: payload.campus,
-    school: String(payload.school || '').trim(),
+    // Derived from the programme. A student who names a course has already
+    // named their school; asking again only creates a second answer that can
+    // contradict the first.
+    school: Catalogue.schoolOf(payload.programme),
     year: Number(payload.year),
 
     // What the allotment order actually turns on.
@@ -147,7 +169,11 @@ function apiRegisterStudent(payload) {
     parentTransferred: payload.residenceCategory === 'DELHI' && !!payload.parentTransferred,
     isForeign: !!payload.isForeign,
     meritPercent: Number(payload.meritPercent) || 0,
-    meritBasis: Number(payload.year) <= 1 ? 'CLASS_12' : 'SEMESTER',
+    // First year OF THE PROGRAMME, which for a lateral entrant is year 2. Their
+    // qualifying result is a diploma or a B.Sc rather than class 12, which the
+    // brochure covers with "12th [best five subjects] /equivalent".
+    meritBasis: Number(payload.year) <= Catalogue.entryYear(payload.programme)
+      ? 'CLASS_12' : 'SEMESTER',
     meritRank: 0,
 
     // A self-registering applicant is by definition not a returning resident;
@@ -200,19 +226,27 @@ function validateRegistration_(p) {
   }
   if (!isMobile_(p.phone)) e.push('Enter a valid 10-digit mobile number.');
   if (['M', 'F', 'O'].indexOf(p.gender) < 0) e.push('Select your gender.');
-  if (!PROGRAMME_YEARS[p.programme]) e.push('Select your programme.');
+  var prog = Catalogue.byCode(p.programme);
+  if (!prog) e.push('Select your programme.');
   if (!p.branch) e.push('Select your branch or specialisation.');
+  else if (prog && Catalogue.branches(p.programme).indexOf(p.branch) < 0) {
+    e.push('That specialisation is not offered on ' + prog.name + '.');
+  }
   // Campus decides which hostels exist for this student at all, so a wrong or
   // missing value is not a cosmetic error - it would leave them unallocatable.
   if (['DWARKA', 'EDC'].indexOf(p.campus) < 0) {
     e.push('Select the campus you are admitted to.');
   }
 
-  var maxYear = PROGRAMME_YEARS[p.programme] || 5;
+  // Lateral entry starts in the second year, so a first year does not exist on
+  // those programmes and offering one would produce a student who cannot be.
+  var firstYear = prog ? Catalogue.entryYear(p.programme) : 1;
+  var lastYear = prog ? firstYear + Catalogue.years(p.programme) - 1 : 5;
   var year = Number(p.year);
-  if (!(year >= 1 && year <= maxYear)) {
-    e.push('Year of study must be between 1 and ' + maxYear + ' for ' +
-           (p.programme || 'this programme') + '.');
+  if (prog && !(year >= firstYear && year <= lastYear)) {
+    e.push('Year of study must be between ' + firstYear + ' and ' + lastYear +
+           ' for ' + prog.name + (firstYear > 1
+             ? ', which is a lateral-entry programme and has no first year.' : '.'));
   }
 
   // The one figure the priority order ranks on, and the brochure defines it
@@ -220,9 +254,10 @@ function validateRegistration_(p) {
   // is no university result yet. Both are percentages.
   var merit = Number(p.meritPercent);
   if (!(merit > 0 && merit <= 100)) {
-    e.push(year === 1
-      ? 'Enter the percentage of your best five subjects in class 12. It is what your ' +
-        'application is ranked on until you have a university result.'
+    e.push(year <= firstYear
+      ? 'Enter the percentage of your qualifying examination — best five subjects of ' +
+        'class 12, or the diploma or B.Sc you entered on. It is what your application is ' +
+        'ranked on until you have a university result.'
       : 'Enter your result up to the preceding semester, as a percentage.');
   }
 
@@ -235,7 +270,7 @@ function validateRegistration_(p) {
   if (p.residenceCategory === 'OUTSIDE_DELHI' && p.parentTransferred) {
     e.push('The parent-transfer priority applies only to Delhi-category applicants.');
   }
-  if (!p.school) e.push('Select your University School of Studies.');
+
 
   if (['GEN', 'OBC', 'SC', 'ST', 'EWS'].indexOf(p.category) < 0) e.push('Select your category.');
   if (p.isPwD && !p.pwdType) {

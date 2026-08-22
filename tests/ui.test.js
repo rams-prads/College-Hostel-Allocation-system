@@ -220,12 +220,25 @@ check('the course step asks the admission category', (() => {
 check('and asks a first-year for their class 12 best five', (() => {
   // The marks field only appears once a year of study is chosen, so choose one.
   const t = renderPage('apply.html', 'someone.brand.new@example.com',
-    'step = STEPS.indexOf("Course"); reg.programme = "BTech"; reg.year = 1; paint();');
-  return t.screen.indexOf('best five subjects') > 0;
+    'step = STEPS.indexOf("Course"); reg.programme = "BTMT"; reg.year = 1; paint();');
+  return t.screen.indexOf('Qualifying examination') > 0 &&
+         t.screen.indexOf('class 12') > 0;
 })(), 'which is what the brochure ranks a first-year on');
+
+check('a lateral-entry programme is never offered a first year', (() => {
+  const t = renderPage('apply.html', 'someone.brand.new@example.com',
+    'step = STEPS.indexOf("Course"); reg.programme = "LE-BTMT"; paint();');
+  return t.screen.indexOf('>Year 2<') > 0 && t.screen.indexOf('>Year 1<') < 0;
+})(), 'they enter in the second year, so a first year would describe a student who cannot exist');
+
+check('and is asked about the diploma it entered on, not class 12', (() => {
+  const t = renderPage('apply.html', 'someone.brand.new@example.com',
+    'step = STEPS.indexOf("Course"); reg.programme = "LE-BTMT"; reg.year = 2; paint();');
+  return t.screen.indexOf('diploma or B.Sc') > 0;
+})());
 check('and a continuing student for their last semester result', (() => {
   const t = renderPage('apply.html', 'someone.brand.new@example.com',
-    'step = STEPS.indexOf("Course"); reg.programme = "BTech"; reg.year = 3; paint();');
+    'step = STEPS.indexOf("Course"); reg.programme = "BTMT"; reg.year = 3; paint();');
   return t.screen.indexOf('preceding semester') > 0;
 })());
 check('it no longer asks for a CGPA or an entrance rank',

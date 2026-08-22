@@ -143,9 +143,11 @@ function plainAllocsFor(gender, campus) {
     !appById[a.appId].needsAccessible &&
     !roomById[Db.byId('Beds', a.bedId).roomId].isAccessible);
 }
-const boys = plainAllocsFor('M', 'DWARKA');
-const girls = plainAllocsFor('F', 'DWARKA');
-const edcBoys = plainAllocsFor('M', 'EDC');
+// One campus now, so a cross-campus refusal cannot be demonstrated from seeded
+// data. The rule is still tested - directly, against Swap.validate - further
+// down, which is a better test of it than an incidental pair anyway.
+const boys = plainAllocsFor('M', 'EDC');
+const girls = plainAllocsFor('F', 'EDC');
 const boyA = boys[0].appId, boyB = boys[1].appId, girlA = girls[0].appId;
 console.log('        pair: ' + boyA + ' and ' + boyB +
             ' (both plain rooms, same gender, same campus)');
@@ -165,14 +167,20 @@ console.log('        cross-gender -> "' +
   vCross.checks.find(c => !c.ok).text + '"');
 
 // Two consenting students cannot agree their way past a partition. A swap is
-// the only route by which an allocation changes after the run, so it is the only
-// route by which either partition could be broken after the fact.
-const vCampus = Swap.validate(boyA, edcBoys[0].appId);
-check('a cross-campus swap is refused', !vCampus.ok);
-check('the refusal names the campus check',
-  vCampus.checks.some(c => c.name === 'CAMPUS' && !c.ok));
-console.log('        cross-campus -> "' +
-  vCampus.checks.find(c => c.name === 'CAMPUS').text + '"');
+// the only route by which an allocation changes after the run, so it is the
+// only route by which either partition could be broken after the fact.
+check('a cross-campus swap is refused', (() => {
+  // Move one student to the other campus on paper and re-validate. Seeded data
+  // is one campus, so the pair has to be constructed rather than found.
+  const st = stuById[appById[boyB].studentId];
+  const wasCampus = st.campus;
+  Db.update('Students', st.studentId, { campus: 'DWARKA' });
+  Db.invalidate('Students');
+  const v = Swap.validate(boyA, boyB);
+  Db.update('Students', st.studentId, { campus: wasCampus });
+  Db.invalidate('Students');
+  return !v.ok && v.checks.some(c => c.name === 'CAMPUS' && !c.ok);
+})(), 'a student cannot be moved to a campus they do not attend, by consent or otherwise');
 
 check('a student cannot swap with themselves', !Swap.validate(boyA, boyA).ok);
 check('swapping with an unallotted student is refused', (() => {

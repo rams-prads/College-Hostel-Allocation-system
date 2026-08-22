@@ -83,7 +83,7 @@ const elapsed = Date.now() - t0;
 console.log('        generated in ' + elapsed + ' ms');
 check('generation is fast enough for Apps Script', elapsed < 20000, elapsed + ' ms');
 check('pincode table written', s.pincodePrefixes > 100, s.pincodePrefixes + ' prefixes');
-check('hostels created', s.hostels === 4, s.hostels + '');
+check('hostels created', s.hostels === 2, s.hostels + '');
 check('the EDC boys hostel matches the brochure exactly', (() => {
   const rooms = Db.where('Rooms', { hostelId: 'ED-BH-1' });
   const by = {};
@@ -94,7 +94,7 @@ check('the EDC boys hostel matches the brochure exactly', (() => {
 check('there is no two-seater anywhere',
   Db.readAll('Rooms').every(r => r.roomType !== 'DOUBLE'),
   'the brochure lists single, triple and four-seater only');
-check('students created', s.students === 1400, s.students + '');
+check('students created', s.students === 1000, s.students + '');
 console.log('        ' + s.beds + ' beds / ' + s.rooms + ' rooms / ' + s.hostels + ' hostels');
 console.log('        beds by gender: ' + JSON.stringify(s.bedsByGender));
 console.log('        applicants by gender: ' + JSON.stringify(s.applicantsByGender));
@@ -186,16 +186,53 @@ const pwd = students.filter(x => x.isPwD).length;
 
 check('gender split is roughly 58/42', Math.abs(g.M / students.length - 0.58) < 0.05,
   JSON.stringify(g));
-check('BTech is the largest programme',
-  Object.keys(prog).every(k => prog[k] <= prog.BTech), JSON.stringify(prog));
+// The cohort is drawn in proportion to sanctioned intake, so its shape should
+// reproduce the course table: the dual degree dwarfs everything, the
+// lateral-entry streams are a handful, doctoral numbers are tiny.
+check('the cohort follows the sanctioned intake', (() => {
+  const by = {};
+  students.forEach(x => { by[x.programme] = (by[x.programme] || 0) + 1; });
+  const dual = by['BTMT'] || 0;
+  const lateral = by['LE-BTMT'] || 0;
+  const march = by['MARCH'] || 0;
+  // 480 sanctioned against 48 and 20 respectively.
+  return dual > lateral * 4 && dual > march * 8;
+})(), 'drawing uniformly would give a twelve-seat stream the footprint of a 480-seat one');
+
+check('every programme in the catalogue appears', (() => {
+  const seen = new Set(students.map(x => x.programme));
+  return Catalogue.programmes().every(p => seen.has(p.code));
+})());
+
+check('a branch always belongs to the programme it is under', (() => {
+  return students.every(x => Catalogue.branches(x.programme).indexOf(x.branch) >= 0);
+})());
+
+check('the school is the one that owns the programme', (() => {
+  return students.every(x => x.school === Catalogue.schoolOf(x.programme));
+})(), 'derived, never drawn - two answers that can disagree is one answer too many');
+
+check('a lateral-entry student never has a first year', (() => {
+  return students.filter(x => Catalogue.entryYear(x.programme) === 2)
+    .every(x => Number(x.year) >= 2);
+})(), 'they enter in the second year, on a diploma or a B.Sc');
+
+check('no invented programme survives', (() => {
+  const gone = ['BTech', 'MTech', 'MBA', 'MCA', 'LLB', 'BBA', 'BCA'];
+  return students.every(x => gone.indexOf(x.programme) < 0);
+})());
+
+check('the dual degree is the largest programme, as its intake says it must be',
+  Object.keys(prog).every(k => prog[k] <= prog.BTMT), JSON.stringify(prog));
 check('all five categories present', Object.keys(cat).length === 5, JSON.stringify(cat));
 check('PwD share is roughly 3%', pwd / students.length > 0.01 && pwd / students.length < 0.06,
   (100 * pwd / students.length).toFixed(1) + '%');
 check('merit is a percentage, in range',
   students.every(x => x.meritPercent >= 40 && x.meritPercent <= 99));
-check('a first-year is ranked on class 12, everyone else on their last semester',
-  students.every(x => x.meritBasis === (Number(x.year) <= 1 ? 'CLASS_12' : 'SEMESTER')),
-  'the brochure names both, and they are both percentages so they compare directly');
+check('the entry year of a programme is ranked on the qualifying exam, later years on results',
+  students.every(x => x.meritBasis ===
+    (Number(x.year) <= Catalogue.entryYear(x.programme) ? 'CLASS_12' : 'SEMESTER')),
+  'a lateral entrant has no first year, and entered on a diploma rather than class 12');
 check('most applicants are admitted outside Delhi', (() => {
   const od = students.filter(x => x.residenceCategory === 'OUTSIDE_DELHI').length;
   return od > students.length * 0.5;

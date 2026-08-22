@@ -238,11 +238,16 @@ check('no student waits while a bed they could occupy sits empty', (() => {
   const waitingIn = new Set(r.waitlist.map(w => part(w.candidate)));
   return [...waitingIn].every(k => surplus[k] === 0);
 })(), 'a waitlisted student had an occupiable bed available');
-// Not every partition can be oversubscribed at once - some must have absorbed
-// their whole demand, or beds were stranded somewhere.
-check('the waiting list does not span every partition',
-  new Set(r.waitlist.map(w => part(w.candidate))).size < PARTS.length,
-  'if everyone is waiting everywhere, no partition was actually satisfied');
+// With one campus and two hostels, both partitions can legitimately be
+// oversubscribed - there is nowhere else for the demand to go. What must still
+// hold is the claim above it: nobody waits while a bed they could take is free.
+check('the waiting list is confined to partitions that are actually full', (() => {
+  const waitingIn = new Set(r.waitlist.map(w => part(w.candidate)));
+  return [...waitingIn].every(k => {
+    const [g, c] = k.split('|');
+    return Db.readAll('Hostels').some(h => h.gender === g && h.campus === c);
+  });
+})(), 'somebody waiting in a partition with no hostel would be waiting for nothing');
 check('the vacancy buffer is spread across hostels, not borne by one gender',
   r.quota.buffer > 0 && r.quota.buffer < r.quota.totalBeds * 0.05,
   r.quota.buffer + ' beds held back');

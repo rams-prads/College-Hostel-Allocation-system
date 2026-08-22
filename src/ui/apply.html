@@ -222,15 +222,27 @@
 
   function stepCourse() {
     var prog = REG.programmes.filter(function (p) { return p.code === reg.programme; })[0];
-    var years = [];
-    if (prog) for (var y = 1; y <= prog.years; y++) years.push({ code: y, label: 'Year ' + y });
 
+    // Years run from the programme's own entry year, not from 1. A lateral-entry
+    // student joins in the second year and never has a first, so offering one
+    // would let somebody describe a student who cannot exist.
+    var years = [];
+    if (prog) {
+      for (var y = prog.entryYear; y <= prog.lastYear; y++) {
+        years.push({ code: y, label: 'Year ' + y });
+      }
+    }
+
+    var firstYear = prog ? prog.entryYear : 1;
     var academic = '';
-    if (String(reg.year) === '1') {
-      academic = text('meritPercent', 'Class 12 marks — best five subjects (%)',
+    if (reg.year && Number(reg.year) <= firstYear) {
+      academic = text('meritPercent', 'Qualifying examination (%)',
         { type: 'number', placeholder: 'e.g. 88.4',
-          help: 'The hostel policy ranks first-year applicants on the best five subjects of ' +
-                'class 12, because there is no university result yet.' });
+          help: firstYear > 1
+            ? 'The diploma or B.Sc you entered on. Until you have a university result, it is ' +
+              'what your application is ranked on.'
+            : 'Best five subjects of class 12. The hostel policy ranks applicants in their ' +
+              'first year on this, because there is no university result yet.' });
     } else if (reg.year) {
       academic = text('meritPercent', 'Result up to the preceding semester (%)',
         { type: 'number', placeholder: 'e.g. 76.5',
@@ -410,8 +422,7 @@
           rv('Campus', campusLabel(reg.campus)) +
           rv('Programme', reg.programme + (reg.branch ? ' — ' + reg.branch : '')) +
           rv('Year of study', reg.year ? 'Year ' + reg.year : '') +
-          rv(String(reg.year) === '1' ? 'Class 12 (best five)' : 'Latest result',
-             reg.meritPercent ? reg.meritPercent + '%' : '') +
+          rv('Marks ranked on', reg.meritPercent ? reg.meritPercent + '%' : '') +
           rv('Admission category', label('residence', reg.residenceCategory)) +
           rv('School', reg.school) +
           (reg.parentTransferred ? rv('Parent transferred out of Delhi', 'Yes') : '') +
@@ -460,11 +471,11 @@
       if (!reg.programme) miss.push('your programme');
       if (!reg.branch) miss.push('your branch');
       if (!reg.year) miss.push('your year of study');
-      if (!reg.school) miss.push('your school of studies');
       if (!reg.residenceCategory) miss.push('your admission category');
       if (!(Number(reg.meritPercent) > 0 && Number(reg.meritPercent) <= 100)) {
-        miss.push(String(reg.year) === '1'
-          ? 'your class 12 best-five percentage'
+        var p = REG.programmes.filter(function (x) { return x.code === reg.programme; })[0];
+        miss.push(reg.year && Number(reg.year) <= (p ? p.entryYear : 1)
+          ? 'your qualifying examination percentage'
           : 'your result up to the preceding semester');
       }
       if (!reg.category) miss.push('your category');
@@ -571,7 +582,7 @@
    */
   function ensureOptions() {
     if (!FORM.needsRegistration) return;
-    var key = myGender() + '|' + myCampus();
+    var key = [myGender(), myCampus(), reg.programme, reg.year].join('|');
     if (optionsFor === key && FORM.options) return;
 
     var box = el('options');
@@ -588,7 +599,7 @@
       .withFailureHandler(function (e) {
         if (el('options')) el('options').innerHTML = banner('err', e.message);
       })
-      .apiGetHostelOptions(myGender(), myCampus());
+      .apiGetHostelOptions(myGender(), myCampus(), reg.programme, reg.year);
   }
 
   /* ============================================================== options */

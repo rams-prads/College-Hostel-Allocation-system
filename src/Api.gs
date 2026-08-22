@@ -307,7 +307,7 @@ function apiGetApplyForm() {
     };
   }
 
-  var options = hostelOptions_(s.student.gender, s.student.campus);
+  var options = hostelOptions_(s.student.gender, s.student.campus, s.student);
 
   var existing = s.application;
   var draft = null;
@@ -347,7 +347,14 @@ function roomTypeLabel_(rt) {
  * another campus's hostel any more than in another gender's. Offering an option
  * that can never be granted is worse than offering none.
  */
-function hostelOptions_(gender, campus) {
+function hostelOptions_(gender, campus, student) {
+  // The brochure reserves single rooms for PG and PhD students. An
+  // undergraduate ranking one would be ranking something that can never be
+  // granted, and would then be told a preference was "unavailable" when in
+  // truth it was never theirs to ask for.
+  var singlesAllowed = !Number(Policy.value('capacity', 'SINGLE_ROOM_PG_ONLY', 1)) ||
+    (student && Catalogue.isPgOrPhd(student.programme, student.year));
+
   var rooms = Db.readAll('Rooms');
   var hostels = Db.readAll('Hostels').filter(function (h) {
     return h.active && (h.gender === gender || h.gender === 'CO') &&
@@ -357,6 +364,7 @@ function hostelOptions_(gender, campus) {
   var options = [];
   hostels.forEach(function (h) {
     ['SINGLE', 'TRIPLE', 'QUAD'].forEach(function (rt) {
+      if (rt === 'SINGLE' && !singlesAllowed) return;
       var capacity = rooms.filter(function (r) {
         return r.hostelId === h.hostelId && r.roomType === rt && r.status === 'ACTIVE';
       }).length;
@@ -376,14 +384,16 @@ function hostelOptions_(gender, campus) {
  * read a gender or campus from. Called from the form as soon as they have
  * declared both, so the preference step can be filled in the same sitting.
  */
-function apiGetHostelOptions(gender, campus) {
+function apiGetHostelOptions(gender, campus, programme, year) {
   var s = Auth.session();
   if (!s.email) throw new Error('Please sign in first.');
   // An existing record is authoritative - what the browser sends is not.
-  if (s.student) return hostelOptions_(s.student.gender, s.student.campus);
+  if (s.student) return hostelOptions_(s.student.gender, s.student.campus, s.student);
   if (['M', 'F', 'O'].indexOf(gender) < 0) throw new Error('Select your gender first.');
   if (['DWARKA', 'EDC'].indexOf(campus) < 0) throw new Error('Select your campus first.');
-  return hostelOptions_(gender, campus);
+  // A registrant has no record yet, so the programme they have just declared is
+  // what decides whether a single room is theirs to ask for.
+  return hostelOptions_(gender, campus, { programme: programme, year: year });
 }
 
 /**

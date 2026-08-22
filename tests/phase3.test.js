@@ -82,13 +82,13 @@ const sampleStu = stuById[sampleApp.studentId];
 
 const n = Documents.provision(sampleApp.appId, sampleStu);
 check('provisioning creates a row per required document',
-  n === Documents.requiredFor(sampleStu).length, n + ' rows');
+  n === Documents.requiredFor(sampleStu, sampleApp).length, n + ' rows');
 check('provisioning is idempotent',
   Documents.provision(sampleApp.appId, sampleStu) === 0);
 check('rolls up to PENDING when nothing is uploaded',
   Documents.rollUp(sampleApp.appId, sampleStu) === 'PENDING');
 
-Documents.requiredFor(sampleStu).forEach(d =>
+Documents.requiredFor(sampleStu, sampleApp).forEach(d =>
   Documents.recordUpload(sampleApp.appId, d.docType, 'file-' + d.docType, d.docType + '.pdf'));
 check('rolls up to SUBMITTED once everything is uploaded',
   Documents.rollUp(sampleApp.appId, sampleStu) === 'SUBMITTED');
@@ -110,7 +110,7 @@ section('Apply form API');
 // Dwarka deliberately: it has two women's hostels, so this student is offered
 // more options than MAX_PREFERENCES and the over-length case below is reachable.
 // A single-hostel campus cannot produce one, which is itself worth knowing.
-const target = students.find(s => s.gender === 'F' && s.year >= 2 && s.campus === 'DWARKA');
+const target = students.find(s => s.gender === 'F' && s.year >= 2 && s.campus === 'EDC');
 global.Session = { getActiveUser: () => ({ getEmail: () => target.email }) };
 
 const form = apiGetApplyForm();
@@ -141,7 +141,9 @@ section('Saving an application');
 const myApp = Db.findOne('Applications', { studentId: target.studentId });
 Db.update('Applications', myApp.appId, { status: 'DRAFT' });
 
-const goodPrefs = form.options.slice(0, 3).map(o => o.key);
+// The menu is as long as the room types open to THIS student - two for an
+// undergraduate, three for a PG who may also ask for a single room.
+const goodPrefs = form.options.map(o => o.key);
 const goodLifestyle = {
   sleepTime: 'LATE', wakeTime: 'LATE', studyStyle: 'QUIET', cleanliness: 4,
   sociability: 2, foodPref: 'VEG', language: 'Hindi',
@@ -159,8 +161,10 @@ check('preferences are written in the given order', (() => {
   return JSON.stringify(p) === JSON.stringify(goodPrefs);
 })());
 check('ranks are 1..N contiguous', (() => {
-  const ranks = Db.where('Preferences', { appId: saved.appId }).map(p => p.rank).sort();
-  return JSON.stringify(ranks) === JSON.stringify([1, 2, 3]);
+  const ranks = Db.where('Preferences', { appId: saved.appId })
+    .map(p => p.rank).sort((a, b) => a - b);
+  return JSON.stringify(ranks) ===
+         JSON.stringify(goodPrefs.map((_, i) => i + 1));
 })());
 check('saving does not disturb other applicants\' preferences',
   Db.readAll('Preferences').filter(p => p.appId !== saved.appId).length > 0);
@@ -189,18 +193,19 @@ expectReject('duplicate preferences are rejected', {
 expectReject('submitting with no preferences is rejected', {
   preferences: [], lifestyle: goodLifestyle, submit: true
 });
-// A campus has one hostel per gender and three room types, so the menu is
-// three long and the limit is three. Testing the cap therefore means lowering
-// it rather than inventing choices that do not exist.
-check('the limit matches the menu, so nothing unreachable is offered',
-  Number(Db.cfg('MAX_PREFERENCES', 0)) === form.options.length,
+// One hostel per gender and at most three room types, so the menu is short and
+// the limit must never be shorter than it - a choice offered and then refused
+// for exceeding a cap is a choice that should not have been offered.
+check('the limit is never smaller than the menu',
+  Number(Db.cfg('MAX_PREFERENCES', 0)) >= form.options.length,
   form.options.length + ' options, limit ' + Db.cfg('MAX_PREFERENCES', 0));
 
-Db.setCfg('MAX_PREFERENCES', '2');
+// Testing the cap therefore means lowering it, rather than inventing choices
+// that do not exist.
+Db.setCfg('MAX_PREFERENCES', String(Math.max(goodPrefs.length - 1, 1)));
 Db.invalidate('Config');
 expectReject('more preferences than the limit are rejected', {
-  preferences: form.options.slice(0, 3).map(o => o.key),
-  lifestyle: goodLifestyle, submit: true
+  preferences: goodPrefs, lifestyle: goodLifestyle, submit: true
 });
 Db.setCfg('MAX_PREFERENCES', '3');
 Db.invalidate('Config');
@@ -221,13 +226,18 @@ expectReject('an unknown hostel id is rejected', {
 });
 
 // Campus is a property of admission. A student who could post a preference for
-// the other campus could apply for a hostel they can never be housed in.
-const otherCampusHostel = Db.readAll('Hostels')
-  .find(h => h.gender === target.gender && h.campus !== target.campus);
-expectReject('a hostel at the other campus is rejected even if posted directly', {
-  preferences: [otherCampusHostel.hostelId + '|DOUBLE'],
-  lifestyle: goodLifestyle, submit: true
-});
+// another campus could apply for a hostel they can never be housed in. Seeded
+// data is one campus, so the other one has to be constructed - the rule under
+// test is the server refusing it, not the fixture happening to contain one.
+expectReject('a hostel at another campus is rejected even if posted directly', (() => {
+  const mine = Db.readAll('Hostels').find(h => h.gender === target.gender);
+  Db.update('Hostels', mine.hostelId, { campus: 'DWARKA' });
+  Db.invalidate('Hostels');
+  return { preferences: [mine.hostelId + '|TRIPLE'],
+           lifestyle: goodLifestyle, submit: true };
+})());
+Db.readAll('Hostels').forEach(h => Db.update('Hostels', h.hostelId, { campus: 'EDC' }));
+Db.invalidate('Hostels');
 check('the application records the campus from the student record, not the browser',
   Db.byId('Applications', saved.appId).campus === target.campus);
 
