@@ -222,6 +222,18 @@ check('only the student\'s own campus appears in the options', (() => {
   return r.screen.indexOf(mine) > 0 && r.screen.split(other).length - 1 === 0;
 })(), 'offering an option that can never be granted is worse than offering none');
 
+section('Document upload');
+r = renderPage('student.html', studentEmail);
+check('the documents card offers an upload control', r.screen.indexOf('Upload') > 0,
+  'the endpoint existed but nothing on any page called it');
+check('a file input is present for a required document',
+  r.screen.indexOf('type=\"file\"') > 0);
+check('the accept list matches what the server allows',
+  r.screen.indexOf('.pdf,.jpg,.jpeg,.png,.heic,.webp') > 0,
+  'offering a file type the server refuses wastes the upload');
+check('the size limit is stated before the upload, not after',
+  r.screen.indexOf('8 MB') > 0);
+
 section('Identity verification - the student side');
 r = renderPage('student.html', studentEmail);
 check('the identity card is present', r.screen.indexOf('Identity verification') > 0);

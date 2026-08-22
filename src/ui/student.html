@@ -235,19 +235,98 @@
   }
 
   /* -------------------------------------------------------- documents */
+
+  /** Extensions the server will accept, and the type it files them under. */
+  var UPLOAD_TYPES = {
+    pdf:'application/pdf', jpg:'image/jpeg', jpeg:'image/jpeg',
+    png:'image/png', heic:'image/heic', webp:'image/webp'
+  };
+
   function documentsCard(v) {
     if (!v.documents || !v.documents.length) return '';
     var rows = v.documents.map(function (d) {
       var kind = { VERIFIED:'ok', UPLOADED:'info', REJECTED:'bad',
                    WAIVED:'ok', REQUIRED:'warn' }[d.status] || 'warn';
+
+      // A verified document is finished. Everything else can still be sent or
+      // replaced - a rejected one especially, since being told to resubmit with
+      // no way to resubmit is the worst version of this screen.
+      var canSend = d.status !== 'VERIFIED' && d.status !== 'WAIVED';
+      var act = canSend
+        ? '<input type="file" id="f-' + esc(d.docType) + '" style="display:none" ' +
+          'accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" ' +
+          'onchange="uploadDoc(&quot;' + esc(d.docType) + '&quot;,this)">' +
+          '<button class="btn ghost sm" onclick="pickFile(&quot;' + esc(d.docType) + '&quot;)">' +
+          (d.status === 'UPLOADED' ? 'Replace' : 'Upload') + '</button>'
+        : '';
+
       return '<li>' +
         '<span class="body"><span class="n">' + esc(d.label) + '</span>' +
         '<span class="d">' + esc(d.hint) + '</span>' +
         '<span class="why">' + esc(d.why) + '</span>' +
+        (d.fileName ? '<span class="d">Sent: ' + esc(d.fileName) + '</span>' : '') +
         (d.note ? '<span class="d" style="color:var(--bad)">' + esc(d.note) + '</span>' : '') +
-        '</span>' + pill(kind, label('doc', d.status)) + '</li>';
+        '<span class="d" id="u-' + esc(d.docType) + '"></span>' +
+        '</span>' +
+        '<span style="display:flex;gap:8px;align-items:center">' +
+        pill(kind, label('doc', d.status)) + act + '</span></li>';
     }).join('');
-    return card('Documents required of you', '<ul class="rows">' + rows + '</ul>', { tight: true });
+
+    return card('Documents required of you',
+      '<ul class="rows">' + rows + '</ul>' +
+      '<p class="small muted" style="margin:12px 0 0">PDF or a clear photo, up to 8 MB each. ' +
+      'These are what the hostel office checks your declared details against.</p>',
+      { tight: true });
+  }
+
+  function pickFile(docType) {
+    var input = el('f-' + docType);
+    if (input) input.click();
+  }
+
+  function uploadDoc(docType, input) {
+    var file = input && input.files && input.files[0];
+    var status = el('u-' + docType);
+    if (!file) return;
+
+    function say(text, bad) {
+      if (status) status.innerHTML = '<span style="color:var(--' + (bad ? 'bad' : 'muted') +
+        ')">' + esc(text) + '</span>';
+    }
+
+    // Checked here so an 8 MB round trip is not spent to be told no. The server
+    // checks all of it again - this is a courtesy, not the gate.
+    var ext = String(file.name).split('.').pop().toLowerCase();
+    var mime = file.type || UPLOAD_TYPES[ext] || '';
+    if (!UPLOAD_TYPES[ext]) {
+      say('Upload a PDF or a photo (JPG, PNG, HEIC, WEBP).', true);
+      input.value = '';
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      say('That file is ' + Math.round(file.size / 1048576) + ' MB. The limit is 8 MB.', true);
+      input.value = '';
+      return;
+    }
+
+    say('Uploading\u2026');
+    var reader = new FileReader();
+    reader.onerror = function () { say('That file could not be read.', true); };
+    reader.onload = function () {
+      // readAsDataURL gives "data:<mime>;base64,<payload>" - the server wants
+      // only the payload.
+      var b64 = String(reader.result).split(',')[1] || '';
+      google.script.run
+        .withSuccessHandler(function () { window.top.location.reload(); })
+        .withFailureHandler(function (e) { say(e.message, true); input.value = ''; })
+        .apiUploadDocument({
+          docType: docType,
+          fileName: file.name,
+          mimeType: UPLOAD_TYPES[ext] || mime,
+          bytes: b64
+        });
+    };
+    reader.readAsDataURL(file);
   }
 
   /* --------------------------------------------------------- identity */
