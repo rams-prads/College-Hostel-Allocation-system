@@ -316,7 +316,12 @@ var SCHEMA = {
       { name: 'sizeBytes',  type: T.INT },
       // SHA-256 of the uploaded bytes. Two applications holding a byte-identical
       // document is one of the few decisive fraud signals available offline.
-      { name: 'contentHash', type: T.STR }
+      { name: 'contentHash', type: T.STR },
+      // What reading the document said about the declaration. See DocScan.gs.
+      { name: 'scanVerdict', type: T.ENUM,
+        values: ['UNSCANNED', 'MATCH', 'MINOR', 'CONFLICT', 'UNREADABLE'] },
+      { name: 'scanJson',    type: T.JSON },
+      { name: 'scannedAt',   type: T.DATE }
     ]
   },
 

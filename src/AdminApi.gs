@@ -143,6 +143,128 @@ function apiAdminDemoLink(appId, hours) {
 }
 
 /**
+ * Read every document that has not been read yet.
+ *
+ * Batched, because OCR takes seconds per file and Apps Script stops a script at
+ * six minutes. Returns how many are left so the caller can simply call again -
+ * a resumable loop is more honest than a progress bar over a job that might be
+ * killed halfway.
+ */
+function apiAdminScanDocuments(batch) {
+  Auth.requireAdmin();
+  batch = Math.min(Number(batch) || 25, 60);
+
+  var stu = Db.indexBy('Students', 'studentId');
+  var apps = Db.indexBy('Applications', 'appId');
+
+  var pending = Db.readAll('Documents').filter(function (d) {
+    return d.driveFileId && (!d.scanVerdict || d.scanVerdict === 'UNSCANNED');
+  });
+
+  var done = 0, tally = {};
+  pending.slice(0, batch).forEach(function (d) {
+    var app = apps[d.appId];
+    var student = app ? stu[app.studentId] : null;
+    if (!student) return;
+    try {
+      var v = Documents.scanIfNeeded(d, student, false);
+      if (v) { tally[v] = (tally[v] || 0) + 1; done++; }
+    } catch (e) { /* one unreadable file must not stop the batch */ }
+  });
+
+  return { scanned: done, remaining: Math.max(pending.length - done, 0), byVerdict: tally };
+}
+
+/**
+ * How much of the queue actually needs a person.
+ *
+ * This is the number the whole feature exists to move. An officer who has to
+ * open five hundred scans before a run will not do it, and the declaration goes
+ * unchecked - which is the situation this replaced.
+ */
+function apiAdminVerificationSummary() {
+  Auth.requireAdmin();
+  var docs = Db.readAll('Documents').filter(function (d) { return d.driveFileId; });
+
+  var byVerdict = { MATCH: 0, MINOR: 0, CONFLICT: 0, UNREADABLE: 0, UNSCANNED: 0 };
+  docs.forEach(function (d) {
+    var v = d.scanVerdict || 'UNSCANNED';
+    byVerdict[v] = (byVerdict[v] || 0) + 1;
+  });
+
+  var needsPerson = docs.filter(function (d) {
+    return d.status === 'UPLOADED' &&
+           (d.scanVerdict === 'CONFLICT' || d.scanVerdict === 'UNREADABLE');
+  }).length;
+
+  var clearable = docs.filter(function (d) {
+    return d.status === 'UPLOADED' && (d.scanVerdict === 'MATCH' || d.scanVerdict === 'MINOR');
+  }).length;
+
+  return {
+    total: docs.length,
+    byVerdict: byVerdict,
+    needsPerson: needsPerson,
+    clearable: clearable,
+    unscanned: byVerdict.UNSCANNED || 0
+  };
+}
+
+/**
+ * Mark every document that agrees with its declaration as verified.
+ *
+ * Deliberately an explicit action, not something an upload does by itself.
+ * Somebody has to decide that reading the document is good enough for the clean
+ * cases, and that decision is recorded per document with a machine verifier name
+ * so nobody later mistakes it for a person having looked.
+ *
+ * Only MATCH and MINOR. A conflict, an unreadable scan and an unread document
+ * all stay exactly where they are.
+ */
+function apiAdminAutoClear() {
+  var s = Auth.requireAdmin();
+
+  var stu = Db.indexBy('Students', 'studentId');
+  var apps = Db.indexBy('Applications', 'appId');
+  var cleared = 0, touchedApps = {};
+
+  Db.readAll('Documents').forEach(function (d) {
+    if (d.status !== 'UPLOADED') return;
+    if (d.scanVerdict !== 'MATCH' && d.scanVerdict !== 'MINOR') return;
+
+    // Never clear an application that screening has flagged, whatever the
+    // document says. A reused Aadhaar is not made acceptable by a tidy scan.
+    var risk;
+    try { risk = Identity.screen(d.appId); } catch (e) { return; }
+    if (risk.level === 'HIGH') return;
+
+    Documents.decide(d.docId, true, 'AUTOMATIC (document matched declaration)',
+      d.scanVerdict === 'MINOR'
+        ? 'Read automatically. The PIN code differs from the declaration but not by ' +
+          'enough to change eligibility or the merit score.'
+        : 'Read automatically. The document confirms the declared PIN code and name.');
+    cleared++;
+    touchedApps[d.appId] = true;
+  });
+
+  Object.keys(touchedApps).forEach(function (appId) {
+    var app = apps[appId];
+    var student = app ? stu[app.studentId] : null;
+    if (student) {
+      Db.update('Applications', appId, {
+        docStatus: Documents.rollUp(appId, student), updatedAt: new Date()
+      });
+    }
+  });
+
+  Ledger.append('DOCUMENTS_AUTO_CLEARED', {
+    count: cleared, applications: Object.keys(touchedApps).length
+  }, s.email);
+
+  return { cleared: cleared, applications: Object.keys(touchedApps).length };
+}
+
+/**
  * The document verification queue.
  *
  * Ordered by risk, not by arrival. Four hundred applications reviewed in upload
@@ -150,15 +272,23 @@ function apiAdminDemoLink(appId, hours) {
  * four hundred clean ones. Each entry carries the automated findings, so the
  * verifier opens the scan already knowing what to look for.
  */
-function apiAdminDocQueue(limit) {
+function apiAdminDocQueue(limit, onlyConflicts) {
   Auth.requireAdmin();
   limit = limit || 40;
+  onlyConflicts = onlyConflicts !== false;      // default: only what needs a person
   var stu = Db.indexBy('Students', 'studentId');
   var apps = Db.indexBy('Applications', 'appId');
   var screened = {};
 
   var rows = Db.readAll('Documents')
     .filter(function (d) { return d.status === 'UPLOADED'; })
+    // Anything the machine could settle is not the officer's problem. Without
+    // this the queue is still every applicant and nothing has been gained.
+    .filter(function (d) {
+      if (!onlyConflicts) return true;
+      return d.scanVerdict === 'CONFLICT' || d.scanVerdict === 'UNREADABLE' ||
+             !d.scanVerdict || d.scanVerdict === 'UNSCANNED';
+    })
     .map(function (d) {
       var app = apps[d.appId];
       var student = app ? stu[app.studentId] : null;
@@ -184,7 +314,8 @@ function apiAdminDocQueue(limit) {
         identityStatus: idRow ? idRow.status : 'REQUIRED',
         riskScore: risk.score,
         riskLevel: risk.level,
-        findings: risk.findings,
+        findings: (risk.findings || []).concat(scanFindings_(d)),
+        scanVerdict: d.scanVerdict || 'UNSCANNED',
         uploadedAt: fmtDate_(d.uploadedAt)
       };
     });
@@ -257,6 +388,16 @@ function apiAdminDecideIdentity(studentId, approve, note) {
     try { Identity.rescreen(app.appId); } catch (e) { /* advisory */ }
   }
   return result;
+}
+
+/** What reading the document concluded, as findings the queue can render. */
+function scanFindings_(doc) {
+  var s = doc.scanJson;
+  if (!s) return [];
+  if (typeof s === 'string') {
+    try { s = JSON.parse(s); } catch (e) { return []; }
+  }
+  return (s && s.findings) || [];
 }
 
 /** Approve or reject one document. */

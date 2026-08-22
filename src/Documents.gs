@@ -100,7 +100,8 @@ var Documents = (function () {
           status: 'REQUIRED',
           driveFileId: '', fileName: '',
           uploadedAt: '', verifiedBy: '', verifiedAt: '', note: '',
-          mimeType: '', sizeBytes: 0, contentHash: ''
+          mimeType: '', sizeBytes: 0, contentHash: '',
+          scanVerdict: 'UNSCANNED', scanJson: null, scannedAt: ''
         };
       });
 
@@ -159,9 +160,33 @@ var Documents = (function () {
       fileName: fileName || '', uploadedAt: new Date(),
       mimeType: meta.mimeType || '',
       sizeBytes: Number(meta.sizeBytes) || 0,
-      contentHash: meta.contentHash || ''
+      contentHash: meta.contentHash || '',
+      // A replacement invalidates whatever the previous file said.
+      scanVerdict: 'UNSCANNED', scanJson: null, scannedAt: ''
     });
     return row.docId;
+  }
+
+  /**
+   * Store what reading the document concluded. Advisory: it never changes the
+   * document's own status, which stays a decision somebody made.
+   */
+  function recordScan(docId, result) {
+    Db.update('Documents', docId, {
+      scanVerdict: result.verdict,
+      scanJson: { findings: result.findings || [], detail: result.detail || {} },
+      scannedAt: new Date()
+    });
+    return result.verdict;
+  }
+
+  /** Scan one document if it has a file and has not been read yet. */
+  function scanIfNeeded(doc, student, force) {
+    if (!doc || !doc.driveFileId) return null;
+    if (!force && doc.scanVerdict && doc.scanVerdict !== 'UNSCANNED') return doc.scanVerdict;
+    var result = DocScan.checkDocument(doc, student);
+    recordScan(doc.docId, result);
+    return result.verdict;
   }
 
   /** Verifier decision. Writes to the ledger - document checks are auditable. */
@@ -183,6 +208,8 @@ var Documents = (function () {
     statusFor: statusFor,
     rollUp: rollUp,
     recordUpload: recordUpload,
+    recordScan: recordScan,
+    scanIfNeeded: scanIfNeeded,
     decide: decide
   };
 })();

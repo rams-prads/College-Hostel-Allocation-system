@@ -280,6 +280,15 @@ check('summary tiles are present', r.screen.indexOf('Rooms allotted') > 0);
 check('ledger status is present', r.screen.indexOf('Audit ledger') > 0);
 check('occupancy table is present', r.screen.indexOf('Occupancy') > 0);
 
+section('Document reading is on the dashboard');
+r = renderPage('admin.html', 'admin@ipu.ac.in');
+check('the reading summary renders', r.screen.indexOf('Document reading') > 0);
+check('it states what is actually compared',
+  r.screen.indexOf('PIN code compared') > 0,
+  'an officer should know what the machine checked and what it did not');
+check('it says a difference is only raised when it matters',
+  r.screen.indexOf('change') > 0 && r.screen.indexOf('outcome') > 0);
+
 section('Identity verification - the admin side');
 r = renderPage('admin.html', 'admin@ipu.ac.in');
 check('the verification section is on the dashboard',

@@ -466,7 +466,13 @@ function seedPolicy_() {
     ['POL-ID-MAXMB',   'identity', 'MAX_UPLOAD_MB',     8,
      'Largest document a student may upload'],
     ['POL-ID-RATE',    'identity', 'MAX_UPLOADS_PER_HOUR', 20,
-     'Upload attempts allowed per applicant per hour']
+     'Upload attempts allowed per applicant per hour'],
+
+    // How far the PIN code on a document may sit from the declared one before
+    // the difference is treated as material rather than clerical. Raising it
+    // means fewer things reach a person, and more misdeclarations go unseen.
+    ['POL-ELG-ADDRTOL', 'eligibility', 'ADDRESS_TOLERANCE_KM', 50,
+     'Distance difference between declared and documented PIN that is worth raising']
   ];
 
   Db.appendMany('Policy', rows.map(function (r) {

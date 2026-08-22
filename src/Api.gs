@@ -588,11 +588,18 @@ function apiUploadDocument(payload) {
     docFolderUrl: folder.getUrl()
   });
 
-  // Re-screen now, so the verifier sees the consequences of this upload rather
-  // than a stale assessment made before it arrived.
+  // Read it straight away. A few seconds here saves the applicant discovering a
+  // mismatch weeks later, and saves an officer opening the file at all when it
+  // agrees with what was declared.
+  var verdict = null;
+  try {
+    var slotRow = Db.findOne('Documents', { appId: s.application.appId, docType: payload.docType });
+    verdict = Documents.scanIfNeeded(slotRow, s.student, true);
+  } catch (e) { /* reading is advisory; the upload itself succeeded */ }
+
   try { Identity.rescreen(s.application.appId); } catch (e) { /* screening is advisory */ }
 
-  return { ok: true, fileName: safeName };
+  return { ok: true, fileName: safeName, scanVerdict: verdict };
 }
 
 // ============================================================ identity

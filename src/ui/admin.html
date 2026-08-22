@@ -57,6 +57,7 @@
       sect('Policy'),
       '<div id="simCard"></div>',
       sect('Verification', 'ordered by risk, not by arrival'),
+      '<div id="scanCard"></div>',
       '<div id="idCard"></div>',
       sect('Requests'),
       '<div id="grievCard"></div>',
@@ -65,7 +66,91 @@
       operationsCard(d)
     ].join('');
 
-    loadSimulator(); loadGrievances(); loadSwaps(); loadIdentity();
+    loadSimulator(); loadGrievances(); loadSwaps(); loadIdentity(); loadScans();
+  }
+
+  /* -------------------------------------------------- document reading */
+  function loadScans() {
+    srv().withSuccessHandler(paintScans)
+      .withFailureHandler(function () { el('scanCard').innerHTML = ''; })
+      .apiAdminVerificationSummary();
+  }
+
+  function paintScans(s) {
+    if (!s || !s.total) {
+      // Say what this will do before there is anything to do it to. An officer
+      // meeting the panel for the first time should learn what the machine
+      // checks and what it leaves to them.
+      el('scanCard').innerHTML = card('Document reading',
+        '<p class="small muted" style="margin:0">No documents have been uploaded yet. ' +
+        'When they are, each address proof is read and its PIN code compared with the ' +
+        'one declared &mdash; that is the field distance and eligibility are computed ' +
+        'from. A difference is only raised when it would change the outcome; everything ' +
+        'else is recorded and left alone.</p>');
+      return;
+    }
+    var v = s.byVerdict || {};
+    var settled = (v.MATCH || 0) + (v.MINOR || 0);
+
+    el('scanCard').innerHTML = card('Document reading',
+      '<p class="small muted" style="margin:0 0 14px">Each address proof is read and its ' +
+      'PIN code compared with the one declared &mdash; that is the field distance and ' +
+      'eligibility are computed from. A difference is only raised when it would change ' +
+      'the outcome.</p>' +
+      '<div class="tiles" style="margin-bottom:14px">' +
+        tile(s.total, 'Documents held', '') +
+        tile(settled, 'Agree with the declaration', settled ? 'good' : '') +
+        tile(v.CONFLICT || 0, 'Contradict it', (v.CONFLICT ? 'hi' : '')) +
+        tile(v.UNREADABLE || 0, 'Could not be read', (v.UNREADABLE ? 'hi' : '')) +
+        tile(s.unscanned, 'Not read yet', s.unscanned ? 'hi' : '') +
+      '</div>' +
+      '<div class="status ' + (s.needsPerson ? 'warn' : 'good') + '">' +
+        '<div class="sic">' + (s.needsPerson ? '!' : '&#10003;') + '</div>' +
+        '<div><div class="t">' + (s.needsPerson
+          ? s.needsPerson + ' document' + (s.needsPerson === 1 ? '' : 's') + ' need you'
+          : 'Nothing is waiting on a person') + '</div>' +
+        '<div class="s">' + (s.needsPerson
+          ? 'Out of ' + s.total + '. The rest either agree with what was declared or ' +
+            'differ by too little to matter.'
+          : 'Every document held has been read and agrees with its declaration.') +
+        '</div></div></div>' +
+      '<div class="btn-row" style="margin-top:13px">' +
+        (s.unscanned
+          ? '<button class="btn" onclick="runScans()">Read ' + s.unscanned + ' document' +
+            (s.unscanned === 1 ? '' : 's') + '</button>' : '') +
+        (s.clearable
+          ? '<button class="btn ghost" onclick="autoClear()">Clear the ' + s.clearable +
+            ' that agree</button>' : '') +
+      '</div><div id="scanMsg"></div>');
+  }
+
+  function runScans() {
+    el('scanMsg').innerHTML = '<div class="hint"><span class="spin"></span> ' +
+      'Reading documents. This takes a few seconds each and continues in batches.</div>';
+    srv().withSuccessHandler(function (r) {
+        el('scanMsg').innerHTML = banner(r.remaining ? 'info' : 'good',
+          'Read ' + r.scanned + '. ' + (r.remaining
+            ? r.remaining + ' still to go — press the button again to continue.'
+            : 'All documents have now been read.'));
+        loadScans();
+      })
+      .withFailureHandler(function (e) { el('scanMsg').innerHTML = banner('err', e.message); })
+      .apiAdminScanDocuments(25);
+  }
+
+  function autoClear() {
+    if (!window.confirm('Mark every document that agrees with its declaration as verified?\n\n' +
+        'Conflicts and unreadable scans are left alone. Each one is recorded as a machine ' +
+        'decision, not a person\u2019s.')) return;
+    el('scanMsg').innerHTML = loadingState('Clearing');
+    srv().withSuccessHandler(function (r) {
+        el('scanMsg').innerHTML = banner('good',
+          'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
+          ' across ' + r.applications + ' application' + (r.applications === 1 ? '' : 's') + '.');
+        loadScans(); load();
+      })
+      .withFailureHandler(function (e) { el('scanMsg').innerHTML = banner('err', e.message); })
+      .apiAdminAutoClear();
   }
 
   /* ---------------------------------------------------- verification */
