@@ -31,7 +31,11 @@ function apiCall(sessionToken, fnName, args) {
   }
   if (fnName === 'apiCall') throw new Error('Unknown operation.');
 
-  var fn = this[fnName];
+  // globalThis, not `this`. Apps Script does not guarantee what `this` is bound
+  // to inside a function the google.script.run bridge invoked, and a dispatcher
+  // that resolves nothing would break every call on the site at once.
+  var scope = (typeof globalThis !== 'undefined') ? globalThis : this;
+  var fn = scope[fnName];
   if (typeof fn !== 'function') throw new Error('Unknown operation.');
 
   Auth.useToken(sessionToken);
@@ -130,7 +134,15 @@ function apiGetStudentView(asAppId, demoToken) {
                campus: h ? h.campus : '', roomType: p.roomType };
     });
   view.documents = Documents.statusFor(app.appId, st);
-  view.identity = Identity.statusFor(st.studentId);
+  // A sheet created before the Identity tab existed has no Identity tab. That is
+  // a setup step outstanding, not a reason to fail the whole dashboard - the
+  // student would see a spinner and have no idea why.
+  try {
+    view.identity = Identity.statusFor(st.studentId);
+  } catch (e) {
+    view.identity = null;
+    view.setupWarning = 'Identity verification is not available yet: ' + e.message;
+  }
 
   var alloc = Db.findOne('Allocations', { appId: app.appId });
   if (alloc && alloc.status === 'ACTIVE') {

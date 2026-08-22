@@ -33,7 +33,11 @@ var Db = (function () {
 
   function sheet(tab) {
     var sh = ss().getSheetByName(tab);
-    if (!sh) throw new Error('Db: missing sheet "' + tab + '". Run createDatabase() first.');
+    if (!sh) {
+      // Name the fix, not just the fault. This message reaches students.
+      throw new Error('The "' + tab + '" sheet does not exist yet. An administrator ' +
+                      'needs to run setupEverything() once in the Apps Script editor.');
+    }
     return sh;
   }
 

@@ -26,6 +26,23 @@ function saveToken(t) {
   } catch (e) { /* the in-memory copy still carries this page load */ }
 }
 
+/**
+ * Show a failure the user can act on, wherever the page happens to be.
+ *
+ * Written to #msg if the page has one, otherwise over #root - never nowhere.
+ */
+function showFailure(message, detail) {
+  var box = el('msg') || el('root');
+  if (!box) return;
+  var body = banner('err', message) +
+    (detail ? '<details class="tech"><summary>Technical detail</summary>' +
+              '<pre class="small" style="white-space:pre-wrap;margin:0">' + esc(detail) +
+              '</pre></details>' : '');
+  if (el('msg')) box.innerHTML = body; else box.innerHTML = body;
+}
+
+var CALL_TIMEOUT_MS = 25000;
+
 function srv() {
   var ok = null, fail = null;
 
@@ -39,10 +56,52 @@ function srv() {
       if (prop === 'withFailureHandler') return function (h) { fail = h; return proxy; };
       return function () {
         var args = Array.prototype.slice.call(arguments);
+        var name = String(prop);
+        var settled = false;
+
+        // A page that is only ever going to show a spinner should say so. Without
+        // this, a call that never comes back is indistinguishable from one that
+        // is merely slow, and the user waits forever on a screen with no
+        // information at all.
+        var timer = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          showFailure('This is taking longer than it should. The server has not ' +
+                      'answered in 25 seconds. Reload the page; if it keeps happening, ' +
+                      'the deployment may be serving an older version of the code.',
+                      name);
+        }, CALL_TIMEOUT_MS);
+
+        function done() { settled = true; clearTimeout(timer); }
+
         var r = google.script.run;
-        if (ok) r = r.withSuccessHandler(ok);
-        if (fail) r = r.withFailureHandler(fail);
-        return r.apiCall(SESSION.token, String(prop), args);
+
+        // An exception thrown INSIDE a success handler is caught by nobody:
+        // google.script.run does not route it to the failure handler, and the
+        // page is left on whatever it was showing - almost always a spinner.
+        // Every stuck-loading screen in this project has been that. Catch it here
+        // once, so no handler anywhere has to remember to.
+        r = r.withSuccessHandler(function (result) {
+          done();
+          if (!ok) return;
+          try {
+            ok(result);
+          } catch (e) {
+            showFailure('The page could not display what the server sent back. ' +
+                        'This is a fault in the portal, not in anything you did.',
+                        name + ': ' + (e && e.message ? e.message : String(e)));
+          }
+        });
+
+        r = r.withFailureHandler(function (e) {
+          done();
+          if (fail) {
+            try { fail(e); return; } catch (inner) { /* fall through to the banner */ }
+          }
+          showFailure(e && e.message ? e.message : 'The server returned an error.', name);
+        });
+
+        return r.apiCall(SESSION.token, name, args);
       };
     }
   });

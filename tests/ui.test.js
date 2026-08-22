@@ -71,7 +71,13 @@ function freshDom() {
   };
   global.confirm = () => true;
   global.prompt = () => 'a reason';
-  global.setTimeout = (fn) => { try { fn(); } catch (e) {} return 0; };
+  // Short delays are deferred paints and should run; long ones are timeouts
+  // waiting on a server that, in this harness, has already answered. Firing
+  // those immediately would have every page render its own timeout banner.
+  global.setTimeout = (fn, ms) => {
+    if (!ms || ms < 1000) { try { fn(); } catch (e) {} }
+    return 0;
+  };
   global.clearTimeout = () => {};
   return nodes;
 }
@@ -320,6 +326,55 @@ check('no page still tells the visitor to go and be signed in elsewhere', (() =>
   return ['student.html', 'apply.html', 'index.html'].every(f =>
     fs.readFileSync(path.join(UI, f), 'utf8').indexOf('while signed in') < 0);
 })(), 'that instruction was never actionable from inside the page');
+
+section('A page must never be left on a spinner');
+
+// google.script.run does NOT route an exception thrown inside a success handler
+// to the failure handler. It goes nowhere, and the page keeps showing whatever
+// it had - in every case here, a loading spinner. That is not a hypothetical:
+// it is what a submitted application looked like from the outside.
+check('a throwing success handler surfaces an error', (() => {
+  const nodes = freshDom();
+  global.Session = { getActiveUser: () => ({ getEmail: () => studentEmail }) };
+  global.google = makeRunner([]);
+  (0, eval)(CHROME);
+  document.getElementById('root').innerHTML = '<div>loading</div>';
+
+  // A handler that throws, exactly as a rendering bug would.
+  srv().withSuccessHandler(function () { throw new Error('boom while rendering'); })
+       .apiWhoAmI();
+
+  const screen = Object.keys(nodes).map(k => nodes[k].innerHTML || '').join('');
+  return screen.indexOf('could not display') > 0 && screen.indexOf('boom while rendering') > 0;
+})(), 'otherwise the user waits forever with nothing to report');
+
+check('a server error still reaches the page when no handler was attached', (() => {
+  const nodes = freshDom();
+  global.Session = { getActiveUser: () => ({ getEmail: () => '' }) };
+  global.google = makeRunner([]);
+  (0, eval)(CHROME);
+  document.getElementById('root').innerHTML = '<div>loading</div>';
+
+  srv().apiRequestSignInCode('not-an-email');     // throws server-side
+
+  const screen = Object.keys(nodes).map(k => nodes[k].innerHTML || '').join('');
+  return screen.indexOf('banner err') > 0;
+})(), 'a call with no failure handler used to fail silently');
+
+check('a slow call eventually says so', (() => {
+  const nodes = freshDom();
+  // Run the long timer this time, and never answer.
+  global.setTimeout = (fn) => { try { fn(); } catch (e) {} return 0; };
+  global.google = { script: { run: new Proxy({}, {
+    get: () => function () { return this; }        // accepts the call, never replies
+  }) } };
+  (0, eval)(CHROME);
+  document.getElementById('root').innerHTML = '<div>loading</div>';
+  try { srv().withSuccessHandler(function () {}).apiWhoAmI(); } catch (e) { /* stub */ }
+
+  const screen = Object.keys(nodes).map(k => nodes[k].innerHTML || '').join('');
+  return screen.indexOf('taking longer') > 0;
+})(), 'a spinner with no deadline is indistinguishable from a hang');
 
 section('The session shim');
 const chromeSrcAuth = fs.readFileSync(path.join(UI, 'chrome.html'), 'utf8');
