@@ -190,7 +190,11 @@ var SCHEMA = {
       { name: 'quotaUsed',   type: T.STR },
       { name: 'reasonCodes', type: T.JSON },
       { name: 'compatScore', type: T.NUM },
-      { name: 'status',      type: T.ENUM, values: ['ACTIVE', 'SUPERSEDED', 'CANCELLED'] }
+      { name: 'status',      type: T.ENUM, values: ['ACTIVE', 'SUPERSEDED', 'CANCELLED'] },
+      // Appended. Where the generated letter ended up, so a second press of
+      // "generate" skips it instead of building the whole file again.
+      { name: 'letterUrl',   type: T.STR },
+      { name: 'letterAt',    type: T.DATE }
     ]
   },
 

@@ -288,6 +288,16 @@ function htmlMessage_(title, body) {
  * template that throws renders an empty frame rather than an error - which is
  * indistinguishable, from the outside, from the page simply not working.
  */
+/**
+ * The crest to show in the masthead, from Config.
+ *
+ * Read here rather than hard-coded so the real emblem can be swapped in by
+ * editing one cell, with no push and no redeploy.
+ */
+function logoUrl() {
+  try { return String(Db.cfg('LOGO_URL', '') || ''); } catch (e) { return ''; }
+}
+
 function webAppUrl() {
   try {
     return ScriptApp.getService().getUrl() || '';

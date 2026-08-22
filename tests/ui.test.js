@@ -129,6 +129,7 @@ function scriptOf(file) {
     .replace(/<\?=\s*webAppUrl\(\)\s*\?>/g, 'https://script.example/exec')
     // Server-side conditionals that resolve to a plain string, not an object.
     .replace(/<\?=\s*\(typeof[\s\S]*?\?>/g, '')
+    .replace(/<\?=\s*logoUrl\(\)\s*\?>/g, '')
     .replace(/<\?!?=[\s\S]*?\?>/g, '({})');
 }
 
@@ -338,6 +339,58 @@ check('the full number is not in the admin page either',
 check('verify and reject are both offered',
   r.screen.indexOf('&gt;Verify&lt;') > 0 || r.screen.indexOf('>Verify<') > 0);
 
+section('Grievances can be closed, not only read');
+
+(function () {
+  // A grievance the automatic check could not settle, so it is waiting on a
+  // person - which is the only kind the queue is for.
+  const wl = Db.readAll('Waitlist')[0];
+  global.Session = { getActiveUser: () => ({ getEmail: () => 'admin@ipu.ac.in' }) };
+  const t = Grievance.raise(wl.appId, 'My rank was good and I got no room at all', 'student');
+  Db.update('Grievances', t.ticketId, { status: 'ESCALATED' });
+  Db.invalidate('Grievances');
+
+  let rr = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("requests");');
+  check('the grievance is shown in full, not truncated in a table',
+    rr.screen.indexOf('My rank was good and I got no room at all') > 0);
+  check('it offers a way to close it', rr.screen.indexOf('Mark resolved') > 0,
+    'the inbox was read-only, so a resolved complaint stayed open forever');
+  check('and a way to open the student it is about',
+    rr.screen.indexOf('Open their portal') > 0);
+  check('the count says what is waiting on a person',
+    rr.screen.indexOf('waiting on you') > 0);
+
+  // Close it the way the button does.
+  apiAdminResolveGrievance(t.ticketId, 'Checked the run; the outcome was correct.');
+
+  rr = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("requests");');
+  check('a resolved complaint leaves the waiting list',
+    rr.screen.indexOf('Nothing is waiting on you') > 0);
+  check('and is still readable, with what was done',
+    rr.screen.indexOf('already settled') > 0 &&
+    rr.screen.indexOf('the outcome was correct') > 0);
+  check('the student is told the same words', (() => {
+    const g = Db.byId('Grievances', t.ticketId);
+    return g.status === 'RESOLVED' && /outcome was correct/.test(g.resolution);
+  })());
+})();
+
+section('The lifecycle is spelled out, in order');
+r = renderPage('admin.html', 'admin@ipu.ac.in');
+check('the overview shows how a place is allotted',
+  r.screen.indexOf('How a place is allotted') > 0,
+  'everything needed was on the page; the order was not');
+check('every stage is named', ['Students apply', 'Documents are checked',
+  'Allocation runs', 'Letters and notices go out'].every(t => r.screen.indexOf(t) > 0));
+check('exactly one stage is marked as the next thing to do',
+  (r.screen.match(/<li class="now"/g) || []).length <= 1);
+
+section('The crest is configurable');
+check('with no LOGO_URL it falls back to the monogram', (() => {
+  const rr = renderPage('index.html', '');
+  return rr.chrome.indexOf('>IPU<') > 0 && rr.chrome.indexOf('<img') < 0;
+})(), 'a broken image in the masthead looks worse than no image');
+
 section('Verification page');
 r = renderPage('verify.html', '');
 check('script runs without throwing', !r.threw, r.threw || '');
@@ -390,7 +443,8 @@ check('a throwing success handler surfaces an error', (() => {
        .apiWhoAmI();
 
   const screen = Object.keys(nodes).map(k => nodes[k].innerHTML || '').join('');
-  return screen.indexOf('could not display') > 0 && screen.indexOf('boom while rendering') > 0;
+  return screen.indexOf('Could not display the result of') > 0 &&
+         screen.indexOf('boom while rendering') > 0;
 })(), 'otherwise the user waits forever with nothing to report');
 
 check('a server error still reaches the page when no handler was attached', (() => {

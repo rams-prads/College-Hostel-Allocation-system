@@ -128,8 +128,20 @@ check('the ledger entry records the signature', (() => {
 
 const batch = Letters.generateBatch('RUN-P4', 10);
 check('batch generation is bounded', batch.generated === 10, batch.generated + '');
-check('batch reports what remains', batch.remaining === batch.total - 10,
-  batch.remaining + ' of ' + batch.total);
+check('a letter that already exists is skipped, not rebuilt',
+  batch.already >= 1,
+  'every press used to regenerate every letter from scratch while claiming otherwise');
+check('what is left is what has no letter yet',
+  batch.remaining === batch.total - batch.already - batch.generated,
+  batch.remaining + ' left of ' + batch.total);
+check('the skipped ones are the ones with a recorded url',
+  Db.where('Allocations', { runId: 'RUN-P4', status: 'ACTIVE' })
+    .filter(a => a.letterUrl).length === batch.already + batch.generated);
+
+const second = Letters.generateBatch('RUN-P4', 10);
+check('pressing again continues rather than starting over',
+  second.already === batch.already + batch.generated,
+  second.already + ' already done at the second press');
 check('batching matters at this scale', batch.total > 100,
   batch.total + ' letters would never finish in one execution');
 
@@ -261,7 +273,14 @@ check('the latest run is reported', !!ov.latestRun);
 check('the run carries its seed and policy hash',
   !!ov.latestRun.seed && !!ov.latestRun.policyHash);
 check('metrics come through', !!ov.latestRun.metrics.summary.pref1Pct);
-check('ledger status is reported', ov.ledger.intact === true);
+// The overview deliberately does not verify the chain - re-hashing every row
+// before the dashboard can paint made the page wait on its slowest part. The
+// badge is its own call, and it is still a full verification.
+check('the overview does not block on verifying the chain',
+  ov.ledger.intact === null,
+  'if this becomes a boolean again, the page load has been slowed back down');
+check('the badge endpoint still verifies for real',
+  apiAdminLedgerBadge().intact === true);
 check('policy is exposed for the dashboard', !!ov.policy.weights);
 
 console.log('        occupancy: ' + ov.occupancy.map(h =>

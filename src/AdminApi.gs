@@ -38,7 +38,16 @@ function apiAdminOverview() {
     };
   });
 
-  var chain = Ledger.verify();
+  // Deliberately NOT Ledger.verify() here. Verifying re-hashes every row in the
+  // audit log, which grows without bound, and doing it before the dashboard can
+  // paint means the whole page waits on the slowest thing it shows. The badge
+  // loads on its own; see apiAdminLedgerBadge.
+  var chain = { intact: null, reason: '', length: 0 };
+
+  // Cheap: Allocations is already loaded for the counts above.
+  var lettersDone = Db.readAll('Allocations').filter(function (a) {
+    return a.status === 'ACTIVE' && a.letterUrl;
+  }).length;
 
   var docQueue = Db.readAll('Documents').filter(function (d) {
     return d.status === 'UPLOADED';
@@ -73,6 +82,7 @@ function apiAdminOverview() {
       reason: chain.reason, brokenAt: chain.brokenAt
     },
     docQueue: docQueue,
+    lettersDone: lettersDone,
     email: {
       enabled: Notify.enabled(),
       remainingQuota: Notify.remainingQuota(),
@@ -262,6 +272,18 @@ function apiAdminAutoClear() {
   }, s.email);
 
   return { cleared: cleared, applications: Object.keys(touchedApps).length };
+}
+
+/**
+ * The ledger integrity badge, on its own so the dashboard need not wait for it.
+ *
+ * Still a full verification - re-hashing the whole chain is the entire point of
+ * having one, and an incremental check that trusted its own previous answer
+ * would not detect a row rewritten after that answer was cached.
+ */
+function apiAdminLedgerBadge() {
+  Auth.requireAdmin();
+  return Ledger.verify();
 }
 
 /**

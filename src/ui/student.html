@@ -6,6 +6,7 @@
   // relative link would navigate that frame to the wrong place. Every link is
   // built from this absolute URL and targets _top.
   var WEBAPP_URL = '<?= webAppUrl() ?>';
+  var LOGO_URL   = '<?= logoUrl() ?>';
   var DEMO_TOKEN = '<?= (typeof demoToken !== "undefined" && demoToken) ? demoToken : "" ?>';
 </script>
 
@@ -110,8 +111,8 @@
     else if (v.waitlist)  html.push(waitlistHero(v));
     else                  html.push(pendingHero(v));
 
-    if (v.explanation) html.push(explanationCard(v));
-    if (v.allocation && v.allocation.roommates.length) html.push(roommateCard(v));
+    if (v.explanation && v.explanation.groups) html.push(explanationCard(v));
+    if (v.allocation && (v.allocation.roommates || []).length) html.push(roommateCard(v));
 
     html.push('<div class="cols">' + preferencesCard(v) + documentsCard(v) + '</div>');
     html.push(identityCard(v));
@@ -207,9 +208,9 @@
 
   /* ------------------------------------------- the "why" panel */
   function explanationCard(v) {
-    var x = v.explanation;
-    var groups = x.groups.map(function (g) {
-      var items = g.items.map(function (it) {
+    var x = v.explanation || {};
+    var groups = (x.groups || []).map(function (g) {
+      var items = (g.items || []).map(function (it) {
         return '<li class="' + (it.ok ? 'yes' : 'no') + '">' +
           '<span class="mk">' + (it.ok ? '&#10003;' : '&#10007;') + '</span>' +
           '<span>' + esc(it.text) + '</span></li>';
@@ -252,7 +253,7 @@
 
   /* -------------------------------------------------------- roommates */
   function roommateCard(v) {
-    var mates = v.allocation.roommates.map(function (m) {
+    var mates = (v.allocation.roommates || []).map(function (m) {
       var s = m.strengths.length
         ? 'Matched on ' + m.strengths.join(' and ')
         : 'Sharing this room with you';

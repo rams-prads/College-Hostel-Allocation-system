@@ -446,6 +446,7 @@ var Grievance = (function () {
           // endpoint in the project returns dates as strings, and a Date that
           // failed to parse serialises as null - which took the entire payload
           // with it and left the admin dashboard with nothing to render.
+          resolution: g.resolution || '',
           createdAt: fmtWhen_(g.createdAt), slaDueAt: fmtWhen_(g.slaDueAt)
         };
       });

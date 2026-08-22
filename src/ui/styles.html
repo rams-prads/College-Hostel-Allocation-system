@@ -81,6 +81,15 @@
     font-weight:800;font-size:13px;letter-spacing:-.02em;
     box-shadow:0 0 0 2px rgba(255,255,255,.16);
   }
+  /* The real emblem is full-colour line art on a light ground, so it needs the
+     white disc behind it rather than the amber one the monogram sits on. */
+  .crest.has-img{
+    background:#fff;padding:2px;width:40px;height:40px;
+    box-shadow:0 0 0 2px rgba(255,255,255,.28);
+  }
+  .crest.has-img img{
+    width:100%;height:100%;object-fit:contain;display:block;border-radius:50%;
+  }
   .masthead .who-we-are{min-width:0}
   .masthead .org{
     font-family:var(--display);font-size:16.5px;font-weight:700;
@@ -568,4 +577,75 @@
     background-size:200% 100%;animation:sk 1.3s ease-in-out infinite;border-radius:var(--r-sm);
   }
   @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+  /* The lifecycle strip. Reads top to bottom as a sequence, with the step
+     that is waiting on somebody picked out rather than merely listed. */
+  .pipeline{list-style:none;margin:0;padding:0}
+  .pipeline li{
+    display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:var(--r);
+    border:1px solid transparent;
+  }
+  .pipeline li+li{margin-top:2px}
+  .pipeline .num{
+    flex:none;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;
+    background:var(--surface-3);color:var(--muted);font-size:12px;font-weight:700;
+  }
+  .pipeline li.done .num{background:var(--ok-soft);color:var(--ok)}
+  .pipeline li.now{background:var(--amber-soft);border-color:var(--amber-line)}
+  .pipeline li.now .num{background:var(--amber);color:#26190a}
+  .pipeline .pl{display:flex;flex-direction:column;min-width:0;flex:1}
+  .pipeline .pt{font-weight:600;font-size:14px}
+  .pipeline .ps{font-size:12.5px;color:var(--muted)}
+  .pipeline li.done .pt{color:var(--text-2)}
+
+  /* ==================================================== small screens
+     A hostel portal is opened on a phone far more often than on a desk.
+     Everything below is about the two places that break first: a masthead
+     carrying a long university name beside a user chip, and any row that
+     pins a label against a status on the same line. */
+
+  @media (max-width:760px){
+    .wrap{padding:16px 14px 56px}
+    .masthead .row{padding:9px 14px;gap:10px}
+    .masthead .org{font-size:14px;line-height:1.25}
+    .masthead .unit{font-size:10.5px}
+    .navbar .row{padding:0 14px}
+
+    /* The name is the first thing to go; the initials and the role still say
+       who is signed in, and the sign-out control must stay reachable. */
+    .userchip{max-width:none;padding:4px 9px 4px 4px}
+    .userchip .nm{display:none}
+
+    .apagehead h1{font-size:20px}
+    .card>.hd{padding:11px 14px}
+    .card>.bd{padding:14px}
+
+    /* A title and its status side by side becomes a title above its status. */
+    .vhead{flex-direction:column;align-items:flex-start;gap:7px}
+    .rows li{flex-wrap:wrap}
+
+    .tiles{grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:9px}
+    .tile .n{font-size:20px}
+
+    /* Full-width buttons stack better than three half-width ones wrapping
+       into an uneven grid. */
+    .btn-row .btn{flex:1 1 auto;justify-content:center}
+  }
+
+  @media (max-width:420px){
+    .masthead .org{font-size:13px}
+    .btn-row .btn{flex:1 1 100%}
+    .signin-field{max-width:none}
+  }
+
+  /* Nobody should have to pinch-zoom to read a table on a phone; they scroll
+     it instead, and the shadow says there is more to the right. */
+  .scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  /* Respect a reduced-motion preference: the spinner is the only thing here
+     that moves, and it is the one thing that must not be removed entirely. */
+  @media (prefers-reduced-motion: reduce){
+    *{scroll-behavior:auto !important}
+    .spin{animation-duration:1.6s}
+  }
 </style>

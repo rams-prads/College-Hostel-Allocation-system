@@ -57,15 +57,17 @@ function srv(ownerId) {
   var ok = null, fail = null;
 
   function report(message, detail) {
+    // Open, not collapsed. A failure nobody can read without a second click is
+    // reported to nobody: every screenshot of one so far has been cropped above
+    // the only line that said what went wrong.
+    var body = banner('err', message) +
+      (detail ? '<details class="tech" open><summary>Technical detail</summary>' +
+                '<pre class="small" style="white-space:pre-wrap;margin:0">' + esc(detail) +
+                '</pre></details>' : '');
     var owner = ownerId ? el(ownerId) : null;
-    if (owner) {
-      owner.innerHTML = banner('err', message) +
-        (detail ? '<details class="tech"><summary>Technical detail</summary>' +
-                  '<pre class="small" style="white-space:pre-wrap;margin:0">' + esc(detail) +
-                  '</pre></details>' : '');
-      return;
-    }
-    showFailure(message, detail);
+    if (owner) { owner.innerHTML = body; return; }
+    var box = el('msg') || el('root');
+    if (box) box.innerHTML = body;
   }
 
   // The handlers must return the PROXY, not the object behind it. Returning the
@@ -108,9 +110,12 @@ function srv(ownerId) {
           try {
             ok(result);
           } catch (e) {
-            report('The page could not display what the server sent back. ' +
-                   'This is a fault in the portal, not in anything you did.',
-                   name + ': ' + (e && e.message ? e.message : String(e)));
+            // The operation goes in the headline, not only in the detail. It is
+            // the one word that tells whoever is looking at this where to start.
+            report('Could not display the result of ' + name + '. This is a fault in ' +
+                   'the portal, not in anything you did.',
+                   name + ': ' + (e && e.message ? e.message : String(e)) +
+                   '\n\n' + (e && e.stack ? String(e.stack).split('\n').slice(0, 4).join('\n') : ''));
           }
         });
 
@@ -119,7 +124,8 @@ function srv(ownerId) {
           if (fail) {
             try { fail(e); return; } catch (inner) { /* fall through to the banner */ }
           }
-          report(e && e.message ? e.message : 'The server returned an error.', name);
+          report(e && e.message ? e.message : 'The server returned an error.',
+                 name + ' failed on the server.');
         });
 
         return r.apiCall(SESSION.token, name, args);
@@ -311,6 +317,24 @@ function initials(name) {
     .map(function (w) { return w.charAt(0); }).join('').toUpperCase() || '?';
 }
 
+/**
+ * The university emblem, with the monogram behind it.
+ *
+ * The image is whatever LOGO_URL in the Config sheet points at, so the real
+ * crest can be swapped in without a code change or a redeploy. If it is unset,
+ * or the file cannot be fetched, the monogram stays - a masthead with a broken
+ * image icon in it looks worse than one with no image at all, and this page is
+ * the first thing a judge sees.
+ */
+function crestMarkup() {
+  var url = (typeof LOGO_URL !== 'undefined' && LOGO_URL) ? String(LOGO_URL) : '';
+  if (!url) return '<div class="crest">IPU</div>';
+  return '<div class="crest has-img">' +
+    '<img src="' + esc(url) + '" alt="Guru Gobind Singh Indraprastha University" ' +
+    'onerror="this.parentNode.className=&quot;crest&quot;;this.parentNode.textContent=&quot;IPU&quot;">' +
+    '</div>';
+}
+
 /** Renders the masthead and navigation into #chrome. */
 function paintChrome(opts) {
   opts = opts || {};
@@ -336,7 +360,7 @@ function paintChrome(opts) {
   if (!target) return;
   target.innerHTML =
     '<header class="masthead"><div class="row">' +
-      '<div class="crest">IPU</div>' +
+      crestMarkup() +
       '<div class="who-we-are">' +
         '<div class="org">Guru Gobind Singh Indraprastha University</div>' +
         '<div class="unit">' + esc(opts.unit || 'Hostel Allocation Portal') + '</div>' +

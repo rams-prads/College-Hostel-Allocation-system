@@ -5,6 +5,7 @@
   // relative link would navigate that frame to the wrong place. Every link is
   // built from this absolute URL and targets _top.
   var WEBAPP_URL = '<?= webAppUrl() ?>';
+  var LOGO_URL   = '<?= logoUrl() ?>';
 
   // Before first paint, so there is no flash of the wrong ground. The
   // dashboard is held to the light palette regardless of the operating
@@ -154,7 +155,7 @@
 
     var body = '';
     if (TAB === 'overview') {
-      body = summaryBand(d) + ledgerCard(d);
+      body = summaryBand(d) + pipelineCard(d) + ledgerCard(d);
     } else if (TAB === 'allocation') {
       body = runCard(d) + (m ? metricsCard(d, m) : noRunCard()) +
              (m ? quotaCard(d.latestRun.metrics) : '');
@@ -179,6 +180,7 @@
         ? ' Last run ' + esc(d.latestRun.finishedAt) + '.' : '') +
       '</p></div>' + body;
 
+    if (TAB === 'overview')     { loadLedgerBadge(); }
     if (TAB === 'verification') { loadScans(); loadDocQueue(); loadIdentity(); }
     if (TAB === 'requests')     { loadGrievances(); loadSwaps(); }
     if (TAB === 'policy')       { loadSimulator(); }
@@ -447,7 +449,7 @@
 
   /* ------------------------------------------------------ summary band */
   function summaryBand(d) {
-    var c = d.counts, cap = d.capacity;
+    var c = d.counts || {}, cap = d.capacity || {};
     return '<div class="tiles" style="margin-bottom:14px">' +
       tile(c.applications, 'Applications', '') +
       tile(c.allotted, 'Rooms allotted', 'good') +
@@ -462,17 +464,82 @@
            '</div><div class="l">' + esc(l) + '</div></div>';
   }
 
+  /**
+   * The lifecycle, in order, with the current step marked.
+   *
+   * An officer arriving at this dashboard for the first time - or a judge being
+   * shown it - has no way to know that documents are verified before the
+   * allocation runs and letters after it. Everything needed was on the page and
+   * the ORDER was not, which is the part that matters.
+   */
+  function pipelineCard(d) {
+    var c = d.counts || {};
+    var applied = Number(c.applications) || 0;
+    var allotted = Number(c.allotted) || 0;
+    var toCheck = Number(d.docQueue) || 0;
+    var letters = Number(d.lettersDone) || 0;
+
+    var steps = [
+      { t: 'Students apply',
+        s: applied + ' application' + (applied === 1 ? '' : 's') + ' received',
+        done: applied > 0, tab: null },
+      { t: 'Documents are checked',
+        s: toCheck ? toCheck + ' still need a person' : 'nothing outstanding',
+        done: applied > 0 && toCheck === 0, tab: 'verification' },
+      { t: 'Allocation runs',
+        s: allotted ? allotted + ' rooms allotted' : 'not run yet',
+        done: allotted > 0, tab: 'allocation' },
+      { t: 'Letters and notices go out',
+        s: letters ? letters + ' letters produced' : 'not produced yet',
+        done: letters > 0, tab: 'operations' },
+      { t: 'Students query the result',
+        s: 'answered from the recorded run',
+        done: allotted > 0, tab: 'requests' }
+    ];
+
+    // The first thing not done is the thing to do next.
+    var nextAt = -1;
+    for (var i = 0; i < steps.length; i++) { if (!steps[i].done) { nextAt = i; break; } }
+
+    var list = steps.map(function (st, i) {
+      var state = st.done ? 'done' : (i === nextAt ? 'now' : '');
+      return '<li class="' + state + '">' +
+        '<span class="num">' + (st.done ? '&#10003;' : (i + 1)) + '</span>' +
+        '<span class="pl"><span class="pt">' + esc(st.t) + '</span>' +
+        '<span class="ps">' + esc(st.s) + '</span></span>' +
+        (i === nextAt && st.tab
+          ? '<button class="btn sm" onclick="goTab(&quot;' + st.tab + '&quot;)">Go</button>'
+          : '') + '</li>';
+    }).join('');
+
+    return card('How a place is allotted',
+      '<p class="small muted" style="margin:0 0 14px">The whole lifecycle, in order. ' +
+      'The highlighted step is the one waiting on you.</p>' +
+      '<ul class="pipeline">' + list + '</ul>');
+  }
+
   /* ----------------------------------------------------------- ledger */
   function ledgerCard(d) {
-    var ok = d.ledger.intact;
     return card('Audit ledger',
-      '<div class="status ' + (ok ? 'good' : 'bad') + '">' +
-        '<div class="sic">' + (ok ? '&#10003;' : '&#10007;') + '</div>' +
-        '<div><div class="t">' + (ok ? 'Records intact' : 'Tampering detected') + '</div>' +
-        '<div class="s">' + esc(d.ledger.reason) + '</div></div></div>' +
+      '<div id="ledgerBadge">' + loadingState('Verifying the chain') + '</div>' +
       '<div class="btn-row" style="margin-top:13px">' +
         '<button class="btn ghost sm" onclick="showLedger()">View recent activity</button>' +
       '</div><div id="ledgerDetail"></div>');
+  }
+
+  /**
+   * Verifying re-hashes every row, so the badge arrives after the page rather
+   * than holding it up. The page is useful without it; it is not useful blank.
+   */
+  function loadLedgerBadge() {
+    srv('ledgerBadge').withSuccessHandler(function (v) {
+      var ok = v && v.intact;
+      el('ledgerBadge').innerHTML =
+        '<div class="status ' + (ok ? 'good' : 'bad') + '">' +
+        '<div class="sic">' + (ok ? '&#10003;' : '&#10007;') + '</div>' +
+        '<div><div class="t">' + (ok ? 'Records intact' : 'Tampering detected') + '</div>' +
+        '<div class="s">' + esc((v && v.reason) || '') + '</div></div></div>';
+    }).apiAdminLedgerBadge();
   }
 
   function showLedger() {
@@ -535,7 +602,7 @@
   }
 
   function quotaCard(metrics) {
-    var rows = metrics.quotaTable.map(function (q) {
+    var rows = (metrics.quotaTable || []).map(function (q) {
       if (q.category === 'CONVERTED') {
         return '<tr><td><strong>Converted places</strong>' +
           '<div class="muted small">reserved places no category could fill, reissued in merit order</div></td>' +
@@ -563,7 +630,7 @@
 
   /* -------------------------------------------------------- occupancy */
   function occupancyCard(d) {
-    var rows = d.occupancy.map(function (h) {
+    var rows = (d.occupancy || []).map(function (h) {
       var cls = h.pct >= 99 ? 'full' : (h.pct >= 90 ? 'hot' : '');
       return '<tr><td><strong>' + esc(h.name) + '</strong>' +
         '<div class="muted small">' + esc(label('campus', h.campus)) + ' &middot; ' +
@@ -883,31 +950,90 @@
         '<p class="muted small" style="margin:0">No grievances have been raised.</p>');
       return;
     }
-    var rows = d.tickets.map(function (t) {
+    // Open and escalated first: those are the ones a person still owes an
+    // answer to. Everything the triage already settled is listed after, so the
+    // queue reads as work outstanding rather than a log.
+    var OPEN_STATES = { OPEN: 1, ESCALATED: 1 };
+    var live = d.tickets.filter(function (t) { return OPEN_STATES[t.status]; });
+    var settled = d.tickets.filter(function (t) { return !OPEN_STATES[t.status]; });
+
+    function ticketBlock(t, actionable) {
       var kind = { AUTO_ANSWERED: 'ok', RESOLVED: 'ok', ESCALATED: 'warn',
-                   OPEN: 'info' }[t.status] || 'info';
-      return '<tr><td><strong>' + esc(t.name) + '</strong>' +
-        '<div class="muted small">' + esc(String(t.category).toLowerCase()) + '</div></td>' +
-        '<td class="small">' + esc(t.text.slice(0, 95)) + (t.text.length > 95 ? '&hellip;' : '') +
-          (t.anomalies && t.anomalies.length
-            ? '<div style="color:var(--bad);margin-top:5px;font-weight:550">&#9888; ' +
-              esc(t.anomalies.join(' ')) + '</div>' : '') + '</td>' +
-        '<td>' + pill(kind, label('grievance', t.status)) + '</td></tr>';
-    }).join('');
+                   OPEN: 'info', CLOSED: '' }[t.status] || 'info';
+      return '<div class="vrow">' +
+        '<div class="vhead"><div>' +
+          '<div class="vname">' + esc(t.name || 'Unknown student') + '</div>' +
+          '<div class="small muted">' + esc(t.enrollmentNo || '') +
+          (t.enrollmentNo ? ' &middot; ' : '') +
+          esc(String(t.category).toLowerCase().replace(/_/g, ' ')) +
+          ' &middot; ' + esc(t.ticketId) + '</div>' +
+        '</div>' + pill(kind, label('grievance', t.status)) + '</div>' +
+        '<p class="small" style="margin:10px 0 0">' + esc(t.text) + '</p>' +
+        (t.headline ? '<p class="small muted" style="margin:8px 0 0"><strong>Automatic ' +
+          'check:</strong> ' + esc(t.headline) + '</p>' : '') +
+        (t.anomalies && t.anomalies.length
+          ? '<ul class="findings">' + t.anomalies.map(function (a) {
+              return '<li class="block">' + esc(a) + '</li>'; }).join('') + '</ul>'
+          : '') +
+        '<div class="vmeta">' +
+          (t.createdAt ? '<span>Raised ' + esc(t.createdAt) + '</span>' : '') +
+          (t.slaDueAt ? '<span>Due ' + esc(t.slaDueAt) + '</span>' : '') +
+          (t.appId ? '<span>' + esc(t.appId) + '</span>' : '') +
+        '</div>' +
+        (actionable
+          ? '<div class="btn-row" style="margin-top:11px">' +
+              '<button class="btn sm" onclick="resolveGrievance(&quot;' + esc(t.ticketId) +
+                '&quot;)">Mark resolved</button>' +
+              (t.status === 'ESCALATED' ? '' :
+                '<button class="btn ghost sm" onclick="escalateGrievance(&quot;' +
+                esc(t.ticketId) + '&quot;)">Escalate</button>') +
+              (t.appId ? '<button class="btn ghost sm" onclick="goTab(&quot;students&quot;);' +
+                'viewStudent(&quot;' + esc(t.appId) + '&quot;)">Open their portal</button>' : '') +
+            '</div>'
+          : (t.resolution ? '<p class="small muted" style="margin:9px 0 0"><strong>Closed:</strong> ' +
+             esc(t.resolution) + '</p>' : ''));
+    }
 
     el('grievCard').innerHTML = card('Grievances',
       '<div class="tiles" style="margin-bottom:15px">' +
         tile(st.total, 'raised', '') +
         tile(st.autoResolvedPct + '%', 'answered automatically', 'good') +
-        tile(st.byStatus.ESCALATED || 0, 'need a person',
-             (st.byStatus.ESCALATED || 0) ? 'hi' : '') +
+        tile(live.length, 'waiting on you', live.length ? 'hi' : '') +
       '</div>' +
-      '<div class="scroll-x"><table class="grid"><thead><tr><th>Student</th>' +
-      '<th>Complaint</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      '<p class="small muted" style="margin:12px 0 0">Complaints about an allocation are ' +
-      're-checked against the recorded run before any reply goes out. A ticket only reaches this ' +
-      'queue marked <em>with the hostel office</em> when that check finds something wrong &mdash; ' +
-      'which is exactly the case worth your time.</p>');
+      '<div id="grievMsg"></div>' +
+      (live.length
+        ? '<div class="grp-title" style="margin:4px 0 10px">Waiting on you</div>' +
+          live.map(function (t) { return ticketBlock(t, true); }).join('')
+        : banner('good', 'Nothing is waiting on you. Every complaint raised has either been ' +
+                         'answered automatically or already closed.')) +
+      (settled.length
+        ? '<details class="tech" style="margin-top:14px"><summary>' + settled.length +
+          ' already settled</summary><div style="margin-top:12px">' +
+          settled.map(function (t) { return ticketBlock(t, false); }).join('') +
+          '</div></details>'
+        : '') +
+      '<p class="small muted" style="margin:14px 0 0">A complaint about an allocation is ' +
+      're-checked against the recorded run before any reply goes out, so one only reaches ' +
+      '<em>waiting on you</em> when that check found something the machine could not settle.</p>');
+  }
+
+  function resolveGrievance(ticketId) {
+    var note = window.prompt('What was done? The student is shown this text.');
+    if (note === null) return;
+    if (!String(note).trim()) {
+      el('grievMsg').innerHTML = banner('err', 'A resolution needs a line saying what was done.');
+      return;
+    }
+    el('grievCard').innerHTML = loadingState('Recording the resolution');
+    srv('grievCard').withSuccessHandler(function () { loadGrievances(); })
+      .apiAdminResolveGrievance(ticketId, note);
+  }
+
+  function escalateGrievance(ticketId) {
+    var note = window.prompt('Why is this being escalated? (optional)') || '';
+    el('grievCard').innerHTML = loadingState('Escalating');
+    srv('grievCard').withSuccessHandler(function () { loadGrievances(); })
+      .apiAdminEscalateGrievance(ticketId, note);
   }
 
   /* ============================================================= swaps */
@@ -1001,9 +1127,10 @@
     busy('Producing allotment letters…');
     srv().withSuccessHandler(function (r) {
       load({ kind: r.remaining ? 'info' : 'good',
-             text: 'Produced ' + r.generated + ' of ' + r.total + ' letters.' +
-                   (r.remaining ? ' ' + r.remaining + ' to go — press again to continue.'
-                                : ' All done.') });
+             text: 'Produced ' + r.generated + ' letter' + (r.generated === 1 ? '' : 's') +
+                   (r.already ? ' (' + r.already + ' already existed and were skipped)' : '') +
+                   '. ' + (r.remaining ? r.remaining + ' to go — press again to continue.'
+                                       : 'All ' + r.total + ' are done.') });
     }).withFailureHandler(function (e) { done('err', e.message); })
       .apiAdminGenerateLetters(null, 25);
   }

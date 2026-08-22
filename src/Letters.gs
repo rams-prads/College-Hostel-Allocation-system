@@ -259,10 +259,18 @@ var Letters = (function () {
 
     var file = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    // Record it on the allotment, so the next batch knows this one is done and
+    // the student's dashboard can link straight to it.
+    var url = file.getUrl();
+    try {
+      Db.update('Allocations', allocId, { letterUrl: url, letterAt: new Date() });
+    } catch (e) { /* the letter exists either way; do not lose it over a write */ }
+
     Ledger.append('LETTER_ISSUED', {
       allocId: allocId, fileId: file.getId(), signature: signature(allocId)
     }, 'system');
-    return file.getUrl();
+    return url;
   }
 
   function lettersFolder_() {
@@ -282,21 +290,34 @@ var Letters = (function () {
    * Apps Script will not finish 700 PDFs in one execution, so this does a bounded
    * batch and reports what is left. The admin dashboard calls it repeatedly.
    */
+  /**
+   * Produce the letters for a run, in batches that finish inside the time limit.
+   *
+   * Skips any allotment that already has one. Without that, every press rebuilt
+   * every letter from scratch - several hundred PDFs and Drive writes to produce
+   * files that already existed - while the interface claimed nothing was ever
+   * generated twice. Pressing again now genuinely continues where it stopped.
+   */
   function generateBatch(runId, limit) {
     limit = limit || 25;
-    var allocs = Db.where('Allocations', { runId: runId, status: 'ACTIVE' });
-    var done = 0, remaining = 0;
+    var all = Db.where('Allocations', { runId: runId, status: 'ACTIVE' });
+    var pending = all.filter(function (a) { return !a.letterUrl; });
+
+    var done = 0;
     var startedAt = new Date().getTime();
 
-    for (var i = 0; i < allocs.length; i++) {
-      if (done >= limit || (new Date().getTime() - startedAt) > 240000) {
-        remaining = allocs.length - i;
-        break;
-      }
-      try { generate(allocs[i].allocId); done++; }
-      catch (e) { Logger.log('Letter failed for ' + allocs[i].allocId + ': ' + e.message); }
+    for (var i = 0; i < pending.length; i++) {
+      if (done >= limit || (new Date().getTime() - startedAt) > 240000) break;
+      try { generate(pending[i].allocId); done++; }
+      catch (e) { Logger.log('Letter failed for ' + pending[i].allocId + ': ' + e.message); }
     }
-    return { generated: done, remaining: remaining, total: allocs.length };
+
+    return {
+      generated: done,
+      remaining: Math.max(pending.length - done, 0),
+      already: all.length - pending.length,
+      total: all.length
+    };
   }
 
   /** Data behind the public verification page. */

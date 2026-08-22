@@ -411,6 +411,8 @@ function seedConfig_() {
     { key: 'SUPPORT_EMAIL',        value: 'hostel@ipu.ac.in', notes: 'Shown on letters and notifications' },
     { key: 'GRIEVANCE_SLA_DAYS',   value: '7',     notes: 'Working days to resolve a grievance' },
     { key: 'ALLOW_DEMO_LINKS',     value: 'FALSE', notes: 'Read-only student links that work without sign-in. For demos only - switch back off afterwards.' },
+    { key: 'LOGO_URL',             value: 'https://www.ipu.ac.in/images/logo.png',
+      notes: 'University crest shown in the masthead. Any public image URL, or a Drive file shared "anyone with the link". Blank falls back to the IPU monogram.' },
     { key: 'ALLOC_LOCAL_SEARCH',   value: 'TRUE',  notes: 'Stage F of the allocator. Set FALSE to disable.' },
     { key: 'ALLOC_MAX_ITERATIONS', value: '2000',  notes: 'Cap on local-search iterations (execution-time guard)' }
   ]);
