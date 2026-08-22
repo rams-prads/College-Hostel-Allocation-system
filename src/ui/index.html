@@ -20,11 +20,11 @@
     srv().withSuccessHandler(function (who) {
       if (who.signedIn) { reloadTop(); return; }
       saveToken(null);
-      el('root').innerHTML = signInPanel('Your previous sign-in has expired.');
+      setHtml('root', signInPanel('Your previous sign-in has expired.'));
     }).withFailureHandler(function () {
-      el('root').innerHTML = signInPanel();
+      setHtml('root', signInPanel());
     }).apiWhoAmI();
   } else {
-    el('root').innerHTML = signInPanel();
+    setHtml('root', signInPanel());
   }
 </script>

@@ -664,6 +664,75 @@ check('a slow call eventually says so', (() => {
   return screen.indexOf('taking longer') > 0;
 })(), 'a spinner with no deadline is indistinguishable from a hang');
 
+section('An answer for a screen nobody is looking at any more');
+
+// The reported fault: open the waiting list, wait, click another tab, and the
+// answer lands on a node that no longer exists - "Cannot set properties of
+// null" in a red box, over a page where nothing had gone wrong.
+global.apiVanishingPanel = function () {
+  // Stands in for the person navigating away while the call is in flight.
+  global.__known.delete('probe');
+  return { ok: true };
+};
+
+(() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', `
+    __known.add('probe');
+    el('probe');
+    window.__handlerRan = false;
+    srv('probe').withSuccessHandler(function () { window.__handlerRan = true; })
+      .apiVanishingPanel();
+  `);
+  check('the page does not throw', !t.threw, t.threw || '');
+  check('the handler is not run at all', window.__handlerRan === false,
+    'there is nowhere to put the answer, so running the painter can only fail');
+  check('and nothing is reported as an error',
+    t.screen.indexOf('fault in the portal') < 0 &&
+    t.screen.indexOf('Cannot set properties') < 0,
+    'a red box on a page where nothing went wrong is worse than the silence');
+})();
+
+check('an owner that never existed still fails loudly', (() => {
+  // The other half of the rule. A typo in a call site must not be swallowed by
+  // the same guard that forgives a person navigating away.
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', `
+    window.__typoRan = false;
+    srv('nosuchpanelanywhere')
+      .withSuccessHandler(function () { window.__typoRan = true; })
+      .apiAdminWaitlist({ page: 1, pageSize: 25 });
+  `);
+  return window.__typoRan === true && !t.threw;
+})(), 'forgiving a mistyped panel id would hide the bug rather than the noise');
+
+check('every page writes through the helper that tolerates a missing node', (() => {
+  const offenders = ['admin.html', 'student.html', 'apply.html', 'index.html',
+                     'verify.html', 'chrome.html']
+    .filter(f => /el\('[^']+'\)\.innerHTML\s*=/.test(codeOf(f)));
+  return offenders.length === 0;
+})(), 'one direct assignment is all it takes for the crash to come back');
+
+check('setHtml says whether it landed, and never throws', (() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', `
+    window.__missed = setHtml('definitely-not-on-this-page', 'x');
+    window.__hit = setHtml('tabBody', el('tabBody').innerHTML);
+  `);
+  return !t.threw && window.__missed === false && window.__hit === true;
+})());
+
+check('an overtaken waiting-list answer is ignored', (() => {
+  // Two clicks on Next start two calls, and nothing says they come back in the
+  // order they went out. The older answer must not repaint the table.
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', `
+    goTab("waitlist");
+    var stale = WL.seq;
+    wlGo(2);
+    // An answer from the earlier request, arriving late.
+    paintWaitlistIfCurrent(stale, { rows: [], total: 999, matched: 0, page: 1,
+                                    pages: 1, pageSize: 25, q: 'stale' });
+  `);
+  return !t.threw && t.screen.indexOf('stale') < 0;
+})(), 'the table would show a page the pager underneath it says you are not on');
+
 section('Nothing makes the user reload the page');
 
 // Reloading the document to show the result of an action throws away the page,
@@ -682,7 +751,7 @@ check('a confirmation survives the redraw it triggers', (() => {
   // carried through it rather than written and immediately discarded.
   return /refreshView\(['"]/.test(student) &&
          /PENDING_NOTE/.test(admin) &&
-         /el\('msg'\)\.innerHTML = banner\(PENDING_NOTE/.test(admin);
+         /setHtml\('msg', banner\(PENDING_NOTE/.test(admin);
 })());
 
 check('the student page has somewhere for a message to land',

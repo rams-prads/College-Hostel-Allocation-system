@@ -82,16 +82,16 @@
 
   function goTab(id) {
     TAB = id;
-    el('sidebar').innerHTML = sidebar(D);
+    setHtml('sidebar', sidebar(D));
     paintTab();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   loadToken();
-  el('root').innerHTML = loadingState('Loading dashboard');
+  setHtml('root', loadingState('Loading dashboard'));
 
   /** Called by the shared sign-in panel once a session exists. */
   function onSignedIn() {
-    el('root').innerHTML = loadingState('Loading dashboard');
+    setHtml('root', loadingState('Loading dashboard'));
     load();
   }
 
@@ -109,11 +109,11 @@
       // need different things: one needs a way in, the other needs telling.
       if (!SESSION.token && /sign in/i.test(e.message)) {
         paintChrome({ unit: 'Hostel Administration' });
-        el('root').innerHTML = '<div class="wrap narrow">' +
-          signInPanel('This page is for hostel administrators.') + '</div>';
+        setHtml('root', '<div class="wrap narrow">' +
+          signInPanel('This page is for hostel administrators.') + '</div>');
         return;
       }
-      el('root').innerHTML = '<div class="wrap">' + banner('err', e.message) + '</div>';
+      setHtml('root', '<div class="wrap">' + banner('err', e.message) + '</div>');
     }).apiAdminOverview();
   }
   load();
@@ -127,16 +127,15 @@
       tabs: [{ label: 'Student View', href: '?' }]
     });
 
-    el('root').innerHTML =
-      '<div class="ashell">' +
+    setHtml('root', '<div class="ashell">' +
         '<aside class="asidebar" id="sidebar">' + sidebar(d) + '</aside>' +
         '<main class="amain"><div id="msg"></div><div id="tabBody"></div></main>' +
-      '</div>';
+      '</div>');
 
     paintTab();
 
     if (PENDING_NOTE) {
-      el('msg').innerHTML = banner(PENDING_NOTE.kind, PENDING_NOTE.text);
+      setHtml('msg', banner(PENDING_NOTE.kind, PENDING_NOTE.text));
       PENDING_NOTE = null;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -175,12 +174,11 @@
       body = operationsCard(d);
     }
 
-    el('tabBody').innerHTML =
-      '<div class="apagehead"><h1>' + esc(meta.title) + '</h1>' +
+    setHtml('tabBody', '<div class="apagehead"><h1>' + esc(meta.title) + '</h1>' +
       '<p>' + esc(meta.blurb) +
       (TAB === 'allocation' && d.latestRun && d.latestRun.finishedAt
         ? ' Last run ' + esc(d.latestRun.finishedAt) + '.' : '') +
-      '</p></div>' + body;
+      '</p></div>' + body);
 
     if (TAB === 'overview')     { loadLedgerBadge(); }
     if (TAB === 'waitlist')     { loadWaitlist(); }
@@ -212,7 +210,7 @@
   /* -------------------------------------------------- document reading */
   function loadScans() {
     srv().withSuccessHandler(paintScans)
-      .withFailureHandler(function () { el('scanCard').innerHTML = ''; })
+      .withFailureHandler(function () { setHtml('scanCard', ''); })
       .apiAdminVerificationSummary();
   }
 
@@ -221,18 +219,18 @@
       // Say what this will do before there is anything to do it to. An officer
       // meeting the panel for the first time should learn what the machine
       // checks and what it leaves to them.
-      el('scanCard').innerHTML = card('Document reading',
+      setHtml('scanCard', card('Document reading',
         '<p class="small muted" style="margin:0">No documents have been uploaded yet. ' +
         'When they are, each Aadhaar card is read and its PIN code compared with the ' +
         'one declared &mdash; that is the field distance and eligibility are computed ' +
         'from. A difference is only raised when it would change the outcome; everything ' +
-        'else is recorded and left alone.</p>');
+        'else is recorded and left alone.</p>'));
       return;
     }
     var v = s.byVerdict || {};
     var settled = (v.MATCH || 0) + (v.MINOR || 0);
 
-    el('scanCard').innerHTML = card('Document reading',
+    setHtml('scanCard', card('Document reading',
       '<p class="small muted" style="margin:0 0 14px">Each Aadhaar card is read and its ' +
       'PIN code compared with the one declared &mdash; that is the field distance and ' +
       'eligibility are computed from. A difference is only raised when it would change ' +
@@ -261,20 +259,20 @@
         (s.clearable
           ? '<button class="btn ghost" onclick="autoClear()">Clear the ' + s.clearable +
             ' that agree</button>' : '') +
-      '</div><div id="scanMsg"></div>');
+      '</div><div id="scanMsg"></div>'));
   }
 
   function runScans() {
-    el('scanMsg').innerHTML = '<div class="hint"><span class="spin"></span> ' +
-      'Reading documents. This takes a few seconds each and continues in batches.</div>';
+    setHtml('scanMsg', '<div class="hint"><span class="spin"></span> ' +
+      'Reading documents. This takes a few seconds each and continues in batches.</div>');
     srv().withSuccessHandler(function (r) {
-        el('scanMsg').innerHTML = banner(r.remaining ? 'info' : 'good',
+        setHtml('scanMsg', banner(r.remaining ? 'info' : 'good',
           'Read ' + r.scanned + '. ' + (r.remaining
             ? r.remaining + ' still to go — press the button again to continue.'
-            : 'All documents have now been read.'));
+            : 'All documents have now been read.')));
         loadScans();
       })
-      .withFailureHandler(function (e) { el('scanMsg').innerHTML = banner('err', e.message); })
+      .withFailureHandler(function (e) { setHtml('scanMsg', banner('err', e.message)); })
       .apiAdminScanDocuments(25);
   }
 
@@ -282,14 +280,14 @@
     if (!window.confirm('Mark every document that agrees with its declaration as verified?\n\n' +
         'Conflicts and unreadable scans are left alone. Each one is recorded as a machine ' +
         'decision, not a person\u2019s.')) return;
-    el('scanMsg').innerHTML = loadingState('Clearing');
+    setHtml('scanMsg', loadingState('Clearing'));
     srv('scanMsg').withSuccessHandler(function (r) {
         load({ kind: 'good',
                text: 'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
                      ' across ' + r.applications + ' application' +
                      (r.applications === 1 ? '' : 's') + '. Conflicts were left alone.' });
       })
-      .withFailureHandler(function (e) { el('scanMsg').innerHTML = banner('err', e.message); })
+      .withFailureHandler(function (e) { setHtml('scanMsg', banner('err', e.message)); })
       .apiAdminAutoClear();
   }
 
@@ -303,16 +301,16 @@
    */
   function loadDocQueue() {
     srv().withSuccessHandler(paintDocQueue)
-      .withFailureHandler(function () { el('queueCard').innerHTML = ''; })
+      .withFailureHandler(function () { setHtml('queueCard', ''); })
       .apiAdminDocQueue(40, true);
   }
 
   function paintDocQueue(rows) {
     if (!rows || !rows.length) {
-      el('queueCard').innerHTML = card('Documents needing a decision',
+      setHtml('queueCard', card('Documents needing a decision',
         emptyState('&#9989;', 'Nothing waiting',
           'Every document held either agrees with its declaration or has already ' +
-          'been decided.'));
+          'been decided.')));
       return;
     }
 
@@ -356,10 +354,10 @@
         '</div></div>';
     }).join('');
 
-    el('queueCard').innerHTML = card('Documents needing a decision',
+    setHtml('queueCard', card('Documents needing a decision',
       '<p class="small muted" style="margin:0 0 14px">' + rows.length + ' waiting, worst ' +
       'first. Anything that agreed with its declaration has been left out of this list ' +
-      'entirely.</p>' + body);
+      'entirely.</p>' + body));
   }
 
   function decideDoc(docId, approve) {
@@ -368,11 +366,11 @@
       note = window.prompt('Why is this being rejected? The student is shown this text.');
       if (note === null) return;
       if (!String(note).trim()) {
-        el('msg').innerHTML = banner('err', 'A rejection needs a reason.');
+        setHtml('msg', banner('err', 'A rejection needs a reason.'));
         return;
       }
     }
-    el('queueCard').innerHTML = loadingState('Recording the decision');
+    setHtml('queueCard', loadingState('Recording the decision'));
     srv('queueCard').withSuccessHandler(function () { loadDocQueue(); loadScans(); })
       .apiAdminDecideDocument(docId, approve, note);
   }
@@ -380,15 +378,15 @@
   /* ---------------------------------------------------- verification */
   function loadIdentity() {
     srv().withSuccessHandler(paintIdentity)
-      .withFailureHandler(function () { el('idCard').innerHTML = ''; })
+      .withFailureHandler(function () { setHtml('idCard', ''); })
       .apiAdminIdentityQueue(40);
   }
 
   function paintIdentity(rows) {
     if (!rows || !rows.length) {
-      el('idCard').innerHTML = card('Identity verification',
+      setHtml('idCard', card('Identity verification',
         emptyState('&#9989;', 'Nothing waiting',
-          'No applicant is currently waiting on an identity check.'));
+          'No applicant is currently waiting on an identity check.')));
       return;
     }
 
@@ -427,11 +425,11 @@
       '</div>';
     }).join('');
 
-    el('idCard').innerHTML = card('Identity verification',
+    setHtml('idCard', card('Identity verification',
       '<p class="small muted" style="margin:0 0 14px">' + rows.length + ' waiting. Each ' +
       'Aadhaar number was checked for a valid checksum and against every other record ' +
       'before it reached you; only the last four digits are ever stored. Match those ' +
-      'four against the uploaded Aadhaar card, then decide.</p>' + body);
+      'four against the uploaded Aadhaar card, then decide.</p>' + body));
   }
 
   function decideIdentity(studentId, approve) {
@@ -440,14 +438,14 @@
       note = window.prompt('Why is this being rejected? The student is shown this text.');
       if (note === null) return;
       if (!String(note).trim()) {
-        el('msg').innerHTML = banner('err', 'A rejection needs a reason.');
+        setHtml('msg', banner('err', 'A rejection needs a reason.'));
         return;
       }
     } else {
       note = 'Matched against the uploaded documents.';
     }
 
-    el('idCard').innerHTML = loadingState('Recording the decision');
+    setHtml('idCard', loadingState('Recording the decision'));
     srv('idCard')
       .withSuccessHandler(function () { loadIdentity(); })
       .apiAdminDecideIdentity(studentId, approve, note);
@@ -545,16 +543,15 @@
   function loadLedgerBadge() {
     srv('ledgerBadge').withSuccessHandler(function (v) {
       var ok = v && v.intact;
-      el('ledgerBadge').innerHTML =
-        '<div class="status ' + (ok ? 'good' : 'bad') + '">' +
+      setHtml('ledgerBadge', '<div class="status ' + (ok ? 'good' : 'bad') + '">' +
         '<div class="sic">' + (ok ? '&#10003;' : '&#10007;') + '</div>' +
         '<div><div class="t">' + (ok ? 'Records intact' : 'Tampering detected') + '</div>' +
-        '<div class="s">' + esc((v && v.reason) || '') + '</div></div></div>';
+        '<div class="s">' + esc((v && v.reason) || '') + '</div></div></div>');
     }).apiAdminLedgerBadge();
   }
 
   function showLedger() {
-    el('ledgerDetail').innerHTML = loadingState('Reading the ledger');
+    setHtml('ledgerDetail', loadingState('Reading the ledger'));
     srv('ledgerDetail').withSuccessHandler(function (r) {
       var rows = r.recent.map(function (e) {
         return '<tr><td>' + esc(e.ts) + '</td>' +
@@ -562,13 +559,12 @@
           '<td class="muted small">' + esc(e.actor) + '</td>' +
           '<td class="mono">' + esc(e.hash) + '&hellip;</td></tr>';
       }).join('');
-      el('ledgerDetail').innerHTML =
-        '<div class="divider"></div><div class="scroll-x"><table class="grid">' +
+      setHtml('ledgerDetail', '<div class="divider"></div><div class="scroll-x"><table class="grid">' +
         '<thead><tr><th>When</th><th>Activity</th><th>By</th><th>Fingerprint</th></tr></thead>' +
         '<tbody>' + rows + '</tbody></table></div>' +
         '<p class="small muted" style="margin:11px 0 0">Each entry&rsquo;s fingerprint covers the ' +
         'one before it. Altering any past record breaks every fingerprint that follows, which is ' +
-        'what makes the history verifiable rather than merely stored.</p>';
+        'what makes the history verifiable rather than merely stored.</p>');
     }).apiAdminVerifyLedger();
   }
 
@@ -668,16 +664,16 @@
   function demoLink(appId) {
     srv()
       .withSuccessHandler(function (r) {
-        el('msg').innerHTML = banner('good',
+        setHtml('msg', banner('good',
           'Read-only preview link, valid for ' + r.expiresInHours + ' hours. ' +
           'Anyone with it sees this student\u2019s portal and can change nothing.') +
           '<div class="card" style="margin-bottom:14px"><label class="field" ' +
           'style="margin-bottom:0"><span class="lab">Preview link</span>' +
           '<input type="text" readonly onclick="this.select()" value="' +
-          esc(r.url) + '"></label></div>';
+          esc(r.url) + '"></label></div>');
         window.scrollTo({ top: 0, behavior: 'smooth' });
       })
-      .withFailureHandler(function (e) { el('msg').innerHTML = banner('err', e.message); })
+      .withFailureHandler(function (e) { setHtml('msg', banner('err', e.message)); })
       .apiAdminDemoLink(appId, 24);
   }
 
@@ -695,13 +691,13 @@
   var lookupTimer = null;
   function doLookup(q) {
     clearTimeout(lookupTimer);
-    if (!q || q.length < 2) { el('lookupResults').innerHTML = ''; return; }
+    if (!q || q.length < 2) { setHtml('lookupResults', ''); return; }
     lookupTimer = setTimeout(function () {
       srv().withSuccessHandler(function (rows) {
         if (!rows.length) {
-          el('lookupResults').innerHTML = '<p class="muted small">No match.</p>'; return;
+          setHtml('lookupResults', '<p class="muted small">No match.</p>'); return;
         }
-        el('lookupResults').innerHTML = '<div class="scroll-x"><table class="grid"><tbody>' +
+        setHtml('lookupResults', '<div class="scroll-x"><table class="grid"><tbody>' +
           rows.map(function (r) {
             return '<tr><td><strong>' + esc(r.name) + '</strong>' +
               '<div class="muted small">' + esc(r.enrollmentNo) + ' &middot; ' +
@@ -712,13 +708,13 @@
               esc(r.appId) + '&quot;)">Open portal</button> ' +
               '<button class="btn ghost sm" onclick="demoLink(&quot;' +
               esc(r.appId) + '&quot;)">Preview link</button></td></tr>';
-          }).join('') + '</tbody></table></div>';
+          }).join('') + '</tbody></table></div>');
       }).withFailureHandler(function () {}).apiAdminFindStudent(q);
     }, 250);
   }
 
   function viewStudent(appId) {
-    el('studentView').innerHTML = loadingState('Opening');
+    setHtml('studentView', loadingState('Opening'));
     // The owner id matters here: whatever goes wrong has to replace this
     // spinner, not appear in the strip at the top of a page the reader has
     // already scrolled past.
@@ -728,8 +724,8 @@
 
   function paintStudentView(v) {
     if (!v || !v.student) {
-      el('studentView').innerHTML = '<div class="divider"></div>' +
-        banner('warn', 'That application has no student record attached to it.');
+      setHtml('studentView', '<div class="divider"></div>' +
+        banner('warn', 'That application has no student record attached to it.'));
       return;
     }
     var outcome;
@@ -765,7 +761,7 @@
         }).join('');
     }
 
-    el('studentView').innerHTML = '<div class="divider"></div>' +
+    setHtml('studentView', '<div class="divider"></div>' +
       '<h3 style="margin:0 0 3px">' + esc(v.student.name) + '</h3>' +
       '<p class="muted small" style="margin:0 0 13px">' + esc(v.student.enrollmentNo) +
       ' &middot; ' + esc(v.student.programme) + ' ' + esc(v.student.branch) +
@@ -774,16 +770,16 @@
       (v.student.isPwD ? ' (PwD)' : '') + ' &middot; ' + esc(v.student.homeState) + '</p>' +
       outcome + why +
       '<div class="btn-row" style="margin-top:14px"><button class="btn ghost sm" ' +
-      'onclick="closeStudentView()">Close</button></div>';
+      'onclick="closeStudentView()">Close</button></div>');
   }
 
-  function closeStudentView() { el('studentView').innerHTML = ''; }
+  function closeStudentView() { setHtml('studentView', ''); }
 
   /* ==================================================== what-if simulator */
   function loadSimulator() {
-    el('simCard').innerHTML = card('What-if simulator', loadingState('Loading policy settings'));
+    setHtml('simCard', card('What-if simulator', loadingState('Loading policy settings')));
     srv().withSuccessHandler(function (k) { KNOBS = k; paintSimulator(); })
-      .withFailureHandler(function () { el('simCard').innerHTML = ''; }).apiAdminSimulatorKnobs();
+      .withFailureHandler(function () { setHtml('simCard', ''); }).apiAdminSimulatorKnobs();
   }
 
   function paintSimulator() {
@@ -816,7 +812,7 @@
       }).join('');
 
     var n = pendingChanges().length;
-    el('simCard').innerHTML = card('What-if simulator',
+    setHtml('simCard', card('What-if simulator',
       '<p class="small muted" style="margin:0 0 4px">Change a rule and see the effect ' +
       '<strong>before</strong> committing to it. Nothing is saved until you press Commit &mdash; ' +
       'while the simulation runs, the changed rule exists only in memory.</p>' +
@@ -825,7 +821,7 @@
         '<button class="btn" id="simBtn" ' + (n ? '' : 'disabled') + ' onclick="runSim()">Simulate' +
           (n ? ' ' + n + ' change' + (n === 1 ? '' : 's') : '') + '</button>' +
         '<button class="btn ghost" onclick="resetKnobs()">Reset</button>' +
-      '</div><div id="simResult"></div>');
+      '</div><div id="simResult"></div>'));
   }
 
   function setKnob(i, value) {
@@ -851,12 +847,12 @@
   function runSim() {
     var changes = pendingChanges();
     if (!changes.length) return;
-    el('simResult').innerHTML = '<div class="divider"></div>' +
+    setHtml('simResult', '<div class="divider"></div>' +
       banner('info', 'Running two complete allocations so the difference is caused by your ' +
-                     'change and nothing else…');
+                     'change and nothing else…'));
     srv().withSuccessHandler(paintSimResult)
       .withFailureHandler(function (e) {
-        el('simResult').innerHTML = '<div class="divider"></div>' + banner('err', e.message);
+        setHtml('simResult', '<div class="divider"></div>' + banner('err', e.message));
       }).apiAdminSimulate(changes, null);
   }
 
@@ -888,7 +884,7 @@
         '</td></tr>';
     }).join('');
 
-    el('simResult').innerHTML = '<div class="divider"></div>' +
+    setHtml('simResult', '<div class="divider"></div>' +
       '<div class="grp-title">You are proposing</div>' +
       '<ul class="small" style="margin:0 0 14px;padding-left:20px">' + changeList + '</ul>' +
       '<div class="scroll-x"><table class="grid"><thead><tr><th>Measure</th>' +
@@ -918,7 +914,7 @@
         '<button class="btn ghost" onclick="resetKnobs()">Discard</button>' +
       '</div>' +
       '<p class="small muted" style="margin:10px 0 0">Nothing has been saved. Discarding leaves ' +
-      'the current allocation exactly as it is.</p>';
+      'the current allocation exactly as it is.</p>');
   }
 
   function simRow(lbl, before, after, d, lowerIsBetter) {
@@ -946,13 +942,24 @@
   // Which page is open and what is being searched for, kept out here so a
   // redraw does not throw an officer back to page one of a list they were
   // eighteen pages into.
-  var WL = { page: 1, q: '' };
+  // `seq` rises with every request. Pressing Next twice in a row starts two
+  // calls, and there is nothing to say they come back in the order they went
+  // out - so an older answer arriving second would leave the table showing a
+  // page the pager underneath it says you are not on.
+  var WL = { page: 1, q: '', seq: 0 };
 
   function loadWaitlist() {
     if (!el('wlCard')) return;
-    el('wlCard').innerHTML = card('Waiting list', loadingState('Reading the queue'));
-    srv('wlCard').withSuccessHandler(paintWaitlist)
+    var mine = ++WL.seq;
+    setHtml('wlCard', card('Waiting list', loadingState('Reading the queue')));
+    srv('wlCard').withSuccessHandler(function (d) { paintWaitlistIfCurrent(mine, d); })
       .apiAdminWaitlist({ page: WL.page, pageSize: 25, q: WL.q });
+  }
+
+  /** Paint, unless a later request has gone out since this one was sent. */
+  function paintWaitlistIfCurrent(seq, d) {
+    if (seq !== WL.seq) return;
+    paintWaitlist(d);
   }
 
   function wlGo(page) {
@@ -974,9 +981,9 @@
 
   function paintWaitlist(d) {
     if (!d || !d.rows) {
-      el('wlCard').innerHTML = card('Waiting list',
+      setHtml('wlCard', card('Waiting list',
         banner('warn', 'The waiting list could not be read. Nothing else on this page ' +
-                       'is affected.'));
+                       'is affected.')));
       return;
     }
     WL.page = d.page;
@@ -991,15 +998,15 @@
       '</div>';
 
     if (!d.total) {
-      el('wlCard').innerHTML = card('Waiting list',
+      setHtml('wlCard', card('Waiting list',
         '<p class="muted small" style="margin:0">Nobody is on the waiting list. It is ' +
-        'built when an allocation is committed.</p>');
+        'built when an allocation is committed.</p>'));
       return;
     }
     if (!d.matched) {
-      el('wlCard').innerHTML = card('Waiting list', search +
+      setHtml('wlCard', card('Waiting list', search +
         '<p class="muted small" style="margin:0">Nothing on the waiting list matches ' +
-        '&ldquo;' + esc(d.q) + '&rdquo;. ' + esc(d.total) + ' students are waiting.</p>');
+        '&ldquo;' + esc(d.q) + '&rdquo;. ' + esc(d.total) + ' students are waiting.</p>'));
       return;
     }
 
@@ -1038,7 +1045,7 @@
         ' &middot; page ' + esc(d.page) + ' of ' + esc(d.pages) + '</span>' +
       '</div>';
 
-    el('wlCard').innerHTML = card('Waiting list',
+    setHtml('wlCard', card('Waiting list',
       '<p class="small muted" style="margin:0 0 14px">' + esc(d.total) + ' students are ' +
       'waiting, in the order they would be offered a seat if one is given up. The order is ' +
       'the priority group first and the measure inside it second &mdash; marks for the groups ' +
@@ -1050,27 +1057,27 @@
         '<th>Priority group</th><th class="num">Ranked on</th><th class="num">Chance</th>' +
         '<th>First choice</th><th></th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      pager);
+      pager));
   }
 
   /* ======================================================== grievances */
   function loadGrievances() {
     srv().withSuccessHandler(paintGrievances)
-      .withFailureHandler(function () { el('grievCard').innerHTML = ''; })
+      .withFailureHandler(function () { setHtml('grievCard', ''); })
       .apiAdminGrievanceInbox(null, 40);
   }
 
   function paintGrievances(d) {
     if (!d || !d.stats) {
-      el('grievCard').innerHTML = card('Resident reports',
+      setHtml('grievCard', card('Resident reports',
         banner('warn', 'The reports inbox could not be loaded. Everything else on ' +
-                       'this page is unaffected.'));
+                       'this page is unaffected.')));
       return;
     }
     var st = d.stats;
     if (!st.total) {
-      el('grievCard').innerHTML = card('Resident reports',
-        '<p class="muted small" style="margin:0">Nothing has been reported.</p>');
+      setHtml('grievCard', card('Resident reports',
+        '<p class="muted small" style="margin:0">Nothing has been reported.</p>'));
       return;
     }
     // Open and escalated first: those are the ones a person still owes an
@@ -1122,7 +1129,7 @@
              esc(t.resolution) + '</p>' : ''));
     }
 
-    el('grievCard').innerHTML = card('Resident reports',
+    setHtml('grievCard', card('Resident reports',
       '<div class="tiles" style="margin-bottom:15px">' +
         tile(st.total, 'reported', '') +
         tile(st.autoResolvedPct + '%', 'answered automatically', 'good') +
@@ -1142,24 +1149,24 @@
         : '') +
       '<p class="small muted" style="margin:14px 0 0">A complaint about an allocation is ' +
       're-checked against the recorded run before any reply goes out, so one only reaches ' +
-      '<em>waiting on you</em> when that check found something the machine could not settle.</p>');
+      '<em>waiting on you</em> when that check found something the machine could not settle.</p>'));
   }
 
   function resolveGrievance(ticketId) {
     var note = window.prompt('What was done? The student is shown this text.');
     if (note === null) return;
     if (!String(note).trim()) {
-      el('grievMsg').innerHTML = banner('err', 'A resolution needs a line saying what was done.');
+      setHtml('grievMsg', banner('err', 'A resolution needs a line saying what was done.'));
       return;
     }
-    el('grievCard').innerHTML = loadingState('Recording the resolution');
+    setHtml('grievCard', loadingState('Recording the resolution'));
     srv('grievCard').withSuccessHandler(function () { loadGrievances(); })
       .apiAdminResolveGrievance(ticketId, note);
   }
 
   function escalateGrievance(ticketId) {
     var note = window.prompt('Why is this being escalated? (optional)') || '';
-    el('grievCard').innerHTML = loadingState('Escalating');
+    setHtml('grievCard', loadingState('Escalating'));
     srv('grievCard').withSuccessHandler(function () { loadGrievances(); })
       .apiAdminEscalateGrievance(ticketId, note);
   }
@@ -1167,14 +1174,14 @@
   /* ============================================================= swaps */
   function loadSwaps() {
     srv().withSuccessHandler(paintSwaps)
-      .withFailureHandler(function () { el('swapCard').innerHTML = ''; }).apiAdminSwapBoard();
+      .withFailureHandler(function () { setHtml('swapCard', ''); }).apiAdminSwapBoard();
   }
 
   function paintSwaps(d) {
-    if (!d) { el('swapCard').innerHTML = ''; return; }
+    if (!d) { setHtml('swapCard', ''); return; }
     if (!d.total) {
-      el('swapCard').innerHTML = card('Room swaps',
-        '<p class="muted small" style="margin:0">No swap requests yet.</p>');
+      setHtml('swapCard', card('Room swaps',
+        '<p class="muted small" style="margin:0">No swap requests yet.</p>'));
       return;
     }
     var rows = d.open.map(function (t) {
@@ -1183,7 +1190,7 @@
         '<td class="muted small">' + esc(t.reason || '—') + '</td></tr>';
     }).join('');
 
-    el('swapCard').innerHTML = card('Room swaps',
+    setHtml('swapCard', card('Room swaps',
       '<div class="tiles" style="margin-bottom:15px">' +
         tile(d.counts.APPROVED || 0, 'approved automatically', 'good') +
         tile(d.counts.OPEN || 0, 'listed on the board', '') +
@@ -1194,7 +1201,7 @@
         '</tbody></table></div>' : '') +
       '<p class="small muted" style="margin:12px 0 0">Swaps both students agree to are checked ' +
       'against gender, accessibility and reservation rules and applied without an administrator. ' +
-      'Nothing in this list is waiting on you.</p>');
+      'Nothing in this list is waiting on you.</p>'));
   }
 
   /* ======================================================== operations */
@@ -1225,11 +1232,11 @@
   }
 
   function busy(t) {
-    el('msg').innerHTML = '<div class="banner info"><span class="bic"><span class="spin"></span>' +
-      '</span><span>' + esc(t) + '</span></div>';
+    setHtml('msg', '<div class="banner info"><span class="bic"><span class="spin"></span>' +
+      '</span><span>' + esc(t) + '</span></div>');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
-  function done(kind, t) { el('msg').innerHTML = banner(kind, t); }
+  function done(kind, t) { setHtml('msg', banner(kind, t)); }
 
   function runAllocation() {
     if (!confirm('Run the allocation and save the result? This replaces the previous one.')) return;

@@ -31,7 +31,7 @@
 
 <script>
   paintChrome({ unit: 'Allotment Verification' });
-  el('root').innerHTML = loadingState('Checking this letter');
+  setHtml('root', loadingState('Checking this letter'));
 
   var P = <?!= JSON.stringify(params || {}) ?>;
 
@@ -42,16 +42,14 @@
     srv()
       .withSuccessHandler(show)
       .withFailureHandler(function (e) {
-        el('root').innerHTML =
-          '<div class="banner err">' + esc(e.message) + '</div>';
+        setHtml('root', '<div class="banner err">' + esc(e.message) + '</div>');
       })
       .apiVerifyAllotment(P.id, P.sig);
   }
 
   /** Camera-free entry. A warden at a gate cannot be stopped by a bad photocopy. */
   function showManualEntry(intro, error) {
-    el('root').innerHTML =
-      (error ? '<div class="banner err">' + esc(error) + '</div>' : '') +
+    setHtml('root', (error ? '<div class="banner err">' + esc(error) + '</div>' : '') +
       '<div class="card"><h2>Verify a letter</h2>' +
       '<p class="small muted" style="margin:-4px 0 12px">' + esc(intro) + '</p>' +
       '<label class="field"><span class="lab">Verification code</span>' +
@@ -59,7 +57,7 @@
       'autocomplete="off" autocapitalize="off" spellcheck="false"></label>' +
       '<div class="btn-row"><button class="btn" onclick="checkCode()">Verify</button></div>' +
       '<p class="small muted" style="margin:11px 0 0">You can paste the whole line printed ' +
-      'under the QR code, or just the code itself.</p></div>';
+      'under the QR code, or just the code itself.</p></div>');
     var box = document.getElementById('codeInput');
     if (box) {
       box.focus();
@@ -69,8 +67,7 @@
 
   function checkCode() {
     var v = (document.getElementById('codeInput') || {}).value || '';
-    el('root').innerHTML =
-      '<div class="empty"><span class="spin"></span> Checking&hellip;</div>';
+    setHtml('root', '<div class="empty"><span class="spin"></span> Checking&hellip;</div>');
     srv()
       .withSuccessHandler(show)
       .withFailureHandler(function (e) { showManualEntry('Try again.', e.message); })
@@ -79,20 +76,18 @@
 
   function show(r) {
     if (!r.valid) {
-      el('root').innerHTML =
-        '<div class="verdict bad"><div class="icon">&#10007;</div>' +
+      setHtml('root', '<div class="verdict bad"><div class="icon">&#10007;</div>' +
         '<div class="t">Not verified</div>' +
         '<div class="s">' + esc(r.reason) + '</div></div>' +
         '<div class="card"><p class="small muted" style="margin:0 0 12px">Do not accept this letter ' +
         'as proof of allotment. Refer the student to the hostel office.</p>' +
         '<div class="btn-row"><button class="btn ghost" onclick="showManualEntry(' +
         '&quot;Type or paste the code printed beneath the QR.&quot;)">Try another code</button>' +
-        '</div></div>';
+        '</div></div>');
       return;
     }
 
-    el('root').innerHTML =
-      '<div class="verdict good"><div class="icon">&#10003;</div>' +
+    setHtml('root', '<div class="verdict good"><div class="icon">&#10003;</div>' +
       '<div class="t">Genuine allotment letter</div>' +
       '<div class="s">Verified ' + esc(r.checkedAt) + '</div></div>' +
 
@@ -117,6 +112,6 @@
       '<div class="card"><p class="small muted" style="margin:0">This check confirms that the ' +
       'reference number carries a valid signature issued by the hostel allocation system, and ' +
       'that the allotment is still active. Confirm the student\'s identity separately against ' +
-      'their photo ID.</p></div>';
+      'their photo ID.</p></div>');
   }
 </script>

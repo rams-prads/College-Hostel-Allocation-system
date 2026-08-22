@@ -16,10 +16,10 @@
 <script>
   var VIEW = null;
   loadToken();
-  el('root').innerHTML = loadingState('Loading your application');
+  setHtml('root', loadingState('Loading your application'));
 
   srv().withSuccessHandler(render).withFailureHandler(function (e) {
-    el('root').innerHTML = banner('err', 'Could not load your application: ' + e.message);
+    setHtml('root', banner('err', 'Could not load your application: ' + e.message));
   }).apiGetStudentView(null, DEMO_TOKEN);
 
   /**
@@ -35,7 +35,7 @@
    */
   /** Called by the shared sign-in panel once a session exists. */
   function onSignedIn() {
-    el('root').innerHTML = loadingState('Loading your application');
+    setHtml('root', loadingState('Loading your application'));
     refreshView();
   }
 
@@ -43,7 +43,7 @@
     srv()
       .withSuccessHandler(function (v) {
         render(v);
-        if (note && el('msg')) el('msg').innerHTML = banner('good', note);
+        if (note && el('msg')) setHtml('msg', banner('good', note));
       })
       .withFailureHandler(function (e) {
         showFailure('That worked, but the page could not be refreshed: ' + e.message);
@@ -57,7 +57,7 @@
     if (!v.signedIn) {
       paintChrome({ unit: 'Hostel Allocation Portal' });
       saveToken(null);
-      el('root').innerHTML = signInPanel();
+      setHtml('root', signInPanel());
       return;
     }
 
@@ -79,14 +79,14 @@
     });
 
     if (v.unregistered) {
-      el('root').innerHTML = card('',
+      setHtml('root', card('',
         '<div class="empty"><div class="big">&#128075;</div>' +
         '<h3 style="margin:0 0 6px">Welcome — let\u2019s get you registered</h3>' +
         '<p class="small" style="max-width:460px;display:inline-block;margin:0 0 18px">' +
         'We have no record for <strong>' + esc(v.email) + '</strong> yet. Register your ' +
         'details once and you can apply for a hostel place straight away.</p><br>' +
         '<a class="btn" href="' + appUrl('?page=apply') + '" target="_top">' +
-        'Register and apply</a></div>');
+        'Register and apply</a></div>'));
       return;
     }
 
@@ -108,7 +108,7 @@
     }
     html.push(timeline(v));
 
-    if (!v.application) { html.push(noApplication(v)); el('root').innerHTML = html.join(''); return; }
+    if (!v.application) { html.push(noApplication(v)); setHtml('root', html.join('')); return; }
 
     if (v.allocation)     html.push(allotmentHero(v));
     else if (v.waitlist)  html.push(waitlistHero(v));
@@ -136,8 +136,8 @@
     if (v.allocation) html.push('<div id="grievCard"></div>');
     html.push(footNote(v));
 
-    el('root').innerHTML = html.join('');
-    if (flash && el('msg')) el('msg').innerHTML = banner(flash.kind, flash.text);
+    setHtml('root', html.join(''));
+    if (flash && el('msg')) setHtml('msg', banner(flash.kind, flash.text));
 
     // Swaps and grievances are write paths behind a session a preview does not
     // have. Calling them would render two error boxes on an otherwise correct
@@ -571,14 +571,14 @@
 
   /* ==================================================== swap marketplace */
   function loadSwaps() {
-    if (!VIEW.allocation) { el('swapCard').innerHTML = ''; return; }
-    el('swapCard').innerHTML = card('Room swap', loadingState('Checking the swap board'));
+    if (!VIEW.allocation) { setHtml('swapCard', ''); return; }
+    setHtml('swapCard', card('Room swap', loadingState('Checking the swap board')));
     srv().withSuccessHandler(paintSwaps)
-      .withFailureHandler(function () { el('swapCard').innerHTML = ''; }).apiGetSwapView();
+      .withFailureHandler(function () { setHtml('swapCard', ''); }).apiGetSwapView();
   }
 
   function paintSwaps(s) {
-    if (!s.allotted) { el('swapCard').innerHTML = ''; return; }
+    if (!s.allotted) { setHtml('swapCard', ''); return; }
     var body;
 
     if (!s.myRequest) {
@@ -613,7 +613,7 @@
         '&quot;)">Remove my listing</button></div>';
     }
 
-    el('swapCard').innerHTML = card('Room swap', '<div id="swapMsg"></div>' + body);
+    setHtml('swapCard', card('Room swap', '<div id="swapMsg"></div>' + body));
   }
 
   function postSwap() {
@@ -625,7 +625,7 @@
 
   function acceptSwap(reqId) {
     if (!confirm('Swap rooms with this student? Both allotment letters will be reissued.')) return;
-    el('swapMsg').innerHTML = banner('info', 'Checking hostel rules and applying…');
+    setHtml('swapMsg', banner('info', 'Checking hostel rules and applying…'));
     srv()
       .withSuccessHandler(function (r) {
         if (r.ok) refreshView('Swap agreed. Your new room is shown below.');
@@ -640,13 +640,13 @@
       .withFailureHandler(function (e) { swapErr(e.message); }).apiCancelSwap(reqId);
   }
 
-  function swapErr(msg) { el('swapMsg').innerHTML = banner('err', msg); }
+  function swapErr(msg) { setHtml('swapMsg', banner('err', msg)); }
 
   /* ============================================== reporting a problem */
   function loadGrievances() {
     if (!VIEW.allocation || !el('grievCard')) return;
     srv().withSuccessHandler(paintGrievances)
-      .withFailureHandler(function () { el('grievCard').innerHTML = ''; }).apiGetGrievances();
+      .withFailureHandler(function () { setHtml('grievCard', ''); }).apiGetGrievances();
   }
 
   function paintGrievances(list) {
@@ -683,15 +683,15 @@
       'answered within seconds.</span></label>' +
       '<div class="btn-row"><button class="btn" onclick="raiseGrievance()">Report it</button></div>';
 
-    el('grievCard').innerHTML = card('Report a problem', '<div id="grievMsg"></div>' + body);
+    setHtml('grievCard', card('Report a problem', '<div id="grievMsg"></div>' + body));
   }
 
   function raiseGrievance() {
     var text = (el('grievText') || {}).value || '';
-    el('grievMsg').innerHTML = banner('info', 'Logging your report…');
+    setHtml('grievMsg', banner('info', 'Logging your report…'));
     srv().withSuccessHandler(loadGrievances)
       .withFailureHandler(function (e) {
-        el('grievMsg').innerHTML = banner('err', e.message);
+        setHtml('grievMsg', banner('err', e.message));
       }).apiRaiseGrievance(text);
   }
 </script>

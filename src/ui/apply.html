@@ -63,18 +63,18 @@
   // on the Course step invalidates a stale list instead of silently keeping it.
   var optionsFor = '';
 
-  el('root').innerHTML = loadingState('Loading the application form');
+  setHtml('root', loadingState('Loading the application form'));
 
   srv().withSuccessHandler(boot).withFailureHandler(function (e) {
-    el('root').innerHTML = banner('err', e.message);
+    setHtml('root', banner('err', e.message));
   }).apiGetApplyForm();
 
   /** Called by the shared sign-in panel once a session exists. */
   function onSignedIn() {
-    el('root').innerHTML = loadingState('Loading the application form');
+    setHtml('root', loadingState('Loading the application form'));
     step = 0;
     srv().withSuccessHandler(boot)
-      .withFailureHandler(function (e) { el('root').innerHTML = banner('err', e.message); })
+      .withFailureHandler(function (e) { setHtml('root', banner('err', e.message)); })
       .apiGetApplyForm();
   }
 
@@ -91,12 +91,12 @@
 
     if (!f.signedIn) {
       saveToken(null);
-      el('root').innerHTML = signInPanel();
+      setHtml('root', signInPanel());
       return;
     }
     if (!f.applicationsOpen) {
-      el('root').innerHTML = card('', emptyState('&#128197;', 'Applications are closed',
-        'The hostel application window is not currently open.'));
+      setHtml('root', card('', emptyState('&#128197;', 'Applications are closed',
+        'The hostel application window is not currently open.')));
       return;
     }
 
@@ -104,10 +104,9 @@
     // Rendering one that the server will refuse to save is how a student ends
     // up typing a correction twice and losing it twice.
     if (f.draft && f.editable === false) {
-      el('root').innerHTML =
-        card('', emptyState('&#128274;', 'Your application is now fixed', f.lockReason)) +
+      setHtml('root', card('', emptyState('&#128274;', 'Your application is now fixed', f.lockReason)) +
         card('', '<div style="text-align:center"><a class="btn" href="' + appUrl('?') +
-             '" target="_top">Back to my application</a></div>');
+             '" target="_top">Back to my application</a></div>'));
       return;
     }
 
@@ -159,8 +158,7 @@
                    'office has verified both your identity and your documents.')
           : '');
 
-    el('root').innerHTML =
-      '<div id="msg"></div>' + head +
+    setHtml('root', '<div id="msg"></div>' + head +
       card('', '<ul class="wiz">' + STEPS.map(function (s, i) {
         return '<li class="' + (i < step ? 'done' : (i === step ? 'now' : '')) +
           '" onclick="goStep(' + i + ')"><span class="num">' +
@@ -178,7 +176,7 @@
         (!FORM.needsRegistration && (!FORM.draft || FORM.draft.status === 'DRAFT')
           ? '<button class="btn ghost" onclick="saveDraft()">Save as draft</button>' : '') +
         '<span class="small muted">Step ' + (step + 1) + ' of ' + STEPS.length + '</span>' +
-      '</div>');
+      '</div>'));
 
     paintStep();
   }
@@ -197,7 +195,7 @@
       'Family': stepFamily, 'Preferences': stepPreferences, 'Roommate': stepRoommate,
       'Review': stepReview
     }[name];
-    el('stepBody').innerHTML = fn ? fn() : '';
+    setHtml('stepBody', fn ? fn() : '');
     if (name === 'Preferences') { ensureOptions(); paintOptions(); paintChosen(); }
     if (name === 'Roommate') paintLifestyle();
     if (name === 'Home address' && pinInfo) showPin(pinInfo);
@@ -547,7 +545,7 @@
       say('err', 'Please give ' + uniq.join(', ') + '.');
       return false;
     }
-    if (el('msg')) el('msg').innerHTML = '';
+    if (el('msg')) setHtml('msg', '');
     return true;
   }
 
@@ -611,7 +609,7 @@
   }
 
   function say(kind, text) {
-    if (el('msg')) el('msg').innerHTML = banner(kind, text);
+    if (el('msg')) setHtml('msg', banner(kind, text));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -655,7 +653,7 @@
         paintChosen();
       })
       .withFailureHandler(function (e) {
-        if (el('options')) el('options').innerHTML = banner('err', e.message);
+        if (el('options')) setHtml('options', banner('err', e.message));
       })
       .apiGetHostelOptions(myGender(), myCampus(), reg.programme, reg.year);
   }

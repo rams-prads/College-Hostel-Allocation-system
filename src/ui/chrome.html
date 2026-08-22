@@ -43,7 +43,9 @@ function showFailure(message, detail) {
     (detail ? '<details class="tech"><summary>Technical detail</summary>' +
               '<pre class="small" style="white-space:pre-wrap;margin:0">' + esc(detail) +
               '</pre></details>' : '');
-  if (el('msg')) box.innerHTML = body; else box.innerHTML = body;
+  // Whichever of the two exists. box was resolved above; writing through it by
+  // id keeps the "it may have gone" case with every other write on the page.
+  setHtml(box.id, body);
 }
 
 var CALL_TIMEOUT_MS = 25000;
@@ -60,6 +62,21 @@ var CALL_TIMEOUT_MS = 25000;
  */
 function srv(ownerId) {
   var ok = null, fail = null;
+
+  // Whether the panel this call is painting into existed when the call was
+  // made. If it did and it does not any more, the person has moved on - to
+  // another tab, or through a redraw - and the answer is for a screen nobody is
+  // looking at. Dropping it is correct: painting it would write over whatever
+  // they are looking at NOW, and reporting it as a failure would put a red box
+  // on a page where nothing went wrong.
+  //
+  // An owner that never existed is a different thing entirely - a typo in a
+  // call site - and is deliberately left to fail loudly.
+  var ownerWasThere = ownerId ? !!el(ownerId) : false;
+
+  function abandoned() {
+    return ownerWasThere && !el(ownerId);
+  }
 
   function report(message, detail) {
     // Open, not collapsed. A failure nobody can read without a second click is
@@ -95,6 +112,7 @@ function srv(ownerId) {
         var timer = setTimeout(function () {
           if (settled) return;
           settled = true;
+          if (abandoned()) return;
           report('This is taking longer than it should. The server has not answered in ' +
                  '25 seconds. Try again; if it keeps happening, the deployment may be ' +
                  'serving an older version of the code.', name);
@@ -111,7 +129,7 @@ function srv(ownerId) {
         // once, so no handler anywhere has to remember to.
         r = r.withSuccessHandler(function (result) {
           done();
-          if (!ok) return;
+          if (!ok || abandoned()) return;
           try {
             ok(result);
           } catch (e) {
@@ -126,6 +144,7 @@ function srv(ownerId) {
 
         r = r.withFailureHandler(function (e) {
           done();
+          if (abandoned()) return;
           if (fail) {
             try { fail(e); return; } catch (inner) { /* fall through to the banner */ }
           }
@@ -180,8 +199,8 @@ function codeStep(email) {
 var _siEmail = '';
 
 function backToEmail() {
-  el('signinBody').innerHTML = emailStep();
-  el('signinMsg').innerHTML = '';
+  setHtml('signinBody', emailStep());
+  setHtml('signinMsg', '');
 }
 
 function sendCode() {
@@ -189,7 +208,7 @@ function sendCode() {
   if (!input) return;
   var addr = String(input.value || '').trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(addr)) {
-    el('signinMsg').innerHTML = banner('err', 'That does not look like an email address.');
+    setHtml('signinMsg', banner('err', 'That does not look like an email address.'));
     return;
   }
   _siEmail = addr;
@@ -197,13 +216,13 @@ function sendCode() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Sending'; }
 
   srv().withSuccessHandler(function () {
-      el('signinBody').innerHTML = codeStep(_siEmail);
-      el('signinMsg').innerHTML = '';
+      setHtml('signinBody', codeStep(_siEmail));
+      setHtml('signinMsg', '');
       if (el('siCode')) el('siCode').focus();
     })
     .withFailureHandler(function (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Email me a code'; }
-      el('signinMsg').innerHTML = banner('err', e.message);
+      setHtml('signinMsg', banner('err', e.message));
     })
     .apiRequestSignInCode(addr);
 }
@@ -224,7 +243,7 @@ function submitCode() {
     })
     .withFailureHandler(function (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
-      el('signinMsg').innerHTML = banner('err', e.message);
+      setHtml('signinMsg', banner('err', e.message));
     })
     .apiVerifySignInCode(_siEmail, String(input.value || ''));
 }
@@ -297,6 +316,29 @@ function esc(s) {
   });
 }
 function el(id) { return document.getElementById(id); }
+
+/**
+ * Write into an element that may no longer be there.
+ *
+ * Every panel on every page is painted by a callback that runs some time after
+ * the call that asked for it. In between, the person can move to another tab,
+ * sign out, or trigger a redraw - and the node the callback was going to write
+ * into stops existing. The assignment then throws inside a success handler,
+ * which surfaces as "Cannot set properties of null" over the top of a page that
+ * was working perfectly well.
+ *
+ * Nothing has gone wrong in that situation. The answer simply arrived for a
+ * screen nobody is looking at any more, and the right thing to do with it is
+ * nothing. Every write goes through here so that no handler has to remember.
+ *
+ * @return {boolean} whether it landed anywhere.
+ */
+function setHtml(id, html) {
+  var node = el(id);
+  if (!node) return false;
+  node.innerHTML = html;
+  return true;
+}
 
 /**
  * Absolute URL for an in-app link.
