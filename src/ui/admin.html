@@ -90,6 +90,11 @@
   loadToken();
   setHtml('root', loadingState('Loading dashboard'));
 
+  function onSignedOut() {
+    paintChrome({ unit: 'Hostel Administration' });
+    setHtml('root', '<div class="wrap narrow">' + signInPanel() + '</div>');
+  }
+
   /** Called by the shared sign-in panel once a session exists. */
   function onSignedIn() {
     setHtml('root', loadingState('Loading dashboard'));

@@ -724,6 +724,39 @@ check('signing in lands each account in its own place', (() => {
   return /homeFor\(who\)/.test(src) && /apiWhoAmI/.test(src);
 })(), 'the extra hop was a page load spent on a screen the reader may not use');
 
+check('signing out redraws the page instead of leaving it', (() => {
+  // A signed-out visitor being sent to the deployment URL is the moment Google
+  // is most likely to answer with one of its own error pages instead of ours,
+  // and there is nothing to go there FOR: the session is a token this browser
+  // holds, so signing out is discarding it.
+  const t = renderPage('student.html', studentEmail, `
+    window.top.location.href = '';
+    signOut();
+  `);
+  return !t.threw &&
+         window.top.location.href === '' &&
+         t.screen.indexOf('id="siEmail"') > 0;
+})(), window.top.location.href || 'stayed put');
+
+check('every page that can sign someone in can sign them out again', (() => {
+  return ['student.html', 'apply.html', 'admin.html', 'index.html']
+    .every(f => /function onSignedOut/.test(codeOf(f)));
+})(), 'without one, signOut falls back to navigating, which is what this avoids');
+
+check('a navigation that does not take offers a link instead', (() => {
+  // The sandbox this app runs in permits top-level navigation only by user
+  // activation, so a redirect started from a page-load callback can be refused
+  // with no error to catch. The page must not simply stop.
+  const src = codeOf('chrome.html');
+  return /offerLink_/.test(src) && /target="_top"/.test(src);
+})(), 'a page that has quietly stopped is indistinguishable from a hang');
+
+check('an administrator is routed by the server when the server can tell', (() => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'Main.gs'), 'utf8');
+  return src.indexOf("session.isAdmin && !params.demo") > 0 &&
+         src.indexOf("page === 'home' || page === 'apply'") > 0;
+})(), 'doing it in doGet saves the browser a navigation, which is the part that can fail');
+
 section('Every page can sign someone in, not just the front one');
 // A student portal reached without a session used to be a dead end that told
 // the visitor to go and be signed in. Each page now carries the panel itself.

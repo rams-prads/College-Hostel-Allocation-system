@@ -210,6 +210,54 @@ check('another signed-in visitor is still refused', (() => {
   catch (e) { return true; }
 })());
 
+// ================================================ what the browser receives
+section('A response the browser cannot receive is not a response');
+
+// google.script.run does not fail on a value it cannot encode - it hands the
+// success handler null. The page then reads a field off nothing and reports a
+// TypeError naming whatever it asked for first, which is never the real fault.
+// "Cannot read properties of null (reading 'isAdmin')" was one of these.
+
+check('NaN is not a number the browser can be given',
+  jsonSafe_({ n: NaN }).n === null,
+  'one text cell in a numeric column takes the whole response down, not just itself');
+check('nor is Infinity',
+  jsonSafe_({ a: Infinity, b: -Infinity }).a === null &&
+  jsonSafe_({ a: Infinity, b: -Infinity }).b === null);
+check('an unparseable date is dropped rather than sent',
+  jsonSafe_({ d: new Date('not a date') }).d === null);
+check('but a real date survives untouched', (() => {
+  const d = new Date(2026, 7, 23);
+  return jsonSafe_({ d: d }).d instanceof Date && +jsonSafe_({ d: d }).d === +d;
+})(), 'the fix must not cost the pages the dates they format');
+check('undefined inside an array becomes null, not a hole',
+  jsonSafe_([1, undefined, 3])[1] === null,
+  'an array has no key for the encoder to drop, so the encoder gives up instead');
+check('a function is left behind entirely',
+  !('f' in jsonSafe_({ f: function () {}, keep: 1 })) &&
+  jsonSafe_({ f: function () {}, keep: 1 }).keep === 1);
+check('ordinary values are untouched', (() => {
+  const v = jsonSafe_({ s: 'x', n: 4.5, b: true, a: [1, 2], o: { k: 'v' } });
+  return v.s === 'x' && v.n === 4.5 && v.b === true && v.a[1] === 2 && v.o.k === 'v';
+})());
+check('a cycle terminates instead of hanging', (() => {
+  const a = { name: 'a' }; a.self = a;
+  const out = jsonSafe_(a);
+  return out.name === 'a';
+})(), 'a payload that never finishes encoding is the same outage with a longer wait');
+
+// Proved through the dispatcher itself, because that is the guarantee that
+// matters: not that jsonSafe_ works, but that nothing reaches a browser
+// without passing through it.
+global.apiProbeEncoding = function () {
+  return { bad: NaN, when: new Date('not a date'), good: 42, name: 'kept' };
+};
+check('nothing reaches the browser without being made encodable', (() => {
+  const sent = apiCall(null, 'apiProbeEncoding', []);
+  return sent.bad === null && sent.when === null &&
+         sent.good === 42 && sent.name === 'kept';
+})(), 'the field that was wrong goes missing; everything else on the page still arrives');
+
 // ============================================================ end to end
 section('A first-year registers and applies, start to finish');
 

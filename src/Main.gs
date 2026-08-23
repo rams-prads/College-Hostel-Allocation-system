@@ -102,6 +102,18 @@ function route_(e) {
     if (session.email && !session.isAdmin) return accessDenied_(session);
     return render_('ui/admin', 'Admin Dashboard', { session: session });
   }
+  // An administrator has no application of their own, so neither the portal nor
+  // the form is a page they should land on. Decided HERE whenever the server
+  // can see who is asking, which is the case for anyone Google identified.
+  //
+  // The pages carry the same rule for the visitors the server cannot identify -
+  // a code session lives in the browser and never reaches doGet - but doing it
+  // here when we can saves a full top-level navigation, and a navigation to a
+  // URL this script constructed is the one part of the trip that can go wrong.
+  if (session.isAdmin && !params.demo && (page === 'home' || page === 'apply')) {
+    return render_('ui/admin', 'Admin Dashboard', { session: session });
+  }
+
   if (page === 'apply')  return render_('ui/apply',   'Hostel Application', { session: session });
   if (params.demo)       return render_('ui/student', 'My Hostel Application',
                                         { session: session, demoToken: params.demo });
@@ -181,6 +193,19 @@ function diagnosticPage_(e) {
       row('Try', 'Sign in with an address ending @' + ownerDomain);
     }
   }
+
+  // The address every in-app link and redirect is built from. If it is not the
+  // address in the browser's bar, this deployment is not the one the script
+  // thinks is current - and following any link here would leave the deployment
+  // the visitor actually has open, which is its own class of confusing failure.
+  try {
+    var deployed = webAppUrl();
+    row('This deployment', deployed
+      ? deployed + ' &mdash; links and redirects are built from this. Compare it with ' +
+        'the address in your browser: if they differ, you are on an older deployment.'
+      : 'UNKNOWN. ScriptApp.getService().getUrl() returned nothing, so in-app links ' +
+        'fall back to relative addresses.', !!deployed);
+  } catch (err) { row('This deployment', 'ERROR: ' + err.message, false); }
 
   var s = null;
   try { s = Auth.session(); row('Administrator', s.isAdmin ? 'yes (' + s.role + ')' : 'no', s.isAdmin); }

@@ -30,6 +30,10 @@
       .apiWhoAmI();
   }
 
+  function onSignedOut() {
+    setHtml('root', signInPanel());
+  }
+
   // Already holding a session? Go where that account belongs.
   if (SESSION.token) {
     srv().withSuccessHandler(function (who) {

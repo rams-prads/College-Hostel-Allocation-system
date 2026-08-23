@@ -130,6 +130,11 @@
     setHtml('root', banner('err', e.message));
   }).apiGetApplyForm();
 
+  function onSignedOut() {
+    paintChrome({ unit: 'Hostel Application' });
+    setHtml('root', signInPanel());
+  }
+
   /** Called by the shared sign-in panel once a session exists. */
   function onSignedIn() {
     setHtml('root', loadingState('Loading the application form'));
@@ -140,6 +145,15 @@
   }
 
   function boot(f) {
+    // A response that could not be encoded arrives as null rather than as an
+    // error - see jsonSafe_() for why that happens and what now prevents it.
+    // The guard stays because a page reading fields off nothing is how that
+    // fault got reported as a TypeError about an unrelated field.
+    if (!f) {
+      setHtml('root', banner('err', 'The application form could not be loaded. ' +
+        'Please try again; if it keeps happening, tell the hostel office.'));
+      return;
+    }
     FORM = f;
 
     // Same rule as the portal: an administrator has no application to fill in,

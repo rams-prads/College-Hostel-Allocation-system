@@ -40,10 +40,70 @@ function apiCall(sessionToken, fnName, args) {
 
   Auth.useToken(sessionToken);
   try {
-    return fn.apply(null, args || []);
+    return jsonSafe_(fn.apply(null, args || []));
   } finally {
     Auth.useToken(null);
   }
+}
+
+/**
+ * Make a response the browser can actually receive.
+ *
+ * google.script.run serialises the return value, and a value it cannot encode
+ * does not produce an error - it delivers **null** to the success handler. The
+ * page then reads a property off null, throws inside the handler, and reports
+ * a TypeError naming a field that has nothing to do with the real problem.
+ * "Cannot read properties of null (reading 'isAdmin')" was one of those.
+ *
+ * What cannot be encoded is easy to produce here by accident, because the data
+ * comes out of a spreadsheet:
+ *
+ *   NaN        Db.decode does Number(cell) on a NUM column. One cell holding
+ *              text - a stray apostrophe, "N/A", a pasted dash - is enough,
+ *              and it takes the WHOLE response down with it, not just itself.
+ *   Infinity   any division by a zero that should not have been zero.
+ *   Invalid Date  new Date(cell) on a DATE column with anything unparseable.
+ *   undefined  inside an array, where the encoder has no key to drop.
+ *
+ * All four become null. A response that is missing one field is a page with a
+ * gap in it; a response that is null is a page with a stack trace on it.
+ *
+ * Applied at the dispatcher rather than at the fifty places that build a
+ * payload, for the same reason setHtml() is: an endpoint written next year
+ * gets it without knowing it exists.
+ */
+function jsonSafe_(value, depth) {
+  depth = depth || 0;
+  if (depth > 12) return null;                 // cycles, and absurd nesting
+
+  if (value === undefined || value === null) return null;
+
+  var t = typeof value;
+  if (t === 'number') return isFinite(value) ? value : null;
+  if (t === 'string' || t === 'boolean') return value;
+  if (t === 'function') return null;
+
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : value;
+  }
+
+  if (Object.prototype.toString.call(value) === '[object Array]') {
+    var out = [];
+    for (var i = 0; i < value.length; i++) out.push(jsonSafe_(value[i], depth + 1));
+    return out;
+  }
+
+  if (t === 'object') {
+    var o = {};
+    for (var k in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, k)) continue;
+      if (typeof value[k] === 'function') continue;
+      o[k] = jsonSafe_(value[k], depth + 1);
+    }
+    return o;
+  }
+
+  return null;
 }
 
 /**

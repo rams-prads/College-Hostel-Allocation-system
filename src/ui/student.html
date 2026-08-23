@@ -40,6 +40,12 @@
     refreshView();
   }
 
+  /** Signing out draws the sign-in panel here rather than reloading the tab. */
+  function onSignedOut() {
+    paintChrome({ unit: 'Hostel Allocation Portal' });
+    setHtml('root', signInPanel());
+  }
+
   function refreshView(note) {
     srv()
       .withSuccessHandler(function (v) {

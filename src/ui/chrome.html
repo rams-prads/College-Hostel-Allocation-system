@@ -381,11 +381,6 @@ function submitCode() {
     .apiVerifySignInCode(_siEmail, String(input.value || ''));
 }
 
-function signOut() {
-  saveToken(null);
-  reloadTop();
-}
-
 var FLASH_KEY = 'ggsipu.hostel.flash';
 
 /**
@@ -440,14 +435,67 @@ function homeFor(who) {
   return (who && who.isAdmin) ? '?page=admin' : '?';
 }
 
-function reloadTop(query) {
+/**
+ * Move the whole browser tab to another page of this app.
+ *
+ * This is the least reliable thing the client does, and it is worth being
+ * honest about why. The app runs inside a sandboxed iframe served from a
+ * different origin, and that sandbox permits top-level navigation only "by
+ * user activation" - so a navigation started from a page-load callback rather
+ * than from a click can be refused by the browser with no error to catch. The
+ * page then simply sits there, which reads as a hang.
+ *
+ * So: try, and if nothing has happened shortly afterwards, put a real link on
+ * the screen. A link carries the activation the automatic attempt lacked, and
+ * a visible way forward beats a page that has quietly stopped.
+ */
+function reloadTop(query, label) {
   var url = appUrl(query || '?');
   try {
     window.top.location.href = url;
   } catch (e) {
-    // Not in a frame we may navigate. Move this one instead.
-    window.location.href = url;
+    // Not a frame we are allowed to navigate. Move this one instead.
+    try { window.location.href = url; } catch (e2) { /* offer the link below */ }
   }
+
+  // Long enough that a page which IS on its way does not flash a warning at
+  // the reader on the way out.
+  setTimeout(function () { offerLink_(url, label); }, 2500);
+}
+
+/**
+ * The visible way forward when a navigation did not take.
+ *
+ * Deliberately additive: it is written into #msg or over #root only if the
+ * page is still here to write into, which by definition means the navigation
+ * did not happen.
+ */
+function offerLink_(url, label) {
+  var box = el('msg') || el('root');
+  if (!box) return;
+  setHtml(box.id,
+    '<div class="banner info"><span class="bic">i</span><span>' +
+    'Your browser did not follow the link automatically. ' +
+    '<a href="' + esc(url) + '" target="_top">' +
+    esc(label || 'Continue') + '</a></span></div>');
+}
+
+/**
+ * Sign out without leaving the page.
+ *
+ * The session is a token this browser holds, so signing out is discarding it -
+ * there is nothing on the server to tell. Navigating afterwards was pure
+ * habit, and it was the riskiest moment in the whole app: a signed-out visitor
+ * being sent to the deployment URL is exactly when Google is most likely to
+ * answer with one of its own error pages instead of ours.
+ *
+ * Pages that can draw their own signed-out state say so with onSignedOut().
+ */
+function signOut() {
+  saveToken(null);
+  SESSION.email = ''; SESSION.isAdmin = false; SESSION.via = null; SESSION.checked = false;
+  if (typeof onSignedOut === 'function') { onSignedOut(); return; }
+  reloadTop('?', 'Go to the sign-in page');
 }
 
 /**
