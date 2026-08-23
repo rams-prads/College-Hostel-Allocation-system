@@ -244,6 +244,75 @@ check('every reason carries the sentence the student reads', (() => {
   return Verification.reasons().every(r => r.student && r.student.length > 40 && r.label);
 })(), 'a code in a database is not something anybody can act on');
 
+// ============================= the alternative nobody used
+section('An unused alternative is not an outstanding task');
+
+// The reported fault. A continuing student sent the admission page and left the
+// ID-card slot empty - which is the whole point of there being two. The slot
+// stayed REQUIRED for ever, so the console filed them under "waiting on the
+// student" and showed them to nobody, while their own page said "under review".
+(() => {
+  const app = (function () {
+    const apps = Db.readAll('Applications');
+    for (let i = 0; i < apps.length; i++) {
+      if (used[apps[i].appId]) continue;
+      const s = Db.byId('Students', apps[i].studentId);
+      if (Documents.slotsFor(s, apps[i]).length < 2) continue;
+      used[apps[i].appId] = true;
+      return apps[i];
+    }
+    throw new Error('no continuing applicant left');
+  })();
+  const st = Db.byId('Students', app.studentId);
+
+  Documents.provision(app.appId, st);
+  Db.invalidate('Documents');
+  const form = Db.where('Documents', { appId: app.appId })
+    .find(d => d.docType === 'ADMISSION_FORM');
+  Db.update('Documents', form.docId, {
+    status: 'UPLOADED', driveFileId: 'only-the-form', fileName: 'form.jpg',
+    scanVerdict: 'MATCH', scanJson: { findings: [], detail: { nameScore: 1 } }
+  });
+  Db.update('Applications', app.appId,
+    { status: 'SUBMITTED', verifyStatus: '', docStatus: 'SUBMITTED' });
+  Db.invalidate('Documents'); Db.invalidate('Applications');
+
+  check('the unused slot is still marked REQUIRED', (() => {
+    const card = Db.where('Documents', { appId: app.appId }).find(d => d.docType === 'ID_CARD');
+    return card && card.status === 'REQUIRED';
+  })(), 'which is correct - nobody uploaded to it');
+
+  check('but nothing is outstanding, because the requirement is met',
+    Documents.outstanding(app.appId, st).length === 0,
+    'an alternative they declined is not a task they owe');
+
+  check('so the case is waiting on the OFFICER, not on the student',
+    Verification._stateOf(Db.byId('Applications', app.appId),
+      Db.where('Documents', { appId: app.appId }), st) === 'NEEDS_DECISION',
+    'it sat in "with student" for ever, invisible to everybody, while the ' +
+    'their own page meanwhile said "under review"');
+
+  check('it is in the to-do list',
+    Verification.queue({ filter: 'NEEDS_DECISION', limit: 500 })
+      .rows.some(r => r.appId === app.appId));
+
+  check('and it can actually be verified',
+    Verification.caseFor(app.appId).ready.canDecide === true,
+    'the Verify button was disabled on every continuing student who sent the page');
+
+  check('a case with nothing uploaded at all is still waiting on the student', (() => {
+    const other = Db.readAll('Applications').find(a =>
+      !used[a.appId] && a.status !== 'DRAFT' && a.status !== 'WITHDRAWN');
+    used[other.appId] = true;
+    const os = Db.byId('Students', other.studentId);
+    Documents.provision(other.appId, os);
+    Db.update('Applications', other.appId, { verifyStatus: '' });
+    Db.invalidate('Documents'); Db.invalidate('Applications');
+    return Verification._stateOf(Db.byId('Applications', other.appId),
+      Db.where('Documents', { appId: other.appId }), os) === 'WAITING_ON_STUDENT';
+  })(), 'the fix must not make everybody look ready');
+})();
+
 // ============================================================== the queue
 section('The queue is ordered by what should be done first');
 

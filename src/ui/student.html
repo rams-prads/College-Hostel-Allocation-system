@@ -423,8 +423,11 @@
   function documentsCard(v) {
     if (!v.documents || !v.documents.length) return '';
     var rows = v.documents.map(function (d) {
-      var kind = { VERIFIED:'ok', UPLOADED:'info', REJECTED:'bad',
-                   WAIVED:'ok', REQUIRED:'warn' }[d.status] || 'warn';
+      // An alternative nobody has used is not an outstanding task, and a warn
+      // pill saying "Not uploaded yet" beside one reads as a job left undone.
+      var spare = !!d.altFor && d.status === 'REQUIRED';
+      var kind = spare ? '' : ({ VERIFIED:'ok', UPLOADED:'info', REJECTED:'bad',
+                                 WAIVED:'ok', REQUIRED:'warn' }[d.status] || 'warn');
 
       // A verified document is finished. Everything else can still be sent or
       // replaced - a rejected one especially, since being told to resubmit with
@@ -447,7 +450,8 @@
         '<span class="d" id="u-' + esc(d.docType) + '"></span>' +
         '</span>' +
         '<span style="display:flex;gap:8px;align-items:center">' +
-        pill(kind, label('doc', d.status)) + act + '</span></li>';
+        pill(kind, spare ? 'Only if you have no admission page' : label('doc', d.status)) +
+        act + '</span></li>';
     }).join('');
 
     return card('Documents required of you',

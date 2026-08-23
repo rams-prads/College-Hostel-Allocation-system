@@ -395,8 +395,10 @@ var Verification = (function () {
 
   /** Can this case be decided at all, and if not, what is missing? */
   function readiness_(docs, idRow, appId, student) {
-    var required = Documents.statusFor(appId, student);
-    var outstanding = required.filter(function (r) { return r.status === 'REQUIRED'; });
+    // By REQUIREMENT, not by row. An unused alternative slot stays REQUIRED for
+    // ever, and counting it as outstanding disabled the Verify button on every
+    // continuing student who sent the admission page.
+    var outstanding = Documents.outstanding(appId, student);
     var unread = docs.filter(function (d) {
       return d.driveFileId && (!d.scanVerdict || d.scanVerdict === 'UNSCANNED');
     });
@@ -404,6 +406,13 @@ var Verification = (function () {
     return {
       canDecide: outstanding.length === 0,
       awaitingUpload: outstanding.map(function (r) { return r.label; }),
+      // Named so the console can say "or their ID card instead" rather than
+      // implying the one named document is the only thing that would do.
+      alternatives: outstanding.map(function (r) {
+        return (r.alternatives || []).map(function (a) {
+          return (DOC_TYPES[a] || {}).label || a;
+        });
+      }),
       awaitingScan: unread.length,
       identityDeclared: !!(idRow && idRow.status !== 'REQUIRED')
     };
@@ -438,7 +447,7 @@ var Verification = (function () {
       if (!student) return;
 
       var docs = docsByApp[app.appId] || [];
-      var state = stateOf_(app, docs);
+      var state = stateOf_(app, docs, student);
       counts[state] = (counts[state] || 0) + 1;
       counts.ALL++;
 
@@ -498,14 +507,24 @@ var Verification = (function () {
    * Named for what the office is waiting on, not for what the record contains,
    * because "who do I chase" is the question a queue is for.
    */
-  function stateOf_(app, docs) {
+  function stateOf_(app, docs, student) {
     var v = verifyStatusOf_(app);
     if (v === 'VERIFIED' || v === 'REJECTED') return 'DONE';
     if (v === 'ACTION_REQUIRED') return 'WAITING_ON_STUDENT';
 
+    // Whether anything is still owed is a question about REQUIREMENTS. Asking
+    // it of the rows - "is any slot still REQUIRED?" - files every applicant
+    // who used one of two alternatives under "waiting on the student", for
+    // ever, over a slot they were never going to fill.
+    if (student) {
+      try {
+        return Documents.outstanding(app.appId, student).length
+          ? 'WAITING_ON_STUDENT' : 'NEEDS_DECISION';
+      } catch (e) { /* fall through to the row-level reading below */ }
+    }
+
     var uploaded = docs.filter(function (d) { return !!d.driveFileId; });
     if (!uploaded.length) return 'WAITING_ON_STUDENT';
-    if (docs.some(function (d) { return d.status === 'REQUIRED'; })) return 'WAITING_ON_STUDENT';
     return 'NEEDS_DECISION';
   }
 
@@ -674,8 +693,9 @@ var Verification = (function () {
 
     var byState = { NEEDS_DECISION: 0, WAITING_ON_STUDENT: 0, DONE: 0 };
     var ages = [];
+    var stu = Db.indexBy('Students', 'studentId');
     apps.forEach(function (a) {
-      var st = stateOf_(a, docsByApp[a.appId] || []);
+      var st = stateOf_(a, docsByApp[a.appId] || [], stu[a.studentId]);
       byState[st] = (byState[st] || 0) + 1;
       if (st === 'NEEDS_DECISION') ages.push(ageDays_(a.submittedAt));
     });

@@ -1256,6 +1256,31 @@ check('a campus with no rooms on record says so instead of "all chosen"', (() =>
          t.screen.indexOf('already in your list') < 0;
 })(), 'telling somebody with an empty list that it is full is how a form reads as broken');
 
+check('an alternative nobody used is not shown as an outstanding task', (() => {
+  // The student's own page said "Not uploaded yet" in a warning colour beside a
+  // document they were never required to send, which reads as a job undone.
+  // From the END of the list: earlier sections work from the start, and two
+  // sections sharing an applicant is how a test fails for reasons that have
+  // nothing to do with what it is testing.
+  const app = Db.readAll('Applications').slice().reverse().find(a =>
+    Documents.slotsFor(Db.byId('Students', a.studentId), a).length === 2);
+  const st = Db.byId('Students', app.studentId);
+  Documents.provision(app.appId, st);
+  Db.invalidate('Documents');
+  Db.where('Documents', { appId: app.appId }).forEach(d => {
+    Db.update('Documents', d.docId, d.docType === 'ADMISSION_FORM'
+      ? { status: 'UPLOADED', driveFileId: 'alt-1', fileName: 'form.jpg' }
+      : { status: 'REQUIRED', driveFileId: '', fileName: '' });
+  });
+  Db.update('Applications', app.appId, { verifyStatus: '' });
+  Db.invalidate('Documents'); Db.invalidate('Applications');
+
+  const t = renderPage('student.html', st.email);
+  return t.screen.indexOf('College ID card') > 0 &&
+         /Only if you have no admission page/.test(t.screen) &&
+         t.screen.indexOf('Not uploaded yet') < 0;
+})(), 'an offer is not a task, and a warning pill on one says it is');
+
 section('Where has my document got to?');
 
 (() => {

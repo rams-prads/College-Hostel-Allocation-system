@@ -228,6 +228,36 @@ var Documents = (function () {
    * which is what the eligibility engine reads.
    */
   /**
+   * Requirements with nothing uploaded against ANY member.
+   *
+   * The one question worth asking about an applicant's evidence, and the one
+   * that has to be asked in exactly one place. Asking it row by row - "is any
+   * slot still REQUIRED?" - is wrong the moment a requirement has an
+   * alternative, because the alternative slot stays REQUIRED for ever once the
+   * student uploads the other one. That is not an outstanding task; it is an
+   * offer they declined.
+   *
+   * It cost an applicant their place in the queue: their admission page was
+   * uploaded and waiting, their unused ID-card slot said REQUIRED, and the
+   * verification console therefore filed them under "waiting on the student"
+   * and never showed them to anybody.
+   */
+  function outstanding(appId, student) {
+    var app = Db.byId('Applications', appId);
+    var rows = Db.where('Documents', { appId: appId });
+    var byType = {};
+    rows.forEach(function (d) { byType[d.docType] = d; });
+
+    return requiredFor(student, app).filter(function (g) {
+      var members = [g.docType].concat(g.alternatives || []);
+      return !members.some(function (t) {
+        var r = byType[t];
+        return r && (!!r.driveFileId || r.status === 'WAIVED');
+      });
+    });
+  }
+
+  /**
    * The state of the requirement, not of the rows.
    *
    * A requirement satisfied by either of two documents is met when EITHER is
@@ -321,6 +351,7 @@ var Documents = (function () {
   return {
     requiredFor: requiredFor,
     slotsFor: slotsFor,
+    outstanding: outstanding,
     provision: provision,
     statusFor: statusFor,
     rollUp: rollUp,
