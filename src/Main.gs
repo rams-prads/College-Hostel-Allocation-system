@@ -298,6 +298,15 @@ function logoUrl() {
   try { return String(Db.cfg('LOGO_URL', '') || ''); } catch (e) { return ''; }
 }
 
+/**
+ * The address a stuck visitor should write to. Read here rather than passed
+ * through every view payload: the sign-in panel needs it before there is a
+ * session to build a payload from.
+ */
+function supportEmail() {
+  try { return String(Db.cfg('SUPPORT_EMAIL', '') || ''); } catch (e) { return ''; }
+}
+
 function webAppUrl() {
   try {
     return ScriptApp.getService().getUrl() || '';

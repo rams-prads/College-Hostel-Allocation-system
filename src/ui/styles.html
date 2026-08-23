@@ -435,16 +435,99 @@
   .findings li.info{color:var(--muted)}
   .findings li.info:before{content:"\2139"}
 
-  /* Sign-in. Narrow on purpose: one field, one button, nothing to scan past. */
-  .signin{text-align:center;padding:22px 8px 8px}
-  .signin .big{font-size:38px;line-height:1;margin-bottom:12px;opacity:.9}
-  .signin h3{margin:0 0 8px;font-size:20px}
-  .signin .intro{max-width:400px;margin:0 auto 16px;display:block}
-  .signin-field{max-width:320px;margin:0 auto 14px;text-align:left}
-  .signin-field input{text-align:center;font-size:16px}
+  /* ============================================================= sign-in
+     Two panels, not one centred box. The old page was a card floating in a
+     field of white with an emoji on top: correct, and completely silent about
+     what this is or why it does not want a password. The navy half gives the
+     page somewhere to stand and answers both questions before the field is
+     reached; the white half is still one input and one button.
+
+     On a narrow screen the form comes FIRST and the navy panel drops beneath
+     it. Somebody who already knows what this is should not have to scroll past
+     an explanation to reach the box. */
+  .signin-split{
+    display:grid;grid-template-columns:1.02fr 1fr;
+    border:1px solid var(--border);border-radius:var(--r-lg);
+    box-shadow:var(--sh-2);overflow:hidden;background:var(--surface);
+    /* Capped and centred: the admin shell is a 1120px page, and a sign-in panel
+       stretched across all of it reads as a form nobody finished designing. */
+    max-width:880px;margin:8px auto 18px;
+  }
+  .signin-aside{
+    position:relative;overflow:hidden;
+    background:
+      radial-gradient(120% 120% at 88% -10%, var(--navy-700) 0%, transparent 58%),
+      linear-gradient(160deg, var(--navy-800) 0%, var(--navy-900) 100%);
+    color:#fff;padding:34px 32px;
+    display:flex;flex-direction:column;justify-content:center;gap:5px;
+  }
+  /* The crest again, very faintly, as a watermark. Large, cropped, and low
+     contrast: it should read as letterhead, not as a second logo competing
+     with the one in the masthead directly above it. */
+  .signin-aside .wm{
+    position:absolute;right:-46px;bottom:-52px;width:230px;height:230px;
+    opacity:.075;pointer-events:none;filter:grayscale(1) brightness(3);
+  }
+  .signin-aside .wm img{width:100%;height:100%;object-fit:contain}
+  .signin-aside .eyebrow{
+    font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--amber);margin-bottom:9px;
+  }
+  .signin-aside h1{
+    font-family:var(--display);font-size:29px;line-height:1.18;font-weight:700;
+    margin:0 0 10px;letter-spacing:-.015em;
+  }
+  .signin-aside p{
+    margin:0 0 18px;font-size:14px;line-height:1.6;color:#c9d4e4;max-width:34ch;
+  }
+  .signin-points{list-style:none;margin:0;padding:0;display:grid;gap:11px;position:relative}
+  .signin-points li{display:flex;gap:11px;align-items:flex-start;font-size:13.5px}
+  .signin-points .tick{
+    flex:none;width:19px;height:19px;border-radius:50%;margin-top:1px;
+    background:rgba(232,151,26,.16);color:var(--amber);
+    display:grid;place-items:center;font-size:11px;font-weight:800;
+  }
+  .signin-points strong{display:block;font-weight:600;color:#fff}
+  .signin-points span.d{display:block;color:#a9b7cb;font-size:12.5px;line-height:1.45}
+
+  .signin-form{padding:34px 32px;display:flex;flex-direction:column;justify-content:center}
+  .signin-form h2{
+    margin:0 0 5px;font-size:20px;font-weight:700;letter-spacing:-.015em;
+    font-family:var(--display);
+  }
+  .signin-form .lede{margin:0 0 20px;font-size:13.5px;color:var(--muted);line-height:1.55}
+  .signin-field{margin-bottom:14px}
+  .signin-field input{font-size:16px}   /* 16px: iOS zooms into anything smaller */
+  .signin-form .btn{width:100%}
+  .signin-form .btn-row .btn{width:auto}
+  .signin-foot{
+    margin:18px 0 0;padding-top:15px;border-top:1px solid var(--border);
+    font-size:12.5px;color:var(--muted);line-height:1.55;
+  }
+  .signin-foot a,.linkish{
+    background:none;border:0;padding:0;font:inherit;font-size:inherit;
+    color:var(--info);text-decoration:underline;cursor:pointer;
+  }
+  .linkish:disabled{color:var(--muted);text-decoration:none;cursor:default}
+
+  /* The code step. Six digits deserve to look like six digits. */
+  .signin-to{
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+    background:var(--surface-2);border:1px solid var(--border);
+    border-radius:var(--r);padding:10px 13px;margin:0 0 18px;font-size:13.5px;
+  }
+  .signin-to .addr{font-weight:600;word-break:break-all}
   .signin-field input#siCode{
-    letter-spacing:10px;font-size:24px;font-weight:650;
-    font-variant-numeric:tabular-nums;padding-left:10px
+    text-align:center;letter-spacing:.42em;font-size:26px;font-weight:700;
+    font-variant-numeric:tabular-nums;padding:12px 10px 12px 22px;
+  }
+
+  @media (max-width:800px){
+    .signin-split{grid-template-columns:1fr}
+    .signin-form{order:1;padding:26px 20px}
+    .signin-aside{order:2;padding:26px 20px}
+    .signin-aside h1{font-size:24px}
+    .signin-aside .wm{width:170px;height:170px;right:-38px;bottom:-44px}
   }
   .signout{
     background:none;border:0;color:var(--muted);font:inherit;font-size:12px;
@@ -623,7 +706,7 @@
   @media (max-width:420px){
     .masthead .org{font-size:13px}
     .btn-row .btn{flex:1 1 100%}
-    .signin-field{max-width:none}
+    .signin-field input#siCode{font-size:22px;letter-spacing:.3em;padding-left:14px}
   }
 
   /* Nobody should have to pinch-zoom to read a table on a phone; they scroll

@@ -5,28 +5,89 @@
 <script>
   // The app runs inside a sandboxed iframe on a different origin, so relative
   // links would navigate that frame to the wrong place.
-  var WEBAPP_URL = '<?= webAppUrl() ?>';
-  var LOGO_URL   = '<?= logoUrl() ?>';
+  var WEBAPP_URL    = '<?= webAppUrl() ?>';
+  var LOGO_URL      = '<?= logoUrl() ?>';
+  var SUPPORT_EMAIL = '<?= supportEmail() ?>';
 </script>
 
 <style>
-  .wiz{display:flex;gap:6px;list-style:none;margin:0;padding:0;flex-wrap:wrap}
+  /* The progress rail.
+     Seven equal chips told you what the steps were called and almost nothing
+     about where you were in them - at a glance the current one looked much
+     like the other six, and on a phone they wrapped into three ragged rows.
+     What a long form owes the person filling it in is a straight answer to
+     "how much of this is left", so that is what leads now: a bar, a count, and
+     the name of the step you are on. */
+  .wizhead{margin:0 0 4px}
+  .wizhead .top{
+    display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px;
+  }
+  .wizhead .stepname{
+    font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:-.01em;
+  }
+  .wizhead .count{
+    font-size:12px;font-weight:650;color:var(--muted);
+    font-variant-numeric:tabular-nums;letter-spacing:.02em;
+  }
+  .wizhead .left{margin-left:auto;font-size:12px;color:var(--muted)}
+  .wizbar{height:5px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+  .wizbar i{
+    display:block;height:100%;border-radius:99px;
+    background:linear-gradient(90deg,var(--amber),var(--amber-600));
+    transition:width .28s ease;
+  }
+
+  .wiz{
+    display:flex;gap:4px;list-style:none;margin:13px 0 0;padding:0;
+    flex-wrap:wrap;align-items:stretch;
+  }
   .wiz li{
-    flex:1;min-width:104px;padding:9px 12px;border-radius:var(--r-sm);
-    background:var(--surface-2);border:1px solid var(--border);
-    font-size:12.5px;color:var(--muted);font-weight:550;cursor:pointer;
+    flex:1 1 0;min-width:0;display:flex;align-items:center;gap:7px;
+    padding:7px 9px;border-radius:var(--r-sm);border:1px solid transparent;
+    font-size:12px;color:var(--muted);font-weight:550;cursor:pointer;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
+  .wiz li:hover{background:var(--surface-2)}
   .wiz li .num{
-    display:inline-grid;place-items:center;width:19px;height:19px;border-radius:50%;
-    background:var(--border-strong);color:var(--surface);font-size:11px;font-weight:700;
-    margin-right:7px;vertical-align:-4px;
+    flex:none;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;
+    background:var(--surface-3);color:var(--muted);font-size:11px;font-weight:700;
+    border:1px solid var(--border);
   }
-  .wiz li.done{color:var(--text-2);border-color:var(--ok-line);background:var(--ok-soft)}
-  .wiz li.done .num{background:var(--ok);color:#fff}
-  .wiz li.now{color:var(--navy-900);background:var(--amber-soft);
-    border-color:var(--amber);font-weight:650}
-  .wiz li.now .num{background:var(--amber);color:var(--navy-900)}
-  :root:not([data-theme="light"]) .wiz li.now{color:var(--amber)}
+  .wiz li.done{color:var(--text-2)}
+  .wiz li.done .num{background:var(--ok);border-color:var(--ok);color:#fff}
+  .wiz li.now{
+    color:var(--navy-900);background:var(--amber-soft);border-color:var(--amber-line);
+    font-weight:700;
+  }
+  .wiz li.now .num{background:var(--amber);border-color:var(--amber);color:var(--navy-900)}
+  /* Under 700px the labels are dropped rather than wrapped: the bar and the
+     count above already say where you are, and seven names on three lines was
+     the part that made this look long before it had been started. */
+  @media (max-width:700px){
+    .wiz li{flex:0 0 auto;padding:5px;gap:0}
+    .wiz li .lbl{display:none}
+  }
+
+  /* "What happens next": three numbered beats, not three bullets. The last
+     screen of a long form should say that the effort is nearly over and what
+     it buys, so it is given the weight of a list somebody reads. */
+  .next{list-style:none;counter-reset:n;margin:0;padding:0;display:grid;gap:13px}
+  .next li{
+    counter-increment:n;position:relative;padding-left:34px;
+    font-size:13.5px;color:var(--text-2);line-height:1.55;
+  }
+  .next li:before{
+    content:counter(n);position:absolute;left:0;top:0;
+    width:23px;height:23px;border-radius:50%;display:grid;place-items:center;
+    background:var(--navy-700);color:#fff;font-size:11.5px;font-weight:700;
+  }
+  .next strong{color:var(--text);font-weight:650}
+
+  /* One sentence at the top of a step, saying why it is being asked. */
+  .steplead{
+    margin:-2px 0 16px;font-size:13.5px;color:var(--text-2);line-height:1.55;
+    max-width:62ch;
+  }
   .req{color:var(--bad);font-weight:700}
   .fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
   @media (max-width:640px){.fieldrow{grid-template-columns:1fr}}
@@ -145,6 +206,35 @@
     reg.isPwD = !!st.isPwD;
   }
 
+  /**
+   * Where you are, and how much is left.
+   *
+   * The bar answers that in one glance without reading anything; the numbered
+   * rail underneath is still there to jump between steps, but it is no longer
+   * the only thing carrying the answer.
+   */
+  function progressRail() {
+    var pct = Math.round((step / (STEPS.length - 1)) * 100);
+    var left = STEPS.length - 1 - step;
+
+    return '<div class="wizhead">' +
+      '<div class="top">' +
+        '<span class="stepname">' + esc(STEPS[step]) + '</span>' +
+        '<span class="count">Step ' + (step + 1) + ' of ' + STEPS.length + '</span>' +
+        '<span class="left">' + (left === 0
+          ? 'Last one &mdash; check it over and submit'
+          : left + ' step' + (left === 1 ? '' : 's') + ' to go') + '</span>' +
+      '</div>' +
+      '<div class="wizbar"><i style="width:' + pct + '%"></i></div>' +
+      '<ul class="wiz">' + STEPS.map(function (s, i) {
+        return '<li class="' + (i < step ? 'done' : (i === step ? 'now' : '')) +
+          '" onclick="goStep(' + i + ')" title="' + esc(s) + '"><span class="num">' +
+          (i < step ? '&#10003;' : (i + 1)) + '</span>' +
+          '<span class="lbl">' + esc(s) + '</span></li>';
+      }).join('') + '</ul>' +
+    '</div>';
+  }
+
   /* ================================================================ shell */
   function paint() {
     var editing = FULL && !FORM.needsRegistration;
@@ -159,11 +249,7 @@
           : '');
 
     setHtml('root', '<div id="msg"></div>' + head +
-      card('', '<ul class="wiz">' + STEPS.map(function (s, i) {
-        return '<li class="' + (i < step ? 'done' : (i === step ? 'now' : '')) +
-          '" onclick="goStep(' + i + ')"><span class="num">' +
-          (i < step ? '&#10003;' : (i + 1)) + '</span>' + esc(s) + '</li>';
-      }).join('') + '</ul>') +
+      card('', progressRail()) +
       '<div id="stepBody"></div>' +
       card('', '<div class="btn-row">' +
         (step > 0 ? '<button class="btn ghost" onclick="goStep(' + (step - 1) +
@@ -175,7 +261,6 @@
         // that has, "draft" is not a state it can go back to.
         (!FORM.needsRegistration && (!FORM.draft || FORM.draft.status === 'DRAFT')
           ? '<button class="btn ghost" onclick="saveDraft()">Save as draft</button>' : '') +
-        '<span class="small muted">Step ' + (step + 1) + ' of ' + STEPS.length + '</span>' +
       '</div>'));
 
     paintStep();
@@ -232,9 +317,24 @@
 
   function setReg(field, value) { reg[field] = value; }
 
+  /**
+   * One sentence at the top of a step, saying what it is for.
+   *
+   * Every step looked identical before this - a card, a row of labels, a
+   * Continue button - so the only way to find out why something was being
+   * asked was to answer it and hope. A form this long is easier to finish when
+   * each part explains itself in a line.
+   */
+  function lead(text) {
+    return '<p class="steplead">' + esc(text) + '</p>';
+  }
+
   /* ================================================================ steps */
   function stepPersonal() {
     return card('About you',
+      lead('Who you are, as it appears on your admission record. This is what your ' +
+           'documents are checked against, so a name that does not match will hold ' +
+           'things up later.') +
       text('name', 'Full name', { placeholder: 'As printed on your admission record' }) +
       '<div class="fieldrow">' +
         text('enrollmentNo', 'University enrolment number', { placeholder: 'e.g. 04116403223' }) +
@@ -292,6 +392,9 @@
         'campus, so this decides which hostels you are offered.';
 
     return card('Your course',
+      lead('Your campus decides which hostels exist for you at all, and your admission ' +
+           'category decides which queue you are in. Neither is a preference \u2014 both ' +
+           'come from your admission record.') +
       '<label class="field"><span class="lab">Campus you are admitted to ' +
         '<span class="req">*</span></span>' +
         '<div class="seg">' + REG.campuses.map(function (c) {
@@ -362,6 +465,9 @@
 
   function stepAddress() {
     return card('Where you live',
+      lead('How far your home is from campus is part of how seats are ranked, and for ' +
+           'Delhi-category applicants it is the whole of it. Give the address printed on ' +
+           'your Aadhaar card.') +
       '<label class="field"><span class="lab">Permanent home address <span class="req">*</span></span>' +
       '<textarea rows="3" placeholder="House, street, locality" ' +
       'oninput="setReg(&quot;homeAddress&quot;,this.value)">' + esc(reg.homeAddress) +
@@ -396,8 +502,8 @@
 
   function stepFamily() {
     return card('Parent or guardian',
-      '<p class="small muted" style="margin:0 0 15px">The hostel needs one contact who can be ' +
-      'reached in an emergency.</p>' +
+      lead('One person the hostel can reach in an emergency, and anything the warden ' +
+           'should know if you are unwell.') +
       '<div class="fieldrow">' +
         text('guardianName', 'Name') +
         text('guardianPhone', 'Mobile number', { placeholder: '10 digits', max: 10 }) +
@@ -417,8 +523,9 @@
     var g = myGender(), c = myCampus();
     var who = { M: "men's", F: "women's", O: '' }[g] || '';
     return card('Room preferences',
-      '<p class="small muted" style="margin:0 0 15px">Choose up to ' + esc(FORM.maxPreferences) +
-      ' options, then put them in the order you want them. Your first choice goes at the top.</p>' +
+      lead('Choose up to ' + FORM.maxPreferences + ' options and put them in the order you ' +
+           'want them, first choice at the top. You are considered for each in turn, so ' +
+           'ranking one you would rather not have costs you nothing.') +
       '<div class="hint" style="margin-bottom:18px">Showing the ' + esc(who) + ' hostels at ' +
       '<strong>' + esc(campusLabel(c)) + '</strong>. Your campus is fixed by your admission, ' +
       'so these are the only hostels you can be allotted.</div>' +
@@ -437,9 +544,9 @@
 
   function stepRoommate() {
     return card('Roommate questionnaire',
-      '<p class="small muted" style="margin:0 0 16px">Used only to pair you with compatible ' +
-      'roommates <em>within</em> the room type you are allotted. It never affects which room you ' +
-      'get, or whether you get one at all.</p>' +
+      lead('Used only to pair you with people you are likely to get on with, inside the room ' +
+           'you are allotted. It never affects which room you get, or whether you get one ' +
+           'at all.') +
       '<div id="life"></div>');
   }
 
@@ -454,6 +561,15 @@
           return o ? '<li>' + esc(o.hostelName) + ' &mdash; ' + esc(o.roomTypeLabel) + '</li>' : '';
         }).join('') + '</ol>'
       : '<p class="muted small" style="margin:0">None chosen.</p>';
+
+    // Every block on this page can be corrected from here. Reading back a
+    // mistake and then having to hunt for the step that made it is the part of
+    // a review screen that people give up on.
+    function fix(name) {
+      var i = STEPS.indexOf(name);
+      return i < 0 ? '' :
+        '<button type="button" class="linkish" onclick="goStep(' + i + ')">Change</button>';
+    }
 
     var personal = FULL
       ? card('Your details', '<dl class="kv review">' +
@@ -479,20 +595,27 @@
           '</dl>' +
           '<p class="small muted" style="margin:12px 0 0">You are declaring all of this ' +
           'yourself. It is checked against your documents at verification, so anything that ' +
-          'does not match will hold your application up.</p>')
+          'does not match will hold your application up.</p>',
+          { action: fix('Your details') })
       : '';
 
-    return personal +
+    return lead('Everything you have told us, in one place. Check it over — you can ' +
+                'change any of it from here.') +
+      personal +
       card('Your application', '<dl class="kv review">' +
         rv('Campus', campusLabel(myCampus())) +
         rv('Accessible room needed', needsAccessible ? 'Yes' : 'No') +
-        '</dl><div class="grp-title" style="margin-top:15px">Room choices, in order</div>' + prefs) +
+        '</dl><div class="grp-title" style="margin-top:15px">Room choices, in order</div>' + prefs,
+        { action: fix('Preferences') }) +
       card('What happens next',
-        '<ul class="small" style="margin:0;padding-left:20px;line-height:1.8">' +
-        '<li>Your application is recorded, and you can track it on your dashboard.</li>' +
-        '<li>Upload the documents listed there so the office can verify you.</li>' +
-        '<li>When allocation runs you are emailed, and told <em>exactly</em> why you got the ' +
-        'result you did.</li></ul>');
+        '<ol class="next">' +
+        '<li><strong>Your application is recorded.</strong> You can follow it on your ' +
+        'dashboard from the moment you submit.</li>' +
+        '<li><strong>You upload two documents.</strong> Your Aadhaar, and your college ID ' +
+        'if you are not in your first year.</li>' +
+        '<li><strong>Allocation runs, and you are emailed.</strong> Whatever the result, ' +
+        'you are shown exactly how it was reached.</li>' +
+        '</ol>');
   }
 
   function rv(k, v) {

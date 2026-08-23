@@ -6,8 +6,9 @@
   // The app is served inside a sandboxed iframe on a different origin, so a
   // relative link would navigate that frame to the wrong place. Every link is
   // built from this absolute URL and targets _top.
-  var WEBAPP_URL = '<?= webAppUrl() ?>';
-  var LOGO_URL   = '<?= logoUrl() ?>';
+  var WEBAPP_URL    = '<?= webAppUrl() ?>';
+  var LOGO_URL      = '<?= logoUrl() ?>';
+  var SUPPORT_EMAIL = '<?= supportEmail() ?>';
 </script>
 <style>
   .verdict { border-radius: 11px; padding: 24px; text-align: center; margin-bottom: 15px; }

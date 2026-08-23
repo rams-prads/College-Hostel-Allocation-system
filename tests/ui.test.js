@@ -596,11 +596,76 @@ check('it offers a way to actually sign in',
   'this page shipped with no button on it - a page whose only job is to get ' +
   'the visitor somewhere must give them something to press');
 check('it asks for an email address', r.screen.indexOf('siEmail') > 0);
-check('the address may be any address', r.screen.indexOf('Any address works') > 0,
-  'a first-year has no college address for months after allocation');
+check('the address may be any address', (() => {
+  return r.screen.indexOf('Any email address works') > 0 &&
+         /first-year|first years/i.test(r.screen);
+})(), 'a first-year has no college address for months after allocation, and the page has ' +
+      'to say so before they conclude this is not for them');
+check('it says why there is no password, before asking for anything',
+  r.screen.indexOf('No password to remember') > 0,
+  'a login box that behaves unusually and explains nothing reads as broken');
 check('it does not demand a Google account',
   r.screen.toLowerCase().indexOf('google account') < 0,
   'the whole point is that the students who need this most do not have one');
+
+check('the code step can send another without retyping the address', (() => {
+  const t = renderPage('index.html', '', `
+    _siEmail = 'someone@example.com';
+    setHtml('signinBody', codeStep(_siEmail));
+  `);
+  return t.screen.indexOf('Send another code') > 0 &&
+         t.screen.indexOf('someone@example.com') > 0 &&
+         t.screen.indexOf('siCode') > 0;
+})(), 'the only way to resend used to be going back and typing the address in again');
+
+check('and a way back to a different address', (() => {
+  const t = renderPage('index.html', '', `
+    _siEmail = 'someone@example.com';
+    setHtml('signinBody', codeStep(_siEmail));
+  `);
+  return /onclick="backToEmail\(\)"/.test(t.screen);
+})());
+
+check('a code that has not arrived is a normal thing, and the page says so', (() => {
+  const t = renderPage('index.html', '', `
+    setHtml('signinBody', codeStep('someone@example.com'));
+  `);
+  return /spam/i.test(t.screen);
+})(), 'otherwise the only conclusion available is that the portal is broken');
+
+section('The application form says how much is left');
+
+(() => {
+  const at = n => 'step = ' + n + '; paint();';
+  const first = renderPage('apply.html', 'brand.new@example.com', at(0));
+  const last  = renderPage('apply.html', 'brand.new@example.com', at(6));
+
+  check('there is a progress bar, and it moves',
+    /class="wizbar"><i style="width:0%"/.test(first.screen) &&
+    /class="wizbar"><i style="width:100%"/.test(last.screen),
+    'seven identical chips told you the names of the steps and not where you were');
+  check('the step is counted in words as well',
+    first.screen.indexOf('Step 1 of 7') > 0 && last.screen.indexOf('Step 7 of 7') > 0);
+  check('and how many are left is stated outright',
+    first.screen.indexOf('6 steps to go') > 0,
+    'the question a long form has to answer before somebody starts it');
+  check('the step you are on is named at the top',
+    /class="stepname">Your details</.test(first.screen));
+
+  check('every step explains itself in a sentence', (() => {
+    const missing = [0, 1, 2, 3, 4, 5, 6].filter(i =>
+      renderPage('apply.html', 'brand.new@example.com', at(i))
+        .screen.indexOf('class="steplead"') < 0);
+    return missing.length === 0;
+  })(), 'a step that is only a row of labels leaves you guessing why it is being asked');
+
+  check('the review lets you go back and fix what you are reading',
+    /class="linkish" onclick="goStep\(0\)"/.test(last.screen) &&
+    /class="linkish" onclick="goStep\(4\)"/.test(last.screen),
+    'reading back a mistake and then hunting for the step that made it is where people stop');
+
+  check('and it says what happens after submitting', last.screen.indexOf('class="next"') > 0);
+})();
 
 section('Every page can sign someone in, not just the front one');
 // A student portal reached without a session used to be a dead end that told

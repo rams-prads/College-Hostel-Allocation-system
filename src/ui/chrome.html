@@ -165,20 +165,80 @@ function srv(ownerId) {
  * @param {string} note  optional line explaining why they are seeing it
  */
 function signInPanel(note) {
-  return card('',
-    '<div class="signin">' +
-    '<div class="big">&#127891;</div>' +
-    '<h3>Sign in to continue</h3>' +
-    (note ? '<p class="small muted intro">' + esc(note) + '</p>' : '') +
-    '<p class="small muted intro">Enter the email address you want to apply with. ' +
-    'Any address works &mdash; first-year students will not have a college one yet.</p>' +
-    '<div id="signinBody">' + emailStep() + '</div>' +
-    '<div id="signinMsg"></div>' +
-    '</div>');
+  // The caller writes this string into the page after we return, so the field
+  // does not exist yet. One tick later it does, and somebody who came here to
+  // sign in can start typing without reaching for the mouse first.
+  setTimeout(function () { focusOn('siEmail'); }, 0);
+
+  return '<div class="signin-split">' +
+    signInAside() +
+    '<div class="signin-form">' +
+      (note ? banner('info', note) : '') +
+      '<div id="signinBody">' + emailStep() + '</div>' +
+      '<div id="signinMsg"></div>' +
+      signInHelp() +
+    '</div>' +
+  '</div>';
+}
+
+/**
+ * Where to write when the code never comes.
+ *
+ * Read from a page-level template value rather than a view payload: this is
+ * needed before there is a session, which is the whole point of the screen it
+ * appears on.
+ */
+function signInHelp() {
+  var addr = (typeof SUPPORT_EMAIL !== 'undefined' && SUPPORT_EMAIL)
+    ? String(SUPPORT_EMAIL) : '';
+  if (!addr) {
+    return '<p class="signin-foot">If the code does not arrive, the hostel office can ' +
+           'sign you in by hand.</p>';
+  }
+  return '<p class="signin-foot">Trouble signing in? Write to ' +
+    '<a href="mailto:' + esc(addr) + '">' + esc(addr) + '</a> from any address and the ' +
+    'hostel office will sort it out.</p>';
+}
+
+/**
+ * The half of the page that is not a form.
+ *
+ * It exists to answer the two questions a first-time visitor has before they
+ * will type anything - what is this, and why is it not asking for a password -
+ * because the previous version answered neither and read as a login box for
+ * something the reader was expected to already know about.
+ */
+function signInAside() {
+  var url = (typeof LOGO_URL !== 'undefined' && LOGO_URL) ? String(LOGO_URL) : '';
+  return '<div class="signin-aside">' +
+    (url ? '<div class="wm"><img src="' + esc(url) + '" alt=""></div>' : '') +
+    '<div class="eyebrow">Hostel allocation</div>' +
+    '<h1>Apply for a hostel seat, and see exactly how it was decided.</h1>' +
+    '<p>One place to apply, upload what is asked for, and follow your ' +
+    'application through to the room you are given.</p>' +
+    '<ul class="signin-points">' +
+      point('&#10003;', 'No password to remember',
+            'We email you a six-digit code each time. Nothing to set up, nothing to forget.') +
+      point('&#9993;', 'Any email address works',
+            'A college address is not needed - first-years are not issued one until months ' +
+            'after allocation.') +
+      point('&#128274;', 'Your details stay yours',
+            'Seen by the hostel office only, and every decision on your application is ' +
+            'recorded and shown to you.') +
+    '</ul>' +
+  '</div>';
+}
+
+function point(icon, title, detail) {
+  return '<li><span class="tick">' + icon + '</span><span>' +
+    '<strong>' + esc(title) + '</strong>' +
+    '<span class="d">' + esc(detail) + '</span></span></li>';
 }
 
 function emailStep() {
-  return '<label class="field signin-field"><span class="lab">Email address</span>' +
+  return '<h2>Sign in</h2>' +
+    '<p class="lede">Enter your email address and we will send you a six-digit code.</p>' +
+    '<label class="field signin-field"><span class="lab">Email address</span>' +
     '<input type="email" id="siEmail" autocomplete="email" inputmode="email" ' +
     'placeholder="you@example.com" onkeydown="if(event.key===&quot;Enter&quot;)sendCode()">' +
     '</label>' +
@@ -186,14 +246,22 @@ function emailStep() {
 }
 
 function codeStep(email) {
-  return '<p class="small muted intro">We sent a six-digit code to <strong>' +
-    esc(email) + '</strong>. It expires in ten minutes.</p>' +
+  return '<h2>Check your email</h2>' +
+    '<p class="lede">A six-digit code is on its way. It is good for ten minutes.</p>' +
+    '<div class="signin-to"><span>Sent to</span>' +
+      '<span class="addr">' + esc(email) + '</span>' +
+      '<span class="grow" style="flex:1"></span>' +
+      '<button type="button" class="linkish" onclick="backToEmail()">Change</button></div>' +
     '<label class="field signin-field"><span class="lab">Six-digit code</span>' +
     '<input type="text" id="siCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" ' +
     'placeholder="000000" onkeydown="if(event.key===&quot;Enter&quot;)submitCode()">' +
     '</label>' +
-    '<button class="btn" id="siBtn" onclick="submitCode()">Sign in</button> ' +
-    '<button class="btn ghost" onclick="backToEmail()">Use a different address</button>';
+    '<button class="btn" id="siBtn" onclick="submitCode()">Sign in</button>' +
+    // Resending used to mean going back and typing the address again, which is
+    // the last thing somebody wants to do when the first mail has not arrived.
+    '<p class="signin-foot">Not arrived? It can take a minute, and it does end up in spam ' +
+    'sometimes. <button type="button" class="linkish" id="siResend" ' +
+    'onclick="resendCode()">Send another code</button></p>';
 }
 
 var _siEmail = '';
@@ -201,6 +269,62 @@ var _siEmail = '';
 function backToEmail() {
   setHtml('signinBody', emailStep());
   setHtml('signinMsg', '');
+  focusOn('siEmail');
+}
+
+/** Focus without stealing it from someone already typing. */
+function focusOn(id) {
+  var node = el(id);
+  if (!node) return;
+  try {
+    if (document.activeElement && document.activeElement !== document.body &&
+        document.activeElement !== node) return;
+    node.focus();
+  } catch (e) { /* focus is a nicety, never a requirement */ }
+}
+
+/**
+ * Another code for the same address.
+ *
+ * The server allows four an hour, which is generous for a person and mean for
+ * a script. The thirty seconds here is not the security control - it is so
+ * that pressing the button twice in frustration does not spend two of them.
+ */
+function resendCode() {
+  var btn = el('siResend');
+  if (!_siEmail || (btn && btn.disabled)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending\u2026'; }
+
+  srv().withSuccessHandler(function () {
+      setHtml('signinMsg', banner('good', 'A new code is on its way to ' + _siEmail + '.'));
+      countdown(btn, 30, 'Send another code');
+    })
+    .withFailureHandler(function (e) {
+      setHtml('signinMsg', banner('err', e.message));
+      countdown(btn, 30, 'Send another code');
+    })
+    .apiRequestSignInCode(_siEmail);
+}
+
+/** Count a button back to life, so the wait is visible rather than mysterious. */
+function countdown(btn, seconds, label) {
+  if (!btn) return;
+  var left = seconds;
+  btn.disabled = true;
+  btn.textContent = label + ' (' + left + ')';
+  var t = setInterval(function () {
+    left--;
+    // The panel may have been replaced - by signing in, or by going back to the
+    // address step. Stop rather than write into a button that is not there.
+    if (!el('siResend')) { clearInterval(t); return; }
+    if (left <= 0) {
+      clearInterval(t);
+      btn.disabled = false;
+      btn.textContent = label;
+      return;
+    }
+    btn.textContent = label + ' (' + left + ')';
+  }, 1000);
 }
 
 function sendCode() {
@@ -218,7 +342,9 @@ function sendCode() {
   srv().withSuccessHandler(function () {
       setHtml('signinBody', codeStep(_siEmail));
       setHtml('signinMsg', '');
-      if (el('siCode')) el('siCode').focus();
+      var b = el('siResend');
+      if (b) countdown(b, 30, 'Send another code');
+      focusOn('siCode');
     })
     .withFailureHandler(function (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Email me a code'; }
