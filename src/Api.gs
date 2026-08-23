@@ -202,6 +202,12 @@ function apiGetStudentView(asAppId, demoToken) {
     appId: app.appId, status: app.status, campus: app.campus,
     submittedAt: fmtDate_(app.submittedAt), distanceKm: app.distanceKm,
     eligible: app.eligible, docStatus: app.docStatus,
+    // The office's decision and the sentence that goes with it. A student
+    // whose application is held up should not have to work that out from the
+    // colour of a pill beside one of their documents.
+    verifyStatus: app.verifyStatus || '',
+    verifyNote: app.verifyNote || '',
+    verifiedAt: fmtDate_(app.verifiedAt),
     needsAccessible: app.needsAccessible, meritScore: app.meritScore
   };
   // Asked here so the portal and the form give the same answer. A page that

@@ -124,20 +124,40 @@ var Eligibility = (function () {
         { meritPercent: 0 }));
     }
 
-    // --- documents ---------------------------------------------------------
-    if (app.docStatus === 'REJECTED') {
+    // --- verification ------------------------------------------------------
+    //
+    // The OFFICE's decision, not the roll-up of the document rows. The two are
+    // different facts and were previously conflated: asking a student for a
+    // clearer photograph set a document to REJECTED, which rolled the
+    // application up to REJECTED, which read here as "failed verification" and
+    // made them ineligible for a room. Over a blurred photograph.
+    //
+    // ACTION_REQUIRED is therefore explicitly NOT a failure. It means the
+    // office is waiting on the student, which is a reason to chase them, not a
+    // reason to refuse them.
+    var vs = app.verifyStatus ||
+      (app.docStatus === 'VERIFIED' ? 'VERIFIED'
+        : (app.docStatus === 'REJECTED' ? 'REJECTED' : 'PENDING'));
+
+    if (vs === 'REJECTED') {
       reasons.push(reason('ELIG_FAIL_DOCS', false,
-        'Submitted documents were rejected at verification.'));
-    } else if (requireDocs && app.docStatus !== 'VERIFIED') {
+        'The application was not accepted at verification.'));
+    } else if (vs === 'VERIFIED') {
+      reasons.push(reason('ELIG_PASS_DOCS', true,
+        'Checked and accepted by the hostel office.'));
+    } else if (requireDocs) {
       reasons.push(reason('ELIG_FAIL_DOCS_PENDING', false,
-        'Documents are ' + String(app.docStatus).toLowerCase() +
-        '; verification is required before allocation.'));
-    } else if (app.docStatus === 'VERIFIED') {
-      reasons.push(reason('ELIG_PASS_DOCS', true, 'Supporting documents verified by the hostel office.'));
+        vs === 'ACTION_REQUIRED'
+          ? 'The hostel office has asked you for something and is waiting for it; ' +
+            'verification has to be finished before a room can be allotted.'
+          : 'Verification has not been completed, and it is required before allocation.'));
     } else {
       reasons.push(reason('ELIG_WARN_DOCS', true,
-        'Documents are ' + String(app.docStatus).toLowerCase() +
-        '. Allocation may proceed, but the seat is provisional until verification.'));
+        vs === 'ACTION_REQUIRED'
+          ? 'The hostel office has asked you for something. Allocation may proceed, ' +
+            'but the seat is provisional until that is settled.'
+          : 'Verification is not finished. Allocation may proceed, but the seat is ' +
+            'provisional until it is.'));
     }
 
     // --- preferences -------------------------------------------------------

@@ -613,6 +613,58 @@ function apiAdminFillVacancies(limit) {
   return Vacancy.fillAll(limit || 25, s.email);
 }
 
+// ======================================================== verification console
+
+/**
+ * The queue, the case, the decision and the numbers - four calls, because that
+ * is how many distinct things the console asks for. The old screen made six
+ * and then reconciled them in the browser.
+ */
+function apiAdminVerificationQueue(opts) {
+  Auth.requireAdmin();
+  return Verification.queue(opts || {});
+}
+
+function apiAdminVerificationCase(appId) {
+  Auth.requireAdmin();
+  return Verification.caseFor(appId);
+}
+
+function apiAdminVerificationDecide(appId, verdict, opts) {
+  var s = Auth.requireAdmin();
+  return Verification.decide(appId, verdict, opts || {}, s.email);
+}
+
+function apiAdminVerificationStats() {
+  Auth.requireAdmin();
+  return {
+    stats: Verification.stats(),
+    reasons: Verification.reasons(),
+    // Whether an unverified applicant can be allotted a room at all. Shown
+    // rather than buried in the Policy tab, because it is the single setting
+    // that decides whether any of this work gates anything.
+    gate: {
+      documents: !!Number(Policy.value('eligibility', 'REQUIRE_DOC_VERIFIED', 0)),
+      identity: !!Number(Policy.value('eligibility', 'REQUIRE_IDENTITY_VERIFIED', 0))
+    }
+  };
+}
+
+/**
+ * Turn the verification gate on or off.
+ *
+ * A deliberate, recorded act. With it off, verification is advisory and the
+ * allocation ignores it; with it on, an unverified applicant cannot be given a
+ * room. Which of those is right depends on how far through the session the
+ * office is, so it is a switch and not a constant - but it is a switch whose
+ * position is on screen rather than in a settings tab nobody opens.
+ */
+function apiAdminSetVerificationGate(on) {
+  var s = Auth.requireAdmin();
+  Policy.set('eligibility', 'REQUIRE_DOC_VERIFIED', on ? 1 : 0, s.email);
+  return { ok: true, on: !!on };
+}
+
 /** Generate allotment letters in bounded batches. */
 function apiAdminGenerateLetters(runId, limit) {
   Auth.requireAdmin();

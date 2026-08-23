@@ -66,6 +66,30 @@ var Notify = (function () {
           'or contact the hostel office.</p>';
       }
     },
+    // The two verification outcomes a student has to be TOLD about, rather
+    // than left to discover by refreshing a page. The instruction the officer
+    // chose travels in `message`, which is the whole point of choosing from a
+    // list instead of typing "rejected".
+    VERIFY_RESUBMIT: {
+      subject: 'Action needed on your hostel application - {{appId}}',
+      heading: 'One thing needs your attention',
+      body: function (d) {
+        return '<p>Dear ' + d.name + ',</p>' +
+          '<p>' + d.message + '</p>' +
+          '<p>Nothing else about your application has changed and your position in ' +
+          'the queue is unaffected. Sign in to the portal and upload the ' +
+          'replacement.</p>';
+      }
+    },
+    VERIFY_REJECTED: {
+      subject: 'Hostel application not accepted at verification - {{appId}}',
+      heading: 'Your application was not accepted',
+      body: function (d) {
+        return '<p>Dear ' + d.name + ',</p>' +
+          '<p>' + d.message + '</p>' +
+          '<p>If you believe this is wrong, the hostel office can look at it again.</p>';
+      }
+    },
     DOC_REJECTED: {
       subject: 'Document rejected at verification - {{appId}}',
       heading: 'A document needs to be resubmitted',

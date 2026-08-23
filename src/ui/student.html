@@ -144,6 +144,10 @@
     // only by a link in the footer, which is not a place anybody looked.
     if (!v.allocation && !v.waitlist) html.push(editNote(v));
 
+    // Above everything else, because it is the only thing on this page the
+    // student has to act on and the clock is running on it.
+    html.push(verificationCard(v));
+
     if (v.explanation && v.explanation.groups) html.push(explanationCard(v));
     if (v.allocation && (v.allocation.roommates || []).length) html.push(roommateCard(v));
 
@@ -350,6 +354,57 @@
         (got ? pill('ok', 'Granted') : '') + '</li>';
     }).join('');
     return card('Your room preferences', '<ul class="rows">' + rows + '</ul>', { tight: true });
+  }
+
+  /**
+   * What the hostel office decided, and what to do about it.
+   *
+   * A student whose application was held up used to have to infer it from a
+   * red pill beside one document, with the reason - if there was one - in
+   * small grey text underneath. The reason IS the message: it is written from
+   * a fixed list precisely so that it tells them what to do, and it belongs at
+   * the top of the page in the words the officer chose.
+   */
+  function verificationCard(v) {
+    var a = v.application || {};
+    var st = a.verifyStatus;
+    if (!st || st === 'PENDING') return '';
+
+    if (st === 'VERIFIED') {
+      return card('', '<div class="status good"><div class="sic">&#10003;</div><div>' +
+        '<div class="t">Your documents have been checked and accepted</div>' +
+        '<div class="s">Nothing further is needed from you' +
+        (a.verifiedAt ? ', as of ' + esc(a.verifiedAt) : '') + '.</div></div></div>');
+    }
+
+    var toFix = (v.documents || []).filter(function (d) {
+      return d.status === 'REJECTED' || d.status === 'REQUIRED';
+    });
+
+    if (st === 'ACTION_REQUIRED') {
+      return card('', '<div class="status warn"><div class="sic">!</div><div>' +
+        '<div class="t">The hostel office needs something from you</div>' +
+        '<div class="s">' + esc(a.verifyNote ||
+          'One of your documents has to be uploaded again.') + '</div></div></div>' +
+        (toFix.length
+          ? '<p class="small" style="margin:12px 0 0">To replace: <strong>' +
+            toFix.map(function (d) { return esc(d.label); }).join(', ') + '</strong>. ' +
+            'Your place in the queue is not affected while you sort this out.</p>' +
+            '<div class="btn-row" style="margin-top:10px">' +
+            toFix.map(function (d) {
+              return '<button class="btn" onclick="pickFile(&quot;' + esc(d.docType) +
+                '&quot;)">Upload ' + esc(d.label) + ' again</button>';
+            }).join('') + '</div>'
+          : ''));
+    }
+
+    return card('', '<div class="status bad"><div class="sic">&#10007;</div><div>' +
+      '<div class="t">Your application was not accepted at verification</div>' +
+      '<div class="s">' + esc(a.verifyNote || 'The hostel office can explain why.') +
+      '</div></div></div>' +
+      '<p class="small muted" style="margin:12px 0 0">If you believe this is wrong, ' +
+      'write to ' + esc(v.supportEmail || 'the hostel office') + ' with your ' +
+      'application reference.</p>');
   }
 
   /* -------------------------------------------------------- documents */

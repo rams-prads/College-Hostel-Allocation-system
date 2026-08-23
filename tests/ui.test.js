@@ -62,9 +62,18 @@ function freshDom() {
   }
   global.__known = known;
   const attrs = {};
+  const listeners = {};
   global.document = {
     getElementById: node,
     createElement() { return makeEl('new', known); },
+    // A real document has these. Leaving them off meant a page that binds a
+    // keyboard shortcut threw at load and rendered nothing - which is the
+    // exact class of bug this harness exists to catch, so the stub has to be
+    // at least as capable as the thing it stands in for.
+    addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    removeEventListener() {},
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
     // A page may set the theme or tag the body before it paints. Leaving these
     // off the stub meant the whole dashboard threw at line one.
     documentElement: {
@@ -74,6 +83,7 @@ function freshDom() {
     body: { classList: { add() {}, remove() {}, contains() { return false; } } }
   };
   global.__attrs = attrs;
+  global.__listeners = listeners;
   global.window = {
     top: { location: { reload() {}, href: '', pathname: '/' } },
     scrollTo() {}, location: { href: '' }
@@ -357,6 +367,50 @@ check('only the student\'s own campus appears in the options', (() => {
   return r.screen.indexOf(mine) > 0 && r.screen.split(other).length - 1 === 0;
 })(), 'offering an option that can never be granted is worse than offering none');
 
+section('The student is told what to do, not that something was rejected');
+
+(() => {
+  // A decision the student cannot act on is a decision that costs a week.
+  const app = Db.readAll('Applications').find(a => a.status === 'SUBMITTED') ||
+              Db.readAll('Applications')[0];
+  const st = Db.byId('Students', app.studentId);
+  Documents.provision(app.appId, st);
+  Db.invalidate('Documents');
+  Db.where('Documents', { appId: app.appId }).forEach((d, i) => {
+    Db.update('Documents', d.docId, {
+      status: 'UPLOADED', driveFileId: 'sf-' + i, fileName: 'scan.jpg',
+      scanVerdict: 'UNREADABLE'
+    });
+  });
+  Db.invalidate('Documents');
+
+  global.Session = { getActiveUser: () => ({ getEmail: () => 'admin@ipu.ac.in' }) };
+  apiAdminVerificationDecide(app.appId, 'RESUBMIT', { reason: 'UNREADABLE' });
+  Db.invalidate('Documents'); Db.invalidate('Applications');
+
+  const t = renderPage('student.html', st.email);
+  check('the decision is at the top of their page, not inferred from a pill',
+    t.screen.indexOf('The hostel office needs something from you') > 0);
+  check('and it says what to do about it',
+    /clearer photo or scan/.test(t.screen),
+    'the reason is chosen from a fixed list precisely so that it is an instruction');
+  check('with the upload button right there',
+    /pickFile\(&quot;AADHAAR/.test(t.screen),
+    'being told to resubmit with no way to resubmit is the worst version of this screen');
+  check('and reassurance that they have not lost their place',
+    /place in the queue is not affected/.test(t.screen),
+    'the fear this causes is what makes people telephone the office');
+
+  // renderPage points the session at whoever it is rendering for, so the
+  // administrator has to be put back before the next decision.
+  global.Session = { getActiveUser: () => ({ getEmail: () => 'admin@ipu.ac.in' }) };
+  apiAdminVerificationDecide(app.appId, 'VERIFY', {});
+  Db.invalidate('Documents'); Db.invalidate('Applications');
+  const done = renderPage('student.html', st.email);
+  check('a verified applicant is told plainly that nothing is needed',
+    done.screen.indexOf('checked and accepted') > 0);
+})();
+
 section('Reporting a problem is a residents desk');
 
 (() => {
@@ -448,10 +502,11 @@ check('students opens on its own tab', (() => {
   const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("students");');
   return t.screen.indexOf('Look up a student') > 0;
 })());
-check('the document queue finally has a screen', (() => {
+check('verification opens on a queue of people, not of documents', (() => {
   const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
-  return t.screen.indexOf('Documents needing a decision') > 0;
-})(), 'apiAdminDocQueue existed since Phase 4 with nothing rendering it');
+  return /class="vconsole"/.test(t.screen) && /class="vqueue"/.test(t.screen);
+})(), 'the unit of work in this job is a person; three lists of documents made an ' +
+      'officer touch the same applicant twice from two screens');
 
 section('The waiting list has a screen of its own');
 
@@ -510,27 +565,92 @@ check('and does not also render the other seven',
   r.screen.indexOf('Look up a student') < 0,
   'stacking everything on one page is what this replaced');
 
-section('Document reading is on the dashboard');
-r = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
-check('the reading summary renders', r.screen.indexOf('Document reading') > 0);
-check('it states what is actually compared',
-  r.screen.indexOf('PIN code compared') > 0,
-  'an officer should know what the machine checked and what it did not');
-check('it says a difference is only raised when it matters',
-  r.screen.indexOf('change') > 0 && r.screen.indexOf('outcome') > 0);
+section('The verification console');
 
-section('Identity verification - the admin side');
+// Somebody actually waiting on a person: everything asked for uploaded and
+// read, nothing outstanding. Without one the console correctly shows an empty
+// queue, and an empty queue tests nothing.
+const vApp = Db.readAll('Applications').find(a => a.status !== 'DRAFT');
+(() => {
+  const st = Db.byId('Students', vApp.studentId);
+  Documents.provision(vApp.appId, st);
+  Db.invalidate('Documents');
+  Db.where('Documents', { appId: vApp.appId }).forEach((d, i) => {
+    Db.update('Documents', d.docId, {
+      status: 'UPLOADED', driveFileId: 'case-file-' + i, fileName: 'scan.jpg',
+      mimeType: 'image/jpeg', sizeBytes: 90000, uploadedAt: new Date(),
+      scanVerdict: 'MATCH',
+      scanJson: { findings: [], detail: { nameScore: 1, declaredPincode: st.homePincode,
+                                          pincodesFound: [String(st.homePincode)],
+                                          pincodeConfirmed: true } }
+    });
+  });
+  Db.update('Applications', vApp.appId, { verifyStatus: 'PENDING' });
+  Db.invalidate('Documents'); Db.invalidate('Applications');
+})();
+
 r = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
-check('the verification section is on the dashboard',
-  r.screen.indexOf('Identity verification') > 0);
-check('the waiting applicant is listed', r.screen.indexOf(idStudent.name) > 0);
-check('their number is shown masked',
-  r.screen.indexOf('XXXX XXXX ' + IDNUM.slice(-4)) > 0);
-check('the full number is not in the admin page either',
-  r.screen.indexOf(IDNUM.slice(0, 8)) < 0,
-  'an admin screen is the one most likely to be shared or photographed');
-check('verify and reject are both offered',
-  r.screen.indexOf('&gt;Verify&lt;') > 0 || r.screen.indexOf('>Verify<') > 0);
+
+check('it says how much is waiting on a person', r.screen.indexOf('Waiting on you') > 0);
+check('and how old the oldest of it is', r.screen.indexOf('Oldest still waiting') > 0,
+  'a queue with no age on it is a queue nobody can be held to');
+check('and how much the machine took off the pile',
+  r.screen.indexOf('Read and settled automatically') > 0);
+
+check('it says plainly whether verification gates allocation at all', (() => {
+  return /cannot be allotted until verification passes|does not currently gate allocation/
+    .test(r.screen);
+})(), 'the single setting that decides whether any of this work means anything, on the ' +
+      'screen where the work happens rather than three tabs away');
+
+check('the queue can be filtered by who is being waited on', (() => {
+  return /setVFilter\(&quot;NEEDS_DECISION/.test(r.screen) &&
+         /setVFilter\(&quot;WAITING_ON_STUDENT/.test(r.screen) &&
+         /setVFilter\(&quot;FLAGGED/.test(r.screen);
+})(), '"who do I chase" is the question a queue is for');
+
+section('One case, on one screen');
+
+(() => {
+  // The console opens on the first case by itself: an officer arriving wants
+  // to start work, not to choose where to start.
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
+
+  check('a case opens without being asked for', /class="vcase"/.test(t.screen),
+    t.screen.indexOf('Nothing to decide') > 0 ? 'queue was empty' : 'no case rendered');
+  check('the declaration is on it', t.screen.indexOf('What the applicant declared') > 0);
+  check('the automatic checks are on it', t.screen.indexOf('Automatic checks') > 0);
+  check('the evidence is on it', t.screen.indexOf('The evidence') > 0);
+  check('and the comparison between the two',
+    t.screen.indexOf('Declared against the document') > 0,
+    'the officer\'s actual task is comparing what was typed with what the document ' +
+    'says; the old screen did that comparison and then showed only its opinion');
+
+  check('all three decisions are offered', (() => {
+    return /decideCase\(&quot;VERIFY/.test(t.screen) &&
+           /decideCase\(&quot;RESUBMIT/.test(t.screen) &&
+           /decideCase\(&quot;REJECT/.test(t.screen);
+  })(), '"send me a better photograph" is the commonest thing an officer needs to say ' +
+        'and there was no way to say it');
+
+  check('a reason must be chosen, and the list is offered', (() => {
+    return t.screen.indexOf('Too blurred or dark to read') > 0 &&
+           t.screen.indexOf('The name does not match the application') > 0;
+  })(), 'the student is told what to DO, and "rejected" is not an instruction');
+
+  check('the keyboard is documented on the screen that uses it',
+    /<kbd>A<\/kbd>/.test(t.screen) && /<kbd>R<\/kbd>/.test(t.screen),
+    'a queue is measured in throughput, and a hand that finds the mouse between ' +
+    'every case halves it');
+})();
+
+check('an Aadhaar number is masked on the console too', (() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in',
+    'goTab("verification"); setVFilter("ALL"); openCase("' +
+    Db.findOne('Applications', { studentId: idStudent.studentId }).appId + '");');
+  return t.screen.indexOf('XXXX XXXX ' + IDNUM.slice(-4)) > 0 &&
+         t.screen.indexOf(IDNUM.slice(0, 8)) < 0;
+})(), 'an admin screen is the one most likely to be shared or photographed');
 
 section('Grievances can be closed, not only read');
 
@@ -1116,60 +1236,31 @@ check('a campus with no rooms on record says so instead of "all chosen"', (() =>
 section('Where has my document got to?');
 
 (() => {
-  // The reported situation: a student's portal says "under review", and the
-  // verification tab says "nothing waiting" - both correct, because the machine
-  // read it and it agreed. What was missing was any screen that could answer
-  // the question the office is actually being asked on the phone.
+  // The question the office is asked on the phone. It used to have no answer on
+  // any screen: a document the reading had settled was out of the decision
+  // queue, and there was no other list.
   const someApp = Db.readAll('Applications')[0];
   Documents.provision(someApp.appId, Db.byId('Students', someApp.studentId));
   Db.invalidate('Documents');
-  const doc = Db.where('Documents', { appId: someApp.appId })[0];
-  Db.update('Documents', doc.docId, {
-    status: 'UPLOADED', scanVerdict: 'MATCH', driveFileId: 'file-here',
-    fileName: 'aadhaar.jpg'
+  Db.where('Documents', { appId: someApp.appId }).forEach(d => {
+    Db.update('Documents', d.docId, {
+      status: 'VERIFIED', scanVerdict: 'MATCH', driveFileId: 'file-here',
+      fileName: 'aadhaar.jpg', verifiedBy: 'warden@ipu.ac.in'
+    });
   });
   Db.invalidate('Documents');
 
-  const waiting = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
-  check('a document that agrees is still kept out of the decision queue',
-    waiting.screen.indexOf(doc.docId) < 0,
-    'the queue only works if it holds what needs a person');
-  check('but the empty state now says where to look instead',
-    /Every document held/.test(waiting.screen),
-    'a dead end with a green tick on it is still a dead end');
+  const t = renderPage('admin.html', 'admin@ipu.ac.in',
+    'goTab("verification"); setVFilter("ALL"); openCase("' + someApp.appId + '");');
 
-  const all = renderPage('admin.html', 'admin@ipu.ac.in',
-    'goTab("verification"); showAllDocs(true);');
-  check('and the full view finds it', all.screen.indexOf(doc.docId) > 0,
-    'this is the view an officer needs with a student on the phone');
-  check('the toggle is on both views, so neither is a dead end',
-    /showAllDocs\(false\)/.test(all.screen) && /showAllDocs\(true\)/.test(waiting.screen));
-
-  // A decided document is a record, not a task.
-  Db.update('Documents', doc.docId, { status: 'VERIFIED', verifiedBy: 'warden@ipu.ac.in' });
-  Db.invalidate('Documents');
-  const after = renderPage('admin.html', 'admin@ipu.ac.in',
-    'goTab("verification"); showAllDocs(true);');
-  const owner = Db.byId('Students', someApp.studentId);
-  check('an already-decided document is still findable',
-    after.screen.indexOf(owner.enrollmentNo) > 0 &&
-    after.screen.indexOf('file-here') > 0,
-    'by the student it belongs to, and with a link to the file itself');
-  check('and is not offered Accept and Reject again',
-    after.screen.indexOf('decideDoc(&quot;' + doc.docId) < 0,
-    'a second decision overwrites the first without anybody meaning to');
-  check('it says who decided it', after.screen.indexOf('warden@ipu.ac.in') > 0);
+  check('every applicant is reachable, whatever state they are in',
+    /setVFilter\(&quot;ALL/.test(t.screen));
+  check('and their case shows the document itself',
+    t.screen.indexOf('file-here') > 0,
+    'the file, on the screen, not behind a link to another tab');
+  check('with what became of it', t.screen.indexOf('warden@ipu.ac.in') > 0 ||
+    t.screen.indexOf('Verified') > 0);
 })();
-
-check('the summary does not claim everything agrees when things were decided', (() => {
-  // Two contradictions and two unreadable scans, all settled by hand earlier,
-  // used to be reported as "every document held agrees with its declaration".
-  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
-  const s = apiAdminVerificationSummary();
-  if (!s.decided) return true;
-  return t.screen.indexOf('Every document held has been read and agrees') < 0 &&
-         /have been decided/.test(t.screen);
-})(), 'an untrue sentence in a green box is the worst place for one');
 
 section('Occupancy lists buildings, not spreadsheet rows');
 

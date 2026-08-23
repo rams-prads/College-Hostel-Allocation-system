@@ -161,7 +161,22 @@ var SCHEMA = {
       { name: 'docStatus',        type: T.ENUM, values: ['PENDING', 'SUBMITTED', 'VERIFIED', 'REJECTED'] },
       { name: 'docFolderUrl',     type: T.STR },
       { name: 'needsAccessible',  type: T.BOOL },
-      { name: 'updatedAt',        type: T.DATE }
+      { name: 'updatedAt',        type: T.DATE },
+
+      // Appended, never inserted - Db reads by column position.
+      //
+      // The office's DECISION about this applicant, which is a different fact
+      // from docStatus. docStatus is a roll-up of the document rows: it says
+      // what the documents are. This says what was decided about the person.
+      // Conflating them meant that asking a student for a clearer photograph
+      // rolled their application up to REJECTED and made them ineligible for a
+      // room - over a blurred photograph.
+      { name: 'verifyStatus',     type: T.ENUM,
+        values: ['', 'PENDING', 'ACTION_REQUIRED', 'VERIFIED', 'REJECTED'] },
+      { name: 'verifyReason',     type: T.STR },
+      { name: 'verifyNote',       type: T.STR },
+      { name: 'verifiedBy',       type: T.STR },
+      { name: 'verifiedAt',       type: T.DATE }
     ]
   },
 

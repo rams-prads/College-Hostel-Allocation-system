@@ -146,8 +146,52 @@ var Policy = (function () {
     };
   }
 
+  /**
+   * Change a policy value for real, as opposed to overriding it for a
+   * simulation.
+   *
+   * Policy has been readable from code and writable only by hand in the sheet.
+   * That is right for reservation percentages, which nobody should change from
+   * a web page - and wrong for the one setting an officer genuinely toggles
+   * during a session, which is whether verification gates allocation at all.
+   */
+  function set(category, key, value, actor) {
+    var rows = Db.readAll('Policy');
+    var found = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].category === category && rows[i].key === key) { found = rows[i]; break; }
+    }
+    var before;
+    if (found) {
+      before = found.value;
+      Db.update('Policy', found.ruleId, { value: String(value) });
+    } else {
+      // A rule the code reads but the sheet has never held. That happens on
+      // any installation seeded before the rule existed, and refusing to write
+      // it would leave the setting permanently stuck at its default with no way
+      // to change it from anywhere.
+      before = '';
+      Db.append('Policy', {
+        ruleId: 'POL-' + String(category).substring(0, 3).toUpperCase() + '-' +
+                String(key).replace(/[^A-Za-z0-9]/g, '').substring(0, 12).toUpperCase(),
+        category: category, key: key, value: String(value),
+        effectiveFrom: new Date(), notes: 'Added when it was first changed.'
+      });
+    }
+    Db.invalidate('Policy');
+    invalidate();
+
+    Ledger.append('POLICY_CHANGED', {
+      ruleId: found ? found.ruleId : '(created)', category: category, key: key,
+      from: String(before), to: String(value)
+    }, actor || 'system');
+
+    return { ok: true, from: before, to: value };
+  }
+
   return {
     load: load,
+    set: set,
     invalidate: invalidate,
     setOverride: setOverride,
     clearOverride: clearOverride,
