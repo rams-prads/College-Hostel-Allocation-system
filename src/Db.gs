@@ -296,7 +296,9 @@ var Db = (function () {
     STU: ['Students', 'studentId'],
     APP: ['Applications', 'appId'],
     GRV: ['Grievances', 'ticketId'],
-    SWP: ['Transfers', 'reqId']
+    SWP: ['Transfers', 'reqId'],
+    RC:  ['RuleChunks', 'chunkId'],
+    CHT: ['ChatLog', 'turnId']
   };
 
   /**

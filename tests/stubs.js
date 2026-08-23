@@ -119,6 +119,83 @@ global.PropertiesService = {
   })
 };
 
+// ------------------------------------------------------------- UrlFetchApp
+//
+// Gemini.gs is the only file in the project that leaves the machine, so this
+// stub is the one place the network contract is checked at all.
+//
+// __fetches records every request made. Several tests assert on its LENGTH
+// rather than its contents - "the rate limiter rejected the caller before we
+// spent a request" is only provable by showing no request was made.
+//
+// __fetchQueue lets a test script the NEXT response, which is how quota
+// exhaustion, a retired model, and a bare 400 are exercised without waiting
+// for Google to produce one.
+global.__fetches = [];
+global.__fetchQueue = [];
+
+function fetchResponse_(code, body) {
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  return { getResponseCode: () => code, getContentText: () => text, getAllHeaders: () => ({}) };
+}
+global.__fetchResponse = fetchResponse_;
+
+/**
+ * Deterministic stand-in for an embedding model: hash each token into one of
+ * `dims` buckets, count, L2-normalise.
+ *
+ * Semantically meaningless, but LEXICALLY sensible - two texts sharing words
+ * land near each other - which is what lets the retrieval tests assert real
+ * ranking ("an attendance question ranks the attendance chunk first") offline.
+ * A random vector would only prove the plumbing runs, not that ranking works.
+ */
+function fakeEmbed_(text, dims) {
+  const v = new Array(dims).fill(0);
+  String(text).toLowerCase().split(/[^a-z0-9]+/).forEach(tok => {
+    if (!tok) return;
+    let h = 2166136261;
+    for (let i = 0; i < tok.length; i++) { h ^= tok.charCodeAt(i); h = Math.imul(h, 16777619); }
+    v[Math.abs(h) % dims] += 1;
+  });
+  const n = Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1;
+  return v.map(x => x / n);
+}
+global.__fakeEmbed = fakeEmbed_;
+
+global.UrlFetchApp = {
+  fetch(url, params) {
+    global.__fetches.push({ url: String(url), params: params || {} });
+    if (global.__fetchQueue.length) return global.__fetchQueue.shift();
+
+    // Unscripted calls get a plausible default, so a test that cares about
+    // neither embed nor generate does not have to script both.
+    const payload = params && params.payload ? JSON.parse(params.payload) : {};
+
+    if (/embedContent/i.test(url)) {
+      const dims = payload.outputDimensionality ||
+        (payload.requests && payload.requests[0] && payload.requests[0].outputDimensionality) || 768;
+      const texts = payload.requests
+        ? payload.requests.map(r => r.content.parts.map(p => p.text).join(' '))
+        : [(payload.content.parts || []).map(p => p.text).join(' ')];
+      // Deliberately NOT unit length: gemini-embedding-001 does not normalise
+      // truncated output, and code that forgets to must fail here, not in
+      // production. 1.7 is arbitrary and that is the point.
+      const out = texts.map(t => ({ values: fakeEmbed_(t, dims).map(x => x * 1.7) }));
+      return fetchResponse_(200, payload.requests ? { embeddings: out } : { embedding: out[0] });
+    }
+
+    if (/generateContent/i.test(url)) {
+      return fetchResponse_(200, {
+        candidates: [{ content: { parts: [{ text: 'Stubbed answer. [1]' }] }, finishReason: 'STOP' }],
+        usageMetadata: { totalTokenCount: 42 }
+      });
+    }
+
+    return fetchResponse_(404, { error: { message: 'stub: unrouted ' + url } });
+  },
+  _reset() { global.__fetches = []; global.__fetchQueue = []; }
+};
+
 global.Session = { getActiveUser: () => ({ getEmail: () => 'tester@example.com' }) };
 global.Logger = { log: () => {} };                    // silent; tests print their own
 global.SpreadsheetApp = { getActiveSpreadsheet: () => null };
@@ -220,7 +297,7 @@ global.Db = {
 };
 
 // ----------------------------------------------------------- load engine code
-['Util', 'Ledger', 'Geo', 'Catalogue', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'DocScan', 'SignIn', 'Auth', 'Identity', 'Registration', 'Api', 'QrCode', 'Letters', 'Notify', 'Simulator', 'Swap', 'Vacancy', 'Grievance', 'DemoScenario', 'DryRun', 'AdminApi'].forEach(loadSrc);
+['Util', 'Ledger', 'Geo', 'Catalogue', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'DocScan', 'SignIn', 'Auth', 'Identity', 'Registration', 'RuleText', 'RuleBook', 'Gemini', 'Chatbot', 'Api', 'QrCode', 'Letters', 'Notify', 'Simulator', 'Swap', 'Vacancy', 'Grievance', 'DemoScenario', 'DryRun', 'AdminApi'].forEach(loadSrc);
 
 // Setup.gs seeds Config/Policy; we call only its seed functions, not the
 // sheet-building parts, which need a real SpreadsheetApp.

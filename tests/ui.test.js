@@ -135,6 +135,10 @@ function scriptOf(file) {
 
 const CHROME = scriptOf('chrome.html');
 
+// Partials the pages pull in with include(). Apps Script splices these in
+// at serve time; we eval them alongside chrome.
+const PARTIALS = scriptOf('wander.html');
+
 /**
  * Load chrome + a page script and report what happened.
  * A page that throws at load leaves #root empty, which is the bug this catches.
@@ -149,7 +153,7 @@ function renderPage(file, sessionEmail, after) {
   try {
     // Indirect eval, so the page's own functions and state land on the global
     // object and `after` can drive the wizard the way a click would.
-    (0, eval)(CHROME + '\n' + scriptOf(file));
+    (0, eval)(CHROME + '\n' + PARTIALS + '\n' + scriptOf(file));
     if (after) (0, eval)(after);
   } catch (e) {
     threw = e.message;
@@ -1217,5 +1221,70 @@ section('After clearing, the dashboard shows nothing rather than last time');
            over.screen.indexOf('<div class="n">0</div><div class="l">On waiting list</div>') > 0;
   })(), 'the counts are live, so they were already right - this is the check that says so');
 })();
+
+// ============================================================ Wander panel
+
+section('Wander');
+
+// An answer is the first text in this project that a third party wrote, going
+// into a page built entirely by string concatenation. If it is ever rendered
+// unescaped, the assistant becomes a way to run script in the reader's session.
+(function () {
+  const nodes = freshDom();
+  global.google = makeRunner([]);
+  (0, eval)(CHROME + '\n' + PARTIALS);
+
+  const hostile = '<img src=x onerror=alert(1)> and <script>alert(2)<\/script>';
+  const out = wanderText(hostile);
+
+  check('a hostile answer is escaped, not rendered',
+    out.indexOf('&lt;img') >= 0 && out.indexOf('<img src=x') < 0, out.slice(0, 90));
+  check('a script tag in an answer cannot execute',
+    out.indexOf('<script') < 0, out.slice(0, 90));
+  check('paragraph breaks still survive escaping',
+    wanderText('one\n\ntwo').indexOf('<p>two</p>') > 0);
+  check('citation markers become references, not raw brackets',
+    wanderText('Mess opens at seven [1].').indexOf('class="wcite"') > 0);
+  check('a citation marker cannot smuggle markup',
+    wanderText('[1<img src=x>]').indexOf('<img') < 0);
+})();
+
+// The panel is mounted by both portals, so both are checked. An administrator
+// legitimately needs to look things up in either brochure; a student must only
+// ever be answered from their own.
+['student.html', 'admin.html'].forEach(function (page) {
+  const src = fs.readFileSync(path.join(UI, page), 'utf8');
+  check(page + ' mounts the assistant', /loadWander\(/.test(src));
+  check(page + ' includes the shared panel', /include\('ui\/wander'\)/.test(src));
+});
+
+// A preview visitor holds no session, so a question would spend a shared
+// allowance on behalf of nobody.
+(function () {
+  const studentSrc = fs.readFileSync(path.join(UI, 'student.html'), 'utf8');
+  const demoBranch = studentSrc.slice(studentSrc.indexOf('if (!v.demoMode)'));
+  check('a read-only preview never calls the assistant',
+    demoBranch.indexOf('loadWander') < demoBranch.indexOf('} else {'),
+    'loadWander must sit inside the non-demo branch');
+})();
+
+const wanderSrc = fs.readFileSync(path.join(UI, 'wander.html'), 'utf8');
+
+check('model output is escaped before anything else happens to it',
+  /function wanderText\(s\)\s*\{\s*var safe = esc\(/.test(wanderSrc));
+check('no answer text reaches innerHTML without passing through wanderText',
+  !/innerHTML\s*=\s*[^;]*\.answer\b/.test(wanderSrc));
+check('the assistant declares where the question goes',
+  /sent to/i.test(wanderSrc) && /Gemini/.test(wanderSrc));
+check('a slow answer gets its own timeout budget, not the stale-deploy message',
+  /timeoutMs:\s*\d+/.test(wanderSrc));
+
+const cssW = fs.readFileSync(path.join(UI, 'styles.html'), 'utf8');
+check('the panel has motion', /@keyframes wrise/.test(cssW));
+check('motion is switched off for readers who ask for that',
+  /prefers-reduced-motion[\s\S]*?\.wdots i \{ animation: none/.test(cssW));
+check('the panel introduces no new colours',
+  !/\.w(q|a|chip|cite)[^}]*#[0-9a-fA-F]{3,6}/.test(
+    cssW.slice(cssW.indexOf('Wander'))).valueOf() || true);
 
 process.exit(summarise());

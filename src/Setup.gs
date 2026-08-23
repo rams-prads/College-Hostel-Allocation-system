@@ -71,6 +71,18 @@ function setupEverything() {
     out.push('Seeded ' + seeded.students + ' students and ' + seeded.beds + ' beds.');
   }
 
+  // The hostel rules ship with the code, so a deployment can never end up with
+  // an assistant and no rule book. Vectors survive wherever the text is
+  // unchanged, so re-running this after a code push costs nothing.
+  try {
+    var rb = RuleBook.loadBundled();
+    out.push('Hostel rules ' + rb.session + ': ' + rb.chunks + ' passages loaded' +
+             (rb.reused ? ', ' + rb.reused + ' already searchable' :
+                          ' - open Admin > Assistant and press Embed to make them searchable'));
+  } catch (e) {
+    out.push('Hostel rules could not be loaded: ' + e.message);
+  }
+
   // Whoever runs this owns the deployment, so they are the administrator.
   if (me) {
     var existing = Db.readAll('Admins', { fresh: true }).filter(function (a) {
@@ -514,7 +526,24 @@ function seedConfig_() {
     { key: 'LOGO_URL',             value: 'https://www.ipu.ac.in/images/logo.png',
       notes: 'University crest shown in the masthead. Any public image URL, or a Drive file shared "anyone with the link". Blank falls back to the IPU monogram.' },
     { key: 'ALLOC_LOCAL_SEARCH',   value: 'TRUE',  notes: 'Stage F of the allocator. Set FALSE to disable.' },
-    { key: 'ALLOC_MAX_ITERATIONS', value: '2000',  notes: 'Cap on local-search iterations (execution-time guard)' }
+    { key: 'ALLOC_MAX_ITERATIONS', value: '2000',  notes: 'Cap on local-search iterations (execution-time guard)' },
+
+    // Wander, the assistant. OFF by default, like every other capability that
+    // reaches outside this account: a question and the asker's own record are
+    // sent to Google to compose an answer, and that is a decision for whoever
+    // deploys this, not a default they discover afterwards.
+    { key: 'CHATBOT_ENABLED',   value: 'FALSE',
+      notes: 'Wander, the hostel assistant. TRUE to switch it on. Questions and the asking student\'s own record are sent to Google Gemini to compose an answer.' },
+    { key: 'CHATBOT_DAILY_CAP', value: '200',
+      notes: 'Questions Wander will answer per day, counted on the US Pacific day that Google\'s free tier resets on. Keeps a margin below the free-tier ceiling.' },
+    // Model ids, in the sheet rather than the source, because Google retires
+    // them on its own schedule. A rename is then a cell edit, not a redeploy.
+    { key: 'GEMINI_CHAT_MODEL',  value: 'gemini-3.5-flash-lite',
+      notes: 'Gemini model Wander answers with. Google retires ids on its own schedule - 2.5-flash-lite stopped accepting new keys in 2026 - so when an answer fails with a 404 naming a replacement, put that name here. No redeploy needed.' },
+    { key: 'GEMINI_EMBED_MODEL', value: 'gemini-embedding-001',
+      notes: 'Embedding model. Changing this makes every stored vector stale - re-embed the rule book afterwards.' },
+    { key: 'GEMINI_EMBED_DIMS',  value: '768',
+      notes: 'Embedding dimensions. Lower is faster and smaller; changing it requires re-embedding.' }
   ];
 
   var missing = defaults.filter(function (row) { return !existing[row.key]; });
@@ -604,7 +633,17 @@ function seedPolicy_() {
     // the difference is treated as material rather than clerical. Raising it
     // means fewer things reach a person, and more misdeclarations go unseen.
     ['POL-ELG-ADDRTOL', 'eligibility', 'ADDRESS_TOLERANCE_KM', 50,
-     'Distance difference between declared and documented PIN that is worth raising']
+     'Distance difference between declared and documented PIN that is worth raising'],
+
+    // Wander's retrieval. TOP_K is how many rule passages reach the model;
+    // MIN_SIM is the floor below which nothing does, and the assistant says it
+    // has no answer rather than composing one from weak matches.
+    ['POL-CHAT-RATE',   'chatbot', 'RATE_PER_HOUR', 60,
+     'Questions one person may ask Wander per hour. The allowance is shared with the whole cohort, so this protects everyone else from one person in a loop.'],
+    ['POL-CHAT-TOPK',   'chatbot', 'TOP_K', 6,
+     'How many rule passages Wander is given to answer from'],
+    ['POL-CHAT-MINSIM', 'chatbot', 'MIN_SIM', 0.45,
+     'Similarity floor. Below this Wander says the rules do not cover the question instead of guessing.']
   ];
 
   var missing = rows.filter(function (r) { return !have[r[0]]; });

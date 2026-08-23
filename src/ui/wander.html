@@ -1,0 +1,252 @@
+<script>
+/**
+ * Wander - the hostel assistant panel.
+ *
+ * One component, mounted by both the student portal and the admin dashboard.
+ * They differ only in what the server does with the caller: a student's
+ * retrieval is partitioned to their own gender and campus, an administrator's
+ * is not. Nothing about that decision lives here, and it must not - a partition
+ * enforced in the browser is not a partition.
+ */
+
+var WANDER = { status: null, turns: [], busy: false, host: null };
+
+/**
+ * Escape, THEN format. Never the other way round.
+ *
+ * This is the first text in the project that a third party wrote, rendered into
+ * a page built entirely by string concatenation. So it is escaped first and
+ * completely, and only then are two safe things reintroduced: paragraph breaks,
+ * and the [n] citation markers - which survive escaping untouched because they
+ * contain no markup characters.
+ *
+ * There is deliberately no markdown rendering. The model is told not to emit
+ * any, and a markdown renderer here would be an XSS incident with a schedule.
+ */
+function wanderText(s) {
+  var safe = esc(String(s || ''));
+  safe = safe.replace(/\[(\d{1,2})\]/g, function (_, n) {
+    return '<span class="wcite" title="Source ' + n + '">' + n + '</span>';
+  });
+  return safe.split(/\n{2,}/).map(function (para) {
+    return '<p>' + para.replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+}
+
+function wanderTurn(t) {
+  var cls = t.status === 'ANSWERED' ? '' :
+            (t.status === 'ERROR' ? ' err' : ' refused');
+
+  var cites = (t.citations || []).map(function (c) {
+    return [String(c.n), c.sourceRef + (c.heading ? ' — ' + c.heading : '')];
+  });
+
+  var foot = '';
+  if (t.turnId && t.status === 'ANSWERED') {
+    foot = '<div class="wfoot">' +
+      '<button class="wflag" data-flag="' + esc(t.turnId) + '"' +
+        (t.flagged ? ' disabled' : '') + '>' +
+        (t.flagged ? 'Reported' : 'This answer looks wrong') + '</button></div>';
+  }
+
+  return '<div class="wturn">' +
+    '<div class="wq">' + esc(t.question) + '</div>' +
+    '<div class="wa' + cls + '">' + wanderText(t.answer) +
+      (cites.length ? techDetails('Where this came from', cites) : '') +
+      foot +
+    '</div></div>';
+}
+
+function wanderPending(question) {
+  return '<div class="wturn" id="wPending">' +
+    '<div class="wq">' + esc(question) + '</div>' +
+    '<div class="wa"><span class="wdots"><i></i><i></i><i></i></span>' +
+      '<span class="small muted" style="margin-left:8px">Reading the hostel rules</span>' +
+    '</div></div>';
+}
+
+var WANDER_CHIPS_STUDENT = [
+  'What are the hostel fees?',
+  'Which documents do I need?',
+  'What are the mess rules?'
+];
+var WANDER_CHIPS_ADMIN = [
+  'What is the policy for allotment of a hostel seat?',
+  'What are the rules on ragging?',
+  'When must hostel fees be paid?'
+];
+
+function paintWander() {
+  var host = el(WANDER.host);
+  if (!host) return;
+  var st = WANDER.status || {};
+
+  if (!st.enabled) {
+    host.innerHTML = card(st.agent || 'Wander', emptyState('💬',
+      (st.agent || 'Wander') + ' is not available yet',
+      st.note || 'The assistant has not been set up on this deployment.'),
+      { id: 'wanderCard', sub: 'Hostel assistant' });
+    return;
+  }
+
+  var chips = st.isAdmin ? WANDER_CHIPS_ADMIN : WANDER_CHIPS_STUDENT;
+  var body = '';
+
+  if (WANDER.turns.length) {
+    body += '<div class="wander-log" id="wLog">' +
+            WANDER.turns.map(wanderTurn).join('') + '</div>';
+  } else {
+    body += '<div class="wander-log" id="wLog">' +
+      emptyState('💬', 'Ask about the hostel rules',
+        st.isAdmin
+          ? 'Answers come only from the brochures loaded into the rule book, with the passage cited.'
+          : 'Answers come from the hostel brochure and your own application, with the rule cited.') +
+      '<div class="wchips">' + chips.map(function (c) {
+        return '<button class="wchip" data-ask="' + esc(c) + '">' + esc(c) + '</button>';
+      }).join('') + '</div></div>';
+  }
+
+  body += '<div id="wMsg"></div>' +
+    '<div class="wbar">' +
+      '<textarea id="wInput" rows="1" maxlength="400" placeholder="Ask a question about the hostel rules"' +
+        (WANDER.busy ? ' disabled' : '') + '></textarea>' +
+      '<button class="btn primary" id="wSend"' + (WANDER.busy ? ' disabled' : '') + '>Ask</button>' +
+    '</div>' +
+    // Said plainly, and on the page rather than in a policy nobody opens. The
+    // question and the record already shown above it leave this account.
+    '<div class="wnote">Your question and the details already shown on this page are sent to ' +
+      'Google’s Gemini service to compose an answer. ' +
+      (st.remaining ? st.remaining + ' questions left today.' : '') + '</div>';
+
+  host.innerHTML = card(st.agent || 'Wander', body,
+    { id: 'wanderCard', sub: 'Hostel assistant' });
+
+  wanderBind();
+  wanderScroll();
+}
+
+function wanderScroll() {
+  var log = el('wLog');
+  if (log) log.scrollTop = log.scrollHeight;
+}
+
+function wanderBind() {
+  var send = el('wSend');
+  if (send) send.onclick = function () { askWander(el('wInput').value); };
+
+  var input = el('wInput');
+  if (input) {
+    // Enter sends, shift+enter breaks the line - what anyone who has used a
+    // chat box already expects, so nobody has to be told.
+    input.onkeydown = function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askWander(input.value); }
+    };
+    input.oninput = function () {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    };
+    if (!WANDER.busy) input.focus();
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ask]'), function (b) {
+    b.onclick = function () { askWander(b.getAttribute('data-ask')); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-flag]'), function (b) {
+    b.onclick = function () { flagWander(b.getAttribute('data-flag'), b); };
+  });
+}
+
+function askWander(question) {
+  question = String(question || '').trim();
+  if (!question || WANDER.busy) return;
+
+  WANDER.busy = true;
+  var log = el('wLog');
+  if (log) {
+    // Echo the question straight away. The server cannot stream a partial
+    // answer through google.script.run, so showing the question landing is the
+    // only thing that distinguishes "sent" from "did the button work".
+    if (!WANDER.turns.length) log.innerHTML = '';
+    log.insertAdjacentHTML('beforeend', wanderPending(question));
+    wanderScroll();
+  }
+  var input = el('wInput');
+  if (input) { input.value = ''; input.disabled = true; input.style.height = 'auto'; }
+  var send = el('wSend');
+  if (send) send.disabled = true;
+
+  srv('wMsg', {
+    // A language model is not a spreadsheet read. The default 25-second budget
+    // would fire on a slow-but-fine answer and tell the reader to redeploy.
+    timeoutMs: 45000,
+    timeoutMessage: 'Wander has not answered in 45 seconds. Everything else on this page ' +
+                    'still works — try asking again in a moment.'
+  }).withSuccessHandler(function (turn) {
+    WANDER.busy = false;
+    WANDER.turns.push({
+      turnId: turn.turnId, question: question, answer: turn.answer,
+      citations: turn.citations, status: turn.status, flagged: false
+    });
+    if (WANDER.status && turn.status === 'ANSWERED' && WANDER.status.remaining) {
+      WANDER.status.remaining--;
+    }
+    paintWander();
+  }).withFailureHandler(function (e) {
+    WANDER.busy = false;
+    paintWander();
+    var msg = el('wMsg');
+    if (!msg) return;
+
+    // "Wander could not answer" on its own is the same dead end as the server
+    // messages this project spent an afternoon fixing: it names no cause, so
+    // nobody can act on it. Whatever came back gets shown, and the raw object
+    // is offered underneath when there was no message at all - an empty error
+    // is itself the useful clue.
+    var why = (e && e.message) ? String(e.message) : '';
+    msg.innerHTML = banner('err', why || 'Wander could not answer, and the server did not ' +
+                                          'say why.') +
+      (why ? '' : techDetails('Technical detail',
+        [['Response', (function () { try { return JSON.stringify(e); } catch (x) { return String(e); } })()]]));
+  }).apiAskWander(question);
+}
+
+function flagWander(turnId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Reporting…'; }
+  srv('wMsg').withSuccessHandler(function () {
+    WANDER.turns.forEach(function (t) { if (t.turnId === turnId) t.flagged = true; });
+    if (btn) btn.textContent = 'Reported';
+  }).withFailureHandler(function () {
+    if (btn) { btn.disabled = false; btn.textContent = 'This answer looks wrong'; }
+  }).apiFlagWanderAnswer(turnId);
+}
+
+/**
+ * Mount the panel into an element.
+ *
+ * Status first, history second. Rendering the transcript before knowing whether
+ * the assistant is switched on would show a working conversation attached to a
+ * dead input, which reads as broken rather than as unconfigured.
+ */
+function loadWander(hostId) {
+  WANDER.host = hostId;
+  WANDER.turns = [];   // a fresh page is a fresh conversation, every time
+  var host = el(hostId);
+  if (host) host.innerHTML = card('Wander', loadingState('Waking up'),
+                                  { id: 'wanderCard', sub: 'Hostel assistant' });
+
+  // apiWanderHistory is deliberately not called here. Every turn is still
+  // written to ChatLog on the server - that record is what the daily cap, the
+  // ledger hand-off on a flagged answer, and an admin auditing a dispute all
+  // depend on - but replaying it back into the panel on every visit is a
+  // different decision from keeping it, and the reader asked for a clean start
+  // each time rather than a growing transcript.
+  srv(hostId).withSuccessHandler(function (st) {
+    WANDER.status = st;
+    paintWander();
+  }).withFailureHandler(function () {
+    WANDER.status = { enabled: false, agent: 'Wander',
+                      note: 'The assistant could not be reached.' };
+    paintWander();
+  }).apiWanderStatus();
+}
+</script>

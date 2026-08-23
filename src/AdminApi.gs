@@ -800,3 +800,104 @@ function apiVerifyByCode(input) {
             'under the QR code on the letter, or scan the QR.'
   };
 }
+
+// ======================================================= Wander rule book
+
+/** What is loaded, what still needs embedding, and the last failure if any. */
+function apiAdminRuleBookStatus() {
+  Auth.requireAdmin();
+  var s = RuleBook.stats();
+  s.agent = Chatbot.AGENT;
+  s.enabled = Chatbot.enabled();
+  s.hasKey = Gemini.available();
+  s.model = Gemini.chatModel();
+  s.remainingToday = Chatbot.remainingQuota();
+
+  // Anything that did not answer, not only what carried an error string. A
+  // student is deliberately shown a soft message when Wander fails - a
+  // rejected model id means nothing to them - but that left the person who
+  // CAN fix it with no way to see it either, unless they knew to open the
+  // ChatLog tab. Every failure is already recorded; this puts the most recent
+  // one where the person fixing it is already looking.
+  var turns = Db.readAll('ChatLog');
+  var failures = turns.filter(function (r) { return r.status && r.status !== 'ANSWERED'; });
+  if (failures.length) {
+    var last = failures[failures.length - 1];
+    s.lastError = {
+      status: last.status,
+      question: last.question,
+      detail: String(last.error || last.answer || '(the server recorded no reason)').substring(0, 400)
+    };
+    s.errorCount = failures.length;
+  }
+  s.turnsLogged = turns.length;
+  return s;
+}
+
+/**
+ * Reload the hostel rules from the source that ships with this project.
+ *
+ * There is no upload. The brochures are fixed for the session and live in
+ * RuleText.gs, so they arrive with the code and setupEverything loads them
+ * automatically - a deployment cannot end up running the assistant with an
+ * empty or mismatched rule book, and a diff shows exactly what changed when
+ * the university reissues them.
+ *
+ * Reloading does NOT re-embed. Vectors are preserved wherever the text is
+ * byte-identical, so this is cheap to run and only genuinely new or altered
+ * passages cost an API call afterwards.
+ */
+function apiAdminReloadRuleBook() {
+  Auth.requireAdmin();
+  var res = RuleBook.loadBundled();
+  Ledger.append('RULEBOOK_INGESTED', res, Auth.session().email);
+  return res;
+}
+
+/**
+ * Embed one batch and report what is left.
+ *
+ * Resumable by design: the client calls again while `remaining` is non-zero.
+ * A rate limit from Google is reported, not thrown - everything already
+ * embedded is stored, so waiting it out and continuing loses nothing.
+ */
+function apiAdminEmbedChunks(batch) {
+  Auth.requireAdmin();
+  if (!Gemini.available()) {
+    throw new Error('No Gemini API key is set, so nothing can be embedded yet.');
+  }
+  var size = Math.min(Number(batch) || 25, 25);
+  var rows = RuleBook.pending(size);
+  if (!rows.length) return { embedded: 0, remaining: 0 };
+
+  var vectors;
+  try {
+    vectors = Gemini.embed(rows.map(function (r) {
+      // The heading is embedded with the body. Retrieval otherwise cannot tell
+      // a fee clause in the boys' brochure from the same words under a
+      // different section, and the citation would name a heading the vector
+      // never saw.
+      return (r.heading ? r.heading + '\n' : '') + r.text;
+    }), 'RETRIEVAL_DOCUMENT');
+  } catch (e) {
+    if (e.kind === 'QUOTA') {
+      return {
+        embedded: 0, remaining: RuleBook.pending().length, throttled: true,
+        retryAfterMs: e.retryAfterMs || 15000,
+        note: 'Google is limiting how fast passages can be embedded on the free tier.'
+      };
+    }
+    throw e;
+  }
+
+  var n = RuleBook.storeVectors(rows.map(function (r, i) {
+    return { chunkId: r.chunkId, vector: vectors[i] };
+  }));
+
+  var left = RuleBook.pending().length;
+  if (!left) {
+    Ledger.append('RULEBOOK_EMBEDDED',
+      { count: RuleBook.stats().embedded, model: Gemini.embedModel() }, Auth.session().email);
+  }
+  return { embedded: n, remaining: left };
+}

@@ -1,7 +1,8 @@
 # Smart Hostel Allocation & Optimization System — GGSIPU
 
 **SIH 2026** · A zero-cost hostel allocation platform built entirely on Google Apps Script and
-Google Sheets. No servers, no licences, no paid APIs.
+Google Sheets. No servers, no licences, no paid APIs — the hostel assistant runs on Google's
+free Gemini tier and says so plainly when the day's allowance runs out.
 
 > **New here? Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) first.** It carries the full project
 > context — decisions, architecture, schema, algorithm, phase plan and open questions.
@@ -24,11 +25,12 @@ email notification → waitlist, transfers, vacancy tracking and grievance redre
 | **What-if policy simulator** | Admins see the effect of a quota or weight change — including who moves — *before* committing. |
 | **QR-verified letters** | Allotment PDFs carry a signed QR that resolves to a live verification page. |
 | **Mutual swap marketplace** | Students arrange room swaps; policy validation is automatic, no admin queue. |
+| **Wander, the hostel assistant** | Answers from the actual brochure and the student's own record, cites the rule it used, and refuses when the rules do not cover the question. Boys and girls are answered from their own brochure — the same hard partition the allocator enforces for beds. |
 
 ## Tech stack
 
 Google Apps Script · Google Sheets (database) · HTML Service · Gmail · Google Drive ·
-Google Charts · Tailwind CSS. **Total running cost: ₹0.**
+Google Charts · Tailwind CSS · Gemini free tier. **Total running cost: ₹0.**
 
 ---
 

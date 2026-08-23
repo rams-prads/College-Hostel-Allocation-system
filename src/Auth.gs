@@ -121,6 +121,57 @@ var Auth = (function () {
     return { email: email, action: 'added' };
   }
 
+  /**
+   * Add or re-point one administrator account.
+   *
+   * Adding a warden by hand meant typing five columns into the Admins tab in
+   * the right order, and a role misspelt there does not fail loudly - it
+   * silently produces an account that reaches nothing.
+   *
+   * @param {string} email
+   * @param {string} role    one of the Admins role enum
+   * @param {string=} name
+   * @param {string=} campus defaults to ALL
+   */
+  function enrolAdmin(email, role, name, campus) {
+    var key = norm_(email);
+    if (!key || key.indexOf('@') < 1) throw new Error('That is not an email address.');
+
+    var allowed = SCHEMA.Admins.cols.filter(function (c) {
+      return c.name === 'role';
+    })[0].values;
+    if (allowed.indexOf(role) < 0) {
+      throw new Error('Unknown role "' + role + '". Choose one of: ' + allowed.join(', ') + '.');
+    }
+
+    var fields = {
+      role: role, campus: campus || 'ALL', active: true,
+      name: name || role.replace(/_/g, ' ').toLowerCase().replace(/^./, function (c) {
+        return c.toUpperCase();
+      })
+    };
+
+    var existing = readAll_('Admins').filter(function (a) {
+      return norm_(a.email) === key;
+    })[0];
+
+    if (existing) {
+      Db.update('Admins', existing.email, fields);
+      Ledger.append('ADMIN_ROLE_CHANGED',
+        { email: key, from: existing.role, to: role }, Session.getActiveUser().getEmail());
+      return { email: key, role: role, action: 'updated' };
+    }
+
+    fields.email = key;
+    Db.append('Admins', fields);
+    Ledger.append('ADMIN_ENROLLED', { email: key, role: role },
+                  Session.getActiveUser().getEmail());
+    return { email: key, role: role, action: 'added' };
+  }
+
+  /** Fresh read: an enrolment that follows another in one execution must see it. */
+  function readAll_(tab) { return Db.readAll(tab, { fresh: true }); }
+
   /** Throw unless the visitor is an admin. Use at the top of every admin RPC. */
   function requireAdmin() {
     var s = session();
@@ -248,15 +299,80 @@ var Auth = (function () {
     return s;
   }
 
-  /** Roles that may approve allocations and commit runs. */
+  // --------------------------------------------------------- role scoping
+  //
+  // Until now every active administrator saw every section of the dashboard,
+  // and role was consulted in exactly one place - canCommit. A hostel warden
+  // needs the two things that are actually their job, vacancies and student
+  // complaints, and has no business running an allocation or reading identity
+  // documents.
+  //
+  // Written as an allowlist for the CONFINED roles only. The alternative -
+  // listing what every role may see - means a section added next month is
+  // invisible to the super administrator until someone remembers to add it,
+  // and a section nobody can find is indistinguishable from a broken one.
+
+  var SECTIONS_BY_ROLE = {
+    WARDEN: ['occupancy', 'requests']
+  };
+
+  /**
+   * The sections this visitor may open, or null for "no limit".
+   * @return {Array<string>|null}  [] when they are not an administrator at all
+   */
+  function sections(s) {
+    if (!s || !s.isAdmin) return [];
+    return SECTIONS_BY_ROLE[s.role] || null;
+  }
+
+  /** May this visitor open this section of the dashboard? */
+  function canSee(s, section) {
+    var allowed = sections(s);
+    if (allowed === null) return true;
+    return allowed.indexOf(section) >= 0;
+  }
+
+  /**
+   * Throw unless the visitor is an administrator whose role reaches `section`.
+   *
+   * Hiding a tab in the browser hides nothing: every one of these functions is
+   * callable by name from a console. The rail is a convenience; this is the
+   * enforcement.
+   */
+  function requireSection(section) {
+    var s = requireAdmin();
+    if (!canSee(s, section)) {
+      throw new Error('Access denied: ' + roleName(s.role) + ' does not cover ' +
+                      'this part of the dashboard.');
+    }
+    return s;
+  }
+
+  /** 'SUPER_ADMIN' -> 'a super admin', for a message a person has to read. */
+  function roleName(role) {
+    var t = String(role || 'guest').toLowerCase().replace(/_/g, ' ');
+    return (/^[aeiou]/.test(t) ? 'an ' : 'a ') + t;
+  }
+
+  /**
+   * Roles that may approve allocations and commit runs.
+   *
+   * WARDEN was here, and is not any more: the warden account is now the
+   * vacancies-and-complaints desk, and committing a run replaces every
+   * allocation in the system. That belongs with the super administrator.
+   */
   function canCommit(s) {
-    return s.isAdmin && (s.role === 'SUPER_ADMIN' || s.role === 'WARDEN');
+    return !!(s && s.isAdmin && s.role === 'SUPER_ADMIN');
   }
 
   return {
     session: session,
     requireAdmin: requireAdmin,
     requireOwner: requireOwner,
+    requireSection: requireSection,
+    sections: sections,
+    canSee: canSee,
+    roleName: roleName,
     canCommit: canCommit,
     rateLimit: rateLimit,
     useToken: useToken,
@@ -265,6 +381,7 @@ var Auth = (function () {
     demoToken: demoToken,
     checkDemoToken: checkDemoToken,
     selfEnrolAdmin: selfEnrolAdmin,
+    enrolAdmin: enrolAdmin,
     normaliseEmail: norm_
   };
 })();

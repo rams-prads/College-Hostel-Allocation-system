@@ -1,5 +1,6 @@
 <?!= include('ui/styles'); ?>
 <?!= include('ui/chrome'); ?>
+<?!= include('ui/wander'); ?>
 <script>
   // The app is served inside a sandboxed iframe on a different origin, so a
   // relative link would navigate that frame to the wrong place. Every link is
@@ -32,7 +33,8 @@
     students:    'M12 3l9 5-9 5-9-5zM5 11v5c0 1 3 3 7 3s7-2 7-3v-5',
     requests:    'M4 5h16v12H8l-4 3z',
     policy:      'M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1M12 8a4 4 0 100 8 4 4 0 000-8z',
-    operations:  'M13 2L4 14h6l-1 8 9-12h-6z'
+    operations:  'M13 2L4 14h6l-1 8 9-12h-6z',
+    assistant:   'M21 12a8 8 0 11-3.2-6.4M12 8v4M12 16h.01'
   };
 
   var TABS = [
@@ -56,7 +58,9 @@
     { id: 'policy',       label: 'Policy',
       title: 'Policy', blurb: 'Change a rule and see who moves, before committing it.' },
     { id: 'operations',   label: 'Operations',
-      title: 'Operations', blurb: 'Letters, notifications and the audit trail.' }
+      title: 'Operations', blurb: 'Letters, notifications and the audit trail.' },
+    { id: 'assistant',    label: 'Assistant',
+      title: 'Wander', blurb: 'Load the hostel rules, and ask questions of them yourself.' }
   ];
 
   /** Counts that belong on the rail, so an officer sees the work without hunting. */
@@ -203,6 +207,8 @@
       body = '<div id="simCard"></div>';
     } else if (TAB === 'operations') {
       body = operationsCard(d);
+    } else if (TAB === 'assistant') {
+      body = '<div id="ruleBookCard"></div><div id="wanderCardHost"></div>';
     }
 
     setHtml('tabBody', '<div class="apagehead"><h1>' + esc(meta.title) + '</h1>' +
@@ -216,6 +222,7 @@
     if (TAB === 'verification') { loadScans(); loadDocQueue(); loadIdentity(); }
     if (TAB === 'requests')     { loadGrievances(); loadSwaps(); }
     if (TAB === 'policy')       { loadSimulator(); }
+    if (TAB === 'assistant')    { loadRuleBook(); loadWander('wanderCardHost'); }
   }
 
   /** The buttons that actually start a run, lifted out of Operations. */
@@ -1438,5 +1445,152 @@
         (r.remaining ? ', ' + r.remaining + ' still to go' : '') + '.');
       load();
     }).withFailureHandler(function (e) { done('err', e.message); }).apiAdminNotify(null, 50);
+  }
+
+  // ------------------------------------------------------- Wander rule book
+
+  /**
+   * What the assistant is allowed to answer from, and how to change it.
+   *
+   * Loading a brochure is two steps on purpose. Ingesting reads and chunks it;
+   * embedding turns those chunks into something searchable, one batch at a
+   * time, because several hundred embeddings do not reliably fit inside a
+   * single six-minute execution. A job that dies halfway leaves work that can
+   * be continued rather than a corpus half-replaced.
+   */
+  // A message that must outlive the repaint that follows it. Set it, call
+  // loadRuleBook, and paintRuleBook shows it once on the other side.
+  var RB_FLASH = '';
+
+  function loadRuleBook() {
+    setHtml('ruleBookCard', card('Hostel rule book', loadingState('Checking')));
+    srv('ruleBookCard').withSuccessHandler(paintRuleBook)
+      .apiAdminRuleBookStatus();
+  }
+
+  function paintRuleBook(s) {
+    var rows = Object.keys(s.bySource || {}).sort().map(function (k) {
+      return '<tr><td>' + esc(k) + '</td><td class="num">' + s.bySource[k] + '</td></tr>';
+    }).join('');
+
+    var state = !s.hasKey
+      ? banner('warn', 'No Gemini API key yet. Add GEMINI_API_KEY in Project Settings \u203a ' +
+                       'Script Properties before loading anything.')
+      : (!s.enabled
+        ? banner('info', 'The assistant is switched off. Set CHATBOT_ENABLED to TRUE in the ' +
+                         'Config sheet when you are ready for students to use it.')
+        : (s.pending
+          ? banner('warn', s.pending + ' passages still need embedding before they can be found.')
+          : banner('good', s.embedded + ' passages loaded and searchable.')));
+
+    var trouble = s.lastError
+      ? banner('warn', 'Last unanswered question (' + s.lastError.status + '): ' +
+                       s.lastError.detail) +
+        '<p class="small muted">Asked: &ldquo;' + esc(s.lastError.question) + '&rdquo;' +
+        ' &middot; ' + s.errorCount + ' of ' + s.turnsLogged + ' logged turns did not answer' +
+        '</p>'
+      : (s.turnsLogged
+          ? '<p class="small muted">' + s.turnsLogged + ' questions answered, none failed.</p>'
+          : '');
+
+    var body = state + trouble +
+      '<div class="tiles" style="margin-top:12px">' +
+        tile('Passages', s.total) +
+        tile('Searchable', s.embedded) +
+        tile('Awaiting embedding', s.pending) +
+        tile('Questions left today', s.remainingToday) +
+      '</div>' +
+      (rows ? '<table class="rows" style="margin-top:12px"><tbody>' + rows + '</tbody></table>' : '') +
+
+      '<div class="divider"></div>' +
+      '<p class="small muted">Both brochures ship with the system. There is nothing to ' +
+      'upload and no link to paste \u2014 one press loads them and makes them searchable, and ' +
+      'each student is only ever answered from their own.</p>' +
+
+      '<div id="rbMsg"></div>' +
+      '<div class="btn-row">' +
+        '<button class="btn primary" id="rbSetup">' +
+          (s.total === 248 && !s.pending ? 'Rebuild the rule book' : 'Set up the rule book') +
+        '</button>' +
+      '</div>';
+
+    setHtml('ruleBookCard', card('Hostel rule book', body,
+      { sub: s.agent + ' answers only from this' }));
+
+    if (RB_FLASH) { setHtml('rbMsg', RB_FLASH); RB_FLASH = ''; }
+
+    el('rbSetup').onclick = function () { setUpRuleBook(); };
+  }
+
+  function setUpRuleBook() {
+    var btn = el('rbSetup');
+    if (btn) btn.disabled = true;
+
+    var box = el('rbMsg');
+    if (box) setHtml('rbMsg', loadingState('Loading the brochures'));
+
+    srv('rbMsg').withSuccessHandler(function (r) {
+      var m = el('rbMsg');
+      if (m) setHtml('rbMsg', loadingState(r.chunks + ' passages loaded' +
+        (r.reused ? ', ' + r.reused + ' already searchable' : '')));
+      embedLoop();
+    }).withFailureHandler(function (e) {
+      if (btn) btn.disabled = false;
+      var m = el('rbMsg');
+      if (m) setHtml('rbMsg', banner('err', (e && e.message) || 'Could not load the rules.'));
+    }).apiAdminReloadRuleBook();
+  }
+
+  function embedLoop() {
+    var done = 0;
+    var BATCH = 25;
+    var gap = 7000;
+    var GAP_MAX = 20000;
+
+    function say(html) {
+      var box = el('rbMsg');
+      if (box) setHtml('rbMsg', html);
+      return !!box;
+    }
+
+    function wait(ms, label, then) {
+      var left = Math.ceil(ms / 1000);
+      (function tick() {
+        if (left <= 0) { then(); return; }
+        say(loadingState(label + ' \u2014 resuming in ' + left + 's'));
+        left--;
+        setTimeout(tick, 1000);
+      })();
+    }
+
+    say(loadingState('Embedding'));
+
+    (function step() {
+      srv('rbMsg').withSuccessHandler(function (r) {
+        done += r.embedded;
+
+        if (r.throttled) {
+          gap = Math.min(gap + 3000, GAP_MAX);
+          wait(r.retryAfterMs || 15000,
+               'Google is pacing us \u2014 ' + done + ' passages done', step);
+          return;
+        }
+
+        if (r.remaining) {
+          wait(gap, 'Embedded ' + done + ', ' + r.remaining + ' to go', step);
+          return;
+        }
+
+        RB_FLASH = banner('good', 'Embedded ' + done + ' passages. ' +
+                                  'Wander can now answer from them.');
+        loadRuleBook();
+      }).withFailureHandler(function (e) {
+        RB_FLASH = banner('err', (e && e.message) || 'Embedding failed.') +
+          (done ? '<p class="small muted">' + done + ' passages were embedded before it ' +
+                  'stopped, and they are saved. Pressing the button again continues from ' +
+                  'there rather than starting over.</p>' : '');
+        loadRuleBook();
+      }).apiAdminEmbedChunks(BATCH);
+    })();
   }
 </script>

@@ -194,12 +194,60 @@ row per person:
 | warden.dwarka@ipu.ac.in | Dr. A. Sharma | WARDEN | DWARKA | ✓ |
 | clerk@ipu.ac.in | R. Kumar | VERIFIER | ALL | ✓ |
 
-| Role | Can do |
-|---|---|
-| `SUPER_ADMIN` | Everything, including committing policy changes |
-| `WARDEN` | Run and commit allocations, resolve grievances |
-| `VERIFIER` | Verify documents, view dashboards |
-| `VIEWER` | Read-only |
+For a warden there is a shortcut that fills the row correctly and records the
+change in the ledger: **Hostel System › Add a warden**. Type their address, and
+they can open `?page=admin` immediately.
+
+| Role | Sections of the dashboard | May commit a run |
+|---|---|---|
+| `SUPER_ADMIN` | every section | yes |
+| `WARDEN` | Occupancy and Requests only | no |
+| `VERIFIER` | every section | no |
+| `VIEWER` | every section | no |
+
+A warden's account is the vacancies-and-complaints desk. They see how full each
+hostel is and how many beds are free, and they read, escalate and close student
+grievances. Every other section — running an allocation, reading identity
+documents, changing policy, sending letters, opening any student's file — is
+refused, on the server as well as being absent from their menu.
+
+`VERIFIER` and `VIEWER` are not yet confined this way; they still see every
+section. Only `SUPER_ADMIN` and `WARDEN` differ today.
+
+---
+
+## 6b. Turn on Wander, the assistant — deliberately
+
+Wander answers hostel questions from the brochure and from the asking student's own
+record. It is **off by default**, and that is deliberate: a question and the details
+already shown on the student's page are sent to Google to compose an answer, and on
+the free tier Google's terms permit using submitted content to improve its products.
+That is a decision for whoever deploys this, not a default they discover afterwards.
+
+Three steps:
+
+1. **Get a key.** [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → *Create
+   API key*. Free, no billing account.
+2. **Store it.** Apps Script editor → **Project Settings** → scroll to **Script Properties** →
+   add `GEMINI_API_KEY` with that value. It is never written to the spreadsheet, so
+   exfiltrating the whole sheet does not hand over the key.
+3. **Make the rules searchable.** The brochures ship with the code and load
+   themselves when you run `setupEverything` — there is nothing to upload. Open
+   **Admin → Assistant** and press **Make N passages searchable** once. It embeds
+   them in batches and reports progress; if it stops, pressing it again continues
+   from where it left off.
+
+4. Set `CHATBOT_ENABLED` to `TRUE` in the `Config` tab.
+
+**Wander cannot answer anything that is not in the rule book.** That is the design, not a
+limitation to work around: it refuses rather than inventing a fee or a deadline. If it
+declines a question you expected it to answer, the brochure does not cover it.
+
+Two Config values worth knowing: `CHATBOT_DAILY_CAP` (default 200) keeps a margin below
+Google's free-tier ceiling, counted on the **US Pacific** day that Google resets on rather
+than the local one. `GEMINI_CHAT_MODEL` and `GEMINI_EMBED_MODEL` are in the sheet rather
+than the source because Google retires model ids on its own schedule — a rename is a cell
+edit, not a redeploy.
 
 ---
 
@@ -302,6 +350,7 @@ node tests/phase3.test.js   # document rules and portal API
 node tests/phase4.test.js   # letters, QR anti-forgery, email, admin
 node tests/phase5.test.js   # simulator, swaps, grievance audit
 node tests/phase6.test.js   # demo scenario and access guards
+node tests/phase11.test.js  # the assistant: chunking, retrieval, prompt privacy
 ```
 
 `tests/stubs.js` shims `SpreadsheetApp`, `DriveApp`, `MailApp` and friends and
