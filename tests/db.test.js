@@ -172,6 +172,37 @@ section('Writing lands on the right row');
     'a smaller inventory written over a larger one is how phantom hostels appear');
 })();
 
+// ================================================ handing a row back to Db
+section('A row Db produced may be handed straight back to it');
+
+(() => {
+  const sh = install([REAL, REAL2]);
+  // Exactly what a page does: read a record, send it to the browser, get it
+  // back, save it. The row carries _row, which is Db's OWN bookkeeping.
+  const row = Db.readAll('Hostels')[1];
+  check('the row carries a sheet coordinate', typeof row._row === 'number');
+
+  let threw = null;
+  try {
+    Db.update('Hostels', 'ED-GH-1', row);
+  } catch (e) { threw = e.message; }
+
+  check('updating with it does not throw', threw === null, threw ||
+    'Db objecting to a field this layer added itself is Db objecting to its own output');
+  check('and the record is unchanged by the round trip', (() => {
+    Db.invalidate('Hostels');
+    const back = Db.byId('Hostels', 'ED-GH-1');
+    return back.name === REAL2[1] && back.warden === REAL2[4];
+  })());
+
+  // A genuine typo is still a typo.
+  let typo = null;
+  try { Db.update('Hostels', 'ED-GH-1', { wardenn: 'x' }); }
+  catch (e) { typo = e.message; }
+  check('a misspelled column is still refused', /no column/.test(typo || ''),
+    'tolerating _row must not become tolerating anything');
+})();
+
 // ============================================================ coercion
 section('Cells become the types the schema promises');
 

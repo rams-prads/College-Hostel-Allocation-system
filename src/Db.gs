@@ -258,6 +258,14 @@ var Db = (function () {
     if (!row) throw new Error('Db: no row with id "' + id + '" in "' + tab + '"');
     var sh = sheet(tab);
     Object.keys(patch).forEach(function (k) {
+      // _row is Db's OWN bookkeeping - the sheet coordinate it stamps onto
+      // every row it reads. A caller handing a row straight back is the normal
+      // way to save an edited record, and refusing it because of a field this
+      // layer added itself is Db objecting to its own output. It happened for
+      // real: the apply form sends the lifestyle answers back exactly as it
+      // received them, and a re-submitted registration died on "no column
+      // _row in Lifestyle".
+      if (k === '_row') return;
       var col = SCHEMA[tab].cols.filter(function (c) { return c.name === k; })[0];
       if (!col) throw new Error('Db: no column "' + k + '" in "' + tab + '"');
       sh.getRange(row._row, schemaColIndex(tab, k)).setValue(encode(patch[k], col));

@@ -253,7 +253,8 @@ check('and the form starts from what we already hold',
   r.screen.indexOf('value="' + openStudent.name + '"') > 0,
   'an edit that starts blank is a re-typing exercise, and loses whatever nobody retypes');
 check('it says plainly how long they can keep changing it',
-  r.screen.indexOf('verified both your identity and your documents') > 0);
+  r.screen.indexOf('checked your documents') > 0,
+  'one check now, not two - Aadhaar is no longer collected');
 check('and does not offer to un-submit it as a draft',
   r.screen.indexOf('Save as draft') < 0,
   'a submitted application has no draft state to go back to');
@@ -454,7 +455,8 @@ section('Can I still fix this?');
 (() => {
   const open = renderPage('student.html', openEmail);
   check('an unverified application says so on the page itself',
-    open.screen.indexOf('can still be changed') > 0,
+    open.screen.indexOf('can still be changed') > 0 &&
+    open.screen.indexOf('checked your documents') > 0,
     'it used to be answered only by a link in the footer, which nobody read');
   check('with the way to do it right there',
     open.screen.indexOf('Edit my application') > 0);

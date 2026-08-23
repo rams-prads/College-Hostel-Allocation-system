@@ -218,6 +218,46 @@ check('documents are provisioned on submit',
 check('submission is written to the ledger',
   Db.readAll('AuditLog').some(e => e.action === 'APPLICATION_SUBMITTED'));
 
+section('Re-submitting an edited registration');
+
+// The reported fault, in the shape it was reported: open an existing
+// registration, change something, submit. The form sends the roommate answers
+// back exactly as it received them - and it received a raw sheet row, _row and
+// all - so the save died on `Db: no column "_row" in "Lifestyle"`.
+(() => {
+  Db.update('Applications', myApp.appId,
+    { status: 'SUBMITTED', docStatus: 'PENDING', verifyStatus: '' });
+  Db.invalidate('Applications');
+
+  const form = apiCall(null, 'apiGetApplyForm', []);
+  check('the form hands back the roommate answers it holds', !!form.draft.lifestyle,
+    'an edit that starts blank is a re-typing exercise');
+  check('and hands over no sheet coordinates with them',
+    form.draft.lifestyle._row === undefined,
+    'a page that sends _row back is asking Db to write a column that does not exist');
+
+  let threw = null;
+  try {
+    apiSaveApplication({
+      details: details({}),
+      needsAccessible: !!form.draft.needsAccessible,
+      preferences: form.draft.preferences,
+      // Verbatim, the way the page does it.
+      lifestyle: form.draft.lifestyle,
+      submit: true
+    });
+  } catch (e) { threw = e.message; }
+
+  check('re-submitting it works', threw === null, threw || '');
+  check('and the answers survived the round trip', (() => {
+    Db.invalidate('Lifestyle');
+    const life = Db.byId('Lifestyle', myApp.appId);
+    return life && life.studyStyle === form.draft.lifestyle.studyStyle;
+  })());
+  check('the application is submitted, not left half-written',
+    Db.byId('Applications', myApp.appId).status === 'SUBMITTED');
+})();
+
 section('Validation rejects bad input');
 function expectReject(label, payload) {
   let threw = false, msg = '';

@@ -111,6 +111,10 @@ function jsonSafe_(value, depth) {
     for (var k in value) {
       if (!Object.prototype.hasOwnProperty.call(value, k)) continue;
       if (typeof value[k] === 'function') continue;
+      // _row is a sheet coordinate. It means nothing in a browser, and a page
+      // that sends it back is asking Db to write a column that does not exist.
+      // Stripping it here stops the round trip at the point it starts.
+      if (k === '_row') continue;
       o[k] = jsonSafe_(value[k], depth + 1);
     }
     return o;
