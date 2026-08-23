@@ -285,7 +285,13 @@
         '<div><div class="t">' + (s.needsPerson
           ? s.needsPerson + ' document' + (s.needsPerson === 1 ? '' : 's') + ' need you'
           : 'Nothing is waiting on a person') + '</div>' +
-        '<div class="s">' + (s.needsPerson
+        '<div class="s">' + (s.blocked
+          ? s.blocked + ' of them agree with what was declared but cannot be cleared ' +
+            'automatically — ' + esc(s.blockedReason) + '. ' +
+            (s.needsPerson > s.blocked
+              ? 'The rest could not be read or contradict the declaration. '
+              : '') + 'They are in the queue below.'
+          : s.needsPerson
           ? 'Out of ' + s.total + '. The rest either agree with what was declared or ' +
             'differ by too little to matter.'
           : (s.decided
@@ -323,10 +329,23 @@
         'decision, not a person\u2019s.')) return;
     setHtml('scanMsg', loadingState('Clearing'));
     srv('scanMsg').withSuccessHandler(function (r) {
-        load({ kind: 'good',
-               text: 'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
-                     ' across ' + r.applications + ' application' +
-                     (r.applications === 1 ? '' : 's') + '. Conflicts were left alone.' });
+        var held = (r.skipped || []).length;
+        // A button that clears nothing and says nothing is a button people
+        // press three times and then report as broken. It was.
+        var text = r.cleared
+          ? 'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
+            ' across ' + r.applications + ' application' +
+            (r.applications === 1 ? '' : 's') + '.'
+          : 'Nothing was cleared.';
+        if (held) {
+          text += ' ' + held + ' document' + (held === 1 ? '' : 's') +
+            ' agreed with the declaration but ' + (held === 1 ? 'was' : 'were') +
+            ' held back by identity screening — ' + r.skipped[0].studentName + ': ' +
+            r.skipped[0].reason +
+            (held > 1 ? ' (and ' + (held - 1) + ' other' + (held === 2 ? '' : 's') + ')' : '') +
+            ' Decide ' + (held === 1 ? 'it' : 'them') + ' by hand in the queue below.';
+        }
+        load({ kind: r.cleared ? 'good' : 'warn', text: text });
       })
       .withFailureHandler(function (e) { setHtml('scanMsg', banner('err', e.message)); })
       .apiAdminAutoClear();
@@ -1076,7 +1095,9 @@
                  'Nobody already holding a room is affected.')) return;
     setHtml('vacMsg', banner('info', '<span class="spin"></span> Working through the empty beds'));
     srv('vacMsg').withSuccessHandler(function (r) {
-      load(r.filled
+      // load() carries {kind, text} through the redraw; a bare string arrives
+      // as banner(undefined, undefined) and shows nothing at all.
+      load({ kind: r.filled ? 'good' : 'warn', text: r.filled
         ? r.filled + ' bed' + (r.filled === 1 ? '' : 's') + ' filled from the waiting list. ' +
           (r.vacantAfter
             ? r.vacantAfter + ' still empty - nobody waiting is eligible for ' +
@@ -1085,7 +1106,7 @@
         : 'No bed could be filled. ' + (r.vacantBefore
             ? 'The ' + r.vacantBefore + ' empty bed' + (r.vacantBefore === 1 ? '' : 's') +
               ' are in hostels no waiting applicant is eligible for.'
-            : 'There are no empty beds.'));
+            : 'There are no empty beds.') });
     }).apiAdminFillVacancies(50);
   }
 

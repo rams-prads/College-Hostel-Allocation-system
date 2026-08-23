@@ -287,6 +287,71 @@ check('it is in the ledger',
   Db.readAll('AuditLog').some(e => e.action === 'DOCUMENTS_AUTO_CLEARED'));
 check('the ledger is intact', Ledger.verify().intact);
 
+section('A document that agrees but is flagged is not left in limbo');
+
+// The reported fault, in full. A document whose reading AGREED was left out of
+// the decision queue - correctly, the machine had settled it - and then refused
+// by auto-clear because screening had flagged the applicant. Refusing was a
+// bare `return`, so the button reported clearing nothing and gave no reason.
+// The document was on no admin screen, could not be cleared, and the student's
+// portal said "under review" for ever.
+(() => {
+  asAdmin();
+
+  // Two applications holding a byte-identical document: DOCUMENT_REUSED, which
+  // is a BLOCK finding, which makes the applicant screen HIGH.
+  const a1 = allApps[0], a2 = allApps[1];
+  [a1, a2].forEach(a => {
+    Documents.provision(a.appId, students[a.studentId]);
+  });
+  Db.invalidate('Documents');
+  const d1 = Db.where('Documents', { appId: a1.appId })[0];
+  const d2 = Db.where('Documents', { appId: a2.appId })[0];
+  Db.update('Documents', d1.docId, { status: 'UPLOADED', scanVerdict: 'MATCH',
+                                     driveFileId: 'twin-1', contentHash: 'IDENTICAL' });
+  Db.update('Documents', d2.docId, { status: 'UPLOADED', scanVerdict: 'MATCH',
+                                     driveFileId: 'twin-2', contentHash: 'IDENTICAL' });
+  Db.invalidate('Documents');
+
+  check('screening does flag it', Identity.screen(a1.appId).level === 'HIGH',
+    Identity.screen(a1.appId).findings.map(f => f.code).join(','));
+
+  const sum = apiAdminVerificationSummary();
+  check('the button is not offered a count it cannot deliver',
+    sum.clearable === 0 && sum.blocked >= 2,
+    'clearable ' + sum.clearable + ', blocked ' + sum.blocked);
+  check('and the summary says why they are held',
+    /byte-identical|already registered|flagged/i.test(sum.blockedReason || ''),
+    sum.blockedReason);
+  check('they count as waiting on a person, because they are',
+    sum.needsPerson >= 2, sum.needsPerson + ' need a person');
+
+  const queue = apiAdminDocQueue(200);
+  check('and they appear in the queue a person actually works through',
+    queue.some(r => r.docId === d1.docId) && queue.some(r => r.docId === d2.docId),
+    'left out of the queue AND refused by the button is how a document becomes invisible');
+
+  const out = apiAdminAutoClear();
+  check('pressing the button clears none of them', (() => {
+    Db.invalidate('Documents');
+    return Db.byId('Documents', d1.docId).status === 'UPLOADED';
+  })(), 'a tidy scan does not make a reused document acceptable');
+  check('but it says so, and names who and why',
+    (out.skipped || []).length >= 2 &&
+    out.skipped.some(x => x.docId === d1.docId && x.reason && x.studentName),
+    JSON.stringify((out.skipped || [])[0] || null));
+
+  // And the ordinary path still works: unflag one, and it clears.
+  Db.update('Documents', d2.docId, { contentHash: 'DIFFERENT-NOW' });
+  Db.invalidate('Documents');
+  const out2 = apiAdminAutoClear();
+  Db.invalidate('Documents');
+  check('a document nothing is wrong with still clears',
+    Db.byId('Documents', d1.docId).status === 'VERIFIED',
+    'the guard must block the flagged case, not the feature');
+  check('and the button reports the work it did', out2.cleared > 0, out2.cleared + ' cleared');
+})();
+
 section('Only admins can do any of it');
 global.Session = { getActiveUser: () => ({ getEmail: () => students[allApps[0].studentId].email }) };
 ['apiAdminScanDocuments', 'apiAdminVerificationSummary', 'apiAdminAutoClear']
