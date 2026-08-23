@@ -185,7 +185,7 @@
     if (TAB === 'overview') {
       body = summaryBand(d) + pipelineCard(d) + ledgerCard(d);
     } else if (TAB === 'allocation') {
-      body = runCard(d) + (m ? metricsCard(d, m) : noRunCard()) +
+      body = runCard(d) + (m ? metricsCard(d, m) : noRunCard(d)) +
              (m ? quotaCard(d.latestRun.metrics) : '');
     } else if (TAB === 'occupancy') {
       body = occupancyCard(d);
@@ -598,11 +598,21 @@
   }
 
   /* ---------------------------------------------------------- metrics */
-  function noRunCard() {
+  function noRunCard(d) {
+    // Never run and just cleared produce identical numbers and are not the same
+    // thing to be told - one is a job not started, the other a job undone on
+    // purpose, and only one of them means somebody is waiting for a result.
+    var cleared = !!(d && d.hadRun);
     return card('', '<div class="empty"><div class="big">&#9881;</div>' +
-      '<h3 style="margin:0 0 5px">No allocation has been run yet</h3>' +
+      '<h3 style="margin:0 0 5px">' + (cleared
+        ? 'The allocation has been cleared'
+        : 'No allocation has been run yet') + '</h3>' +
       '<p class="small" style="max-width:430px;display:inline-block;margin:0 0 16px">' +
-      'Running the allocation produces room allotments, a waiting list and fairness measures.</p><br>' +
+      (cleared
+        ? 'Every bed is empty and every applicant is back in the queue. There are no ' +
+          'occupancy, preference or quota figures to show until the allocation is run again.'
+        : 'Running the allocation produces room allotments, a waiting list and fairness ' +
+          'measures.') + '</p><br>' +
       '<div class="btn-row" style="justify-content:center">' +
       '<button class="btn" onclick="runAllocation()">Run allocation</button>' +
       '<button class="btn ghost" onclick="preview()">Preview without saving</button></div></div>');

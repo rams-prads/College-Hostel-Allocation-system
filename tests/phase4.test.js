@@ -389,4 +389,61 @@ check('preview leaves applications untouched',
 check('preview writes no run record',
   Db.readAll('Runs').every(r => r.runId !== prev.runId));
 
+section('Clearing an allocation clears the numbers with it');
+
+// Last: this section empties the hostel, and everything above it wants a full
+// one to look at.
+const preClear = apiAdminOverview();
+check('there is something to clear', preClear.counts.allotted > 0 && !!preClear.latestRun,
+  preClear.counts.allotted + ' allotted');
+check('and figures describing it',
+  preClear.latestRun.metrics.summary.pref1Pct >= 0 &&
+  (preClear.latestRun.metrics.quotaTable || []).length > 0);
+
+const cleared = apiAdminClearAllocation();
+const after = apiAdminOverview();
+
+check('every allotment is gone', after.counts.allotted === 0, after.counts.allotted + ' left');
+check('the waiting list with it', after.counts.waitlisted === 0);
+check('every bed is vacant',
+  after.capacity.occupied === 0 && after.capacity.vacant === after.capacity.beds,
+  after.capacity.occupied + ' still occupied');
+check('every hostel reads 0% occupied',
+  after.occupancy.every(h => h.pct === 0 && h.occupied === 0),
+  after.occupancy.map(h => h.name + ' ' + h.pct + '%').join(', '));
+check('no letters are counted as produced', after.lettersDone === 0);
+
+check('and NO figures are reported over an empty hostel', after.latestRun === null,
+  'preference percentages and a filled quota table describing beds nobody holds is ' +
+  'the dashboard stating something that is not true');
+check('the run itself is kept, marked discarded', (() => {
+  const runs = Db.readAll('Runs');
+  return runs.length > 0 && runs.every(r => r.mode !== 'COMMITTED') &&
+         runs.some(r => r.mode === 'DISCARDED');
+})(), 'what was decided is worth keeping; the claim that it still describes the hostel is not');
+check('the clearing says how many runs it stood down', cleared.runsDiscarded > 0);
+check('and it is on the ledger',
+  Db.readAll('AuditLog').some(e => e.action === 'ALLOCATION_CLEARED'));
+
+check('the page can tell "cleared" from "never run"', after.hadRun === true,
+  'they produce identical numbers and are not the same thing to be told');
+
+check('letters are refused rather than written for nobody', (() => {
+  try { apiAdminGenerateLetters(); return false; }
+  catch (e) { return /no allocation/i.test(e.message); }
+})());
+check('and so are notifications', (() => {
+  try { apiAdminNotify(); return false; }
+  catch (e) { return /no allocation/i.test(e.message); }
+})());
+
+check('running it again brings every figure back', (() => {
+  apiAdminRunAllocation({ seed: 'AFTER-CLEAR' });
+  const again = apiAdminOverview();
+  return again.counts.allotted > 0 &&
+         !!again.latestRun &&
+         again.latestRun.metrics.summary.pref1Pct >= 0 &&
+         again.occupancy.some(h => h.pct > 0);
+})(), 'clearing must be undoable by doing the work again, not by editing the sheet');
+
 process.exit(summarise());

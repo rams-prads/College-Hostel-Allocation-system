@@ -1064,4 +1064,29 @@ check('a throwing handler also replaces the spinner it owns', (() => {
   return here.indexOf('Opening') < 0 && here.indexOf('render blew up') > 0;
 })());
 
+section('After clearing, the dashboard shows nothing rather than last time');
+
+(() => {
+  // Done here, at the end of what this file needs a full hostel for.
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', `
+    goTab("allocation");
+    clearAllocation();
+    goTab("allocation");
+  `);
+  check('the fairness figures are gone', t.screen.indexOf('Fairness and efficiency') < 0,
+    'percentages describing beds nobody holds are the page stating something untrue');
+  check('so is the quota table', t.screen.indexOf('Converted places') < 0);
+  check('and it says the allocation was cleared, not that none was ever run',
+    t.screen.indexOf('has been cleared') > 0 &&
+    t.screen.indexOf('No allocation has been run yet') < 0,
+    'one is a job not started, the other a job undone on purpose');
+  check('with the way to run it again in front of you',
+    t.screen.indexOf('runAllocation()') > 0);
+  check('and the overview tiles read zero', (() => {
+    const over = renderPage('admin.html', 'admin@ipu.ac.in');
+    return over.screen.indexOf('<div class="n">0</div><div class="l">Rooms allotted</div>') > 0 &&
+           over.screen.indexOf('<div class="n">0</div><div class="l">On waiting list</div>') > 0;
+  })(), 'the counts are live, so they were already right - this is the check that says so');
+})();
+
 process.exit(summarise());

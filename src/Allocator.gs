@@ -991,14 +991,36 @@ var Allocator = (function () {
     });
     Db.replaceAll('Applications', apps);
 
+    // The run itself is NOT deleted - what happened, happened, and the record
+    // of it is the point of keeping runs at all. What is no longer true is that
+    // its result describes the hostel: every bed it filled is empty again.
+    //
+    // So the run is marked DISCARDED. Anything that asks "what does the current
+    // allocation look like?" reads the latest COMMITTED run and now correctly
+    // finds none, which is what stopped the dashboard reporting last week's
+    // occupancy, preference satisfaction and quota fill over an empty hostel.
+    var runs = Db.readAll('Runs');
+    var discarded = 0;
+    var when = new Date();
+    runs.forEach(function (r) {
+      if (r.mode !== 'COMMITTED') return;
+      r.mode = 'DISCARDED';
+      r.notes = String(r.notes || '') +
+        ' | cleared ' + when.toISOString().substring(0, 10) + ' by ' + (actor || 'system');
+      discarded++;
+    });
+    if (discarded) Db.replaceAll('Runs', runs);
+
     Ledger.append('ALLOCATION_CLEARED', {
       bedsFreed: freed, allocationsRemoved: allocations,
-      waitlistRemoved: waitlisted, applicationsReset: reset
+      waitlistRemoved: waitlisted, applicationsReset: reset,
+      runsDiscarded: discarded
     }, actor || 'system');
 
     return {
       bedsFreed: freed, allocationsRemoved: allocations,
-      waitlistRemoved: waitlisted, applicationsReset: reset
+      waitlistRemoved: waitlisted, applicationsReset: reset,
+      runsDiscarded: discarded
     };
   }
 

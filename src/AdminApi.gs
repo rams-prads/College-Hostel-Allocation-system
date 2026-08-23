@@ -10,6 +10,23 @@
  */
 
 /** Everything the dashboard needs in one round trip. */
+/**
+ * The run whose result is still standing.
+ *
+ * Not simply the last row of Runs. A run that has been cleared leaves its row
+ * behind on purpose - the record of what was decided is worth keeping - but
+ * its numbers stopped describing the hostel the moment the beds were emptied.
+ * Reading the last row regardless is how a dashboard ends up reporting 96%
+ * occupancy and a full quota table over an allocation that no longer exists.
+ */
+function liveRun_() {
+  var runs = Db.readAll('Runs');
+  for (var i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].mode === 'COMMITTED') return runs[i];
+  }
+  return null;
+}
+
 function apiAdminOverview() {
   var s = Auth.requireAdmin();
 
@@ -18,7 +35,7 @@ function apiAdminOverview() {
   var rooms = Db.indexBy('Rooms', 'roomId');
   var hostels = Db.readAll('Hostels');
   var runs = Db.readAll('Runs');
-  var latest = runs.length ? runs[runs.length - 1] : null;
+  var latest = liveRun_();
 
   var byStatus = {};
   apps.forEach(function (a) { byStatus[a.status] = (byStatus[a.status] || 0) + 1; });
@@ -70,6 +87,10 @@ function apiAdminOverview() {
       vacant: beds.filter(function (b) { return b.status === 'VACANT'; }).length
     },
     occupancy: occupancy,
+    // Whether an allocation has ever been run, which is a different question
+    // from whether one is standing now. "Not run yet" and "cleared" look
+    // identical in the numbers and are not the same thing to be told.
+    hadRun: runs.length > 0,
     latestRun: latest ? {
       runId: latest.runId, mode: latest.mode, seed: latest.seed,
       policyHash: latest.policyHash, notes: latest.notes,
@@ -461,9 +482,12 @@ function apiAdminDecideDocument(docId, approve, note) {
 function apiAdminGenerateLetters(runId, limit) {
   Auth.requireAdmin();
   if (!runId) {
-    var runs = Db.readAll('Runs');
-    if (!runs.length) throw new Error('No allocation run exists yet.');
-    runId = runs[runs.length - 1].runId;
+    var live = liveRun_();
+    // Not "the last run": letters for a cleared allocation would be letters
+    // for rooms nobody now holds.
+    if (!live) throw new Error('There is no allocation to write letters for. ' +
+                               'Run the allocation first.');
+    runId = live.runId;
   }
   return Letters.generateBatch(runId, limit || 25);
 }
@@ -472,9 +496,10 @@ function apiAdminGenerateLetters(runId, limit) {
 function apiAdminNotify(runId, limit) {
   Auth.requireAdmin();
   if (!runId) {
-    var runs = Db.readAll('Runs');
-    if (!runs.length) throw new Error('No allocation run exists yet.');
-    runId = runs[runs.length - 1].runId;
+    var live = liveRun_();
+    if (!live) throw new Error('There is no allocation to notify anybody about. ' +
+                               'Run the allocation first.');
+    runId = live.runId;
   }
   return Notify.notifyRun(runId, limit || 50);
 }
