@@ -807,10 +807,11 @@ function validateApplication_(payload, student) {
  * available to the next run, and not returned by anything an officer could
  * look at. A student leaving must free the room they were holding.
  *
- * The bed is released, NOT reassigned. Handing it straight to the next person
- * on the list is a real thing to want and is not what this does; see the note
- * on waiting-list promotion in PROJECT_CONTEXT. What this guarantees is that
- * the bed is genuinely empty, so the next run can give it to somebody.
+ * The bed does not simply go back to the pool: it is offered straight to the
+ * next person on the waiting list who can live in it. Waiting for the next
+ * full run would mean either an empty room for weeks or re-deciding everybody
+ * because one student went home, and neither is what the office does with a
+ * key that has been handed back.
  */
 function apiWithdrawApplication() {
   var s = Auth.session();
@@ -819,12 +820,28 @@ function apiWithdrawApplication() {
   var appId = s.application.appId;
   var released = releaseAllotment_(appId, 'the student withdrew', s.email);
 
+  // Marked withdrawn BEFORE the bed is offered on, so the promotion cannot
+  // consider this student for the room they have just given up.
   Db.update('Applications', appId, { status: 'WITHDRAWN', updatedAt: new Date() });
+  Db.invalidate('Applications');
+
   Ledger.append('APPLICATION_WITHDRAWN', {
     appId: appId, bedFreed: released.bedId || null
   }, s.email);
 
-  return { ok: true, bedFreed: released.bedId || null };
+  var promoted = null;
+  if (released.bedId) {
+    try {
+      var r = Vacancy.fill(released.bedId, s.email);
+      if (r.filled) promoted = { appId: r.appId, fromPosition: r.position };
+    } catch (e) {
+      // The withdrawal itself has already succeeded and been recorded. A
+      // failure to re-fill the bed leaves it vacant, which is correct if
+      // untidy - it must never undo the withdrawal.
+    }
+  }
+
+  return { ok: true, bedFreed: released.bedId || null, promoted: promoted };
 }
 
 /**

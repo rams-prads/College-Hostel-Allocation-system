@@ -59,6 +59,10 @@
   }
 
   function render(v) {
+    // Nothing to render is not a crash - but it is not nothing, either. A page
+    // that quietly returns leaves the reader on a spinner, which is the failure
+    // this project has spent the most time on. Say it, then stop.
+    if (!v) { showFailure(emptyResponseNote('The portal')); return; }
     VIEW = v;
 
     // An administrator does not have a student portal, and this is the first

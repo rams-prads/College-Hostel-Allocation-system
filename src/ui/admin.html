@@ -145,6 +145,8 @@
   load();
 
   function render(d) {
+    if (!d) { showFailure(emptyResponseNote('The dashboard')); return; }
+
     D = d;
     paintChrome({
       unit: 'Hostel Administration',
@@ -689,6 +691,9 @@
         'Seed or import the inventory first.'));
     }
 
+    var vacant = live.reduce(function (n, h) { return n + Number(h.vacant || 0); }, 0);
+    var waiting = Number((d.counts || {}).waitlisted) || 0;
+
     var rows = live.map(function (h) {
       var cls = h.pct >= 99 ? 'full' : (h.pct >= 90 ? 'hot' : '');
       return '<tr><td><strong>' + esc(h.name) + '</strong>' +
@@ -707,7 +712,20 @@
       '<tbody>' + rows + '</tbody></table></div>' +
       (hidden ? '<p class="small muted" style="padding:12px 18px;margin:0">' +
         esc(hidden) + ' hostel' + (hidden === 1 ? '' : 's') + ' with no rooms on record ' +
-        (hidden === 1 ? 'is' : 'are') + ' not shown.</p>' : ''),
+        (hidden === 1 ? 'is' : 'are') + ' not shown.</p>' : '') +
+      // Offered only when it would do something. A button that can only report
+      // "nothing to do" is a button that teaches people to ignore buttons.
+      (vacant && waiting
+        ? '<div style="padding:14px 18px;border-top:1px solid var(--border)">' +
+          '<div id="vacMsg"></div>' +
+          '<p class="small muted" style="margin:0 0 10px">' + esc(vacant) + ' bed' +
+          (vacant === 1 ? '' : 's') + ' empty and ' + esc(waiting) + ' applicant' +
+          (waiting === 1 ? '' : 's') + ' waiting. Offering a bed goes to the ' +
+          'highest-placed applicant on the list who can actually live in it &mdash; ' +
+          'the same hostel rules the run applied. Nobody already allotted is moved.</p>' +
+          '<button class="btn" onclick="fillVacancies()">Offer empty beds to the ' +
+          'waiting list</button></div>'
+        : ''),
       { tight: true });
   }
 
@@ -991,6 +1009,25 @@
       load({ kind: 'good', text: 'Policy committed and the allocation re-run against it.' });
     }).withFailureHandler(function (e) { done('err', e.message); })
       .apiAdminCommitSimulation(changes, null);
+  }
+
+  function fillVacancies() {
+    if (!confirm('Offer every empty bed to the waiting list? Students who are ' +
+                 'allotted a room this way are moved off the list immediately. ' +
+                 'Nobody already holding a room is affected.')) return;
+    setHtml('vacMsg', banner('info', '<span class="spin"></span> Working through the empty beds'));
+    srv('vacMsg').withSuccessHandler(function (r) {
+      load(r.filled
+        ? r.filled + ' bed' + (r.filled === 1 ? '' : 's') + ' filled from the waiting list. ' +
+          (r.vacantAfter
+            ? r.vacantAfter + ' still empty - nobody waiting is eligible for ' +
+              (r.vacantAfter === 1 ? 'it' : 'them') + '.'
+            : 'Every bed is now taken.')
+        : 'No bed could be filled. ' + (r.vacantBefore
+            ? 'The ' + r.vacantBefore + ' empty bed' + (r.vacantBefore === 1 ? '' : 's') +
+              ' are in hostels no waiting applicant is eligible for.'
+            : 'There are no empty beds.'));
+    }).apiAdminFillVacancies(50);
   }
 
   /* ========================================================== waiting list */

@@ -36,6 +36,19 @@ function saveToken(t) {
  *
  * Written to #msg if the page has one, otherwise over #root - never nowhere.
  */
+/**
+ * The one sentence for "the server answered with nothing".
+ *
+ * Shared, because both the page and srv() can be the one to notice, and the
+ * reader should not get two different explanations of the same event.
+ */
+function emptyResponseNote(what) {
+  return (what ? what + ' sent nothing back' : 'The portal sent nothing back') +
+    ', so there was nothing to draw. Reload the page. If it keeps happening, the ' +
+    'deployment may be older than the code - open ?page=diag on this address and ' +
+    'compare the deployment URL it reports with the one in your browser.';
+}
+
 function showFailure(message, detail) {
   var box = el('msg') || el('root');
   if (!box) return;
@@ -133,12 +146,24 @@ function srv(ownerId) {
           try {
             ok(result);
           } catch (e) {
-            // The operation goes in the headline, not only in the detail. It is
-            // the one word that tells whoever is looking at this where to start.
-            report('Could not display the result of ' + name + '. This is a fault in ' +
-                   'the portal, not in anything you did.',
-                   name + ': ' + (e && e.message ? e.message : String(e)) +
-                   '\n\n' + (e && e.stack ? String(e.stack).split('\n').slice(0, 4).join('\n') : ''));
+            // A handler that threw because the server sent NOTHING is a
+            // different fault from a handler with a bug in it, and it gets a
+            // different sentence. google.script.run delivers null rather than
+            // failing when it cannot encode a return value, so "Cannot read
+            // properties of null" here means the page had nothing to draw -
+            // and naming whichever field it happened to read first sends
+            // whoever reads the message off in the wrong direction entirely.
+            var empty = (result === null || result === undefined);
+            report(empty
+              ? name + ' sent nothing back, so there was nothing to draw. Reload the ' +
+                'page. If it keeps happening, the deployment may be older than the code ' +
+                '- open ?page=diag on this address and compare the deployment URL it ' +
+                'reports with the one in your browser.'
+              : 'Could not display the result of ' + name + '. This is a fault in ' +
+                'the portal, not in anything you did.',
+              name + ': ' + (empty ? 'the server returned no data. ' : '') +
+              (e && e.message ? e.message : String(e)) +
+              '\n\n' + (e && e.stack ? String(e.stack).split('\n').slice(0, 4).join('\n') : ''));
           }
         });
 

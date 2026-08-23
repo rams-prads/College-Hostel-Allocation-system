@@ -819,6 +819,37 @@ check('a slow call eventually says so', (() => {
   return screen.indexOf('taking longer') > 0;
 })(), 'a spinner with no deadline is indistinguishable from a hang');
 
+section('An empty response says it is empty');
+
+// google.script.run hands the success handler null when it cannot encode a
+// return value, rather than failing. The page then reads a field off nothing
+// and reports a TypeError naming whichever field it asked for first, which is
+// never the fault - "Cannot read properties of null (reading 'isAdmin')" was
+// two separate reports of exactly this.
+global.apiProbeNothing = function () { return null; };
+
+(() => {
+  const t = renderPage('student.html', studentEmail, `
+    setHtml('root', '');
+    srv().withSuccessHandler(render).apiProbeNothing();
+  `);
+  check('the page does not throw', !t.threw, t.threw || '');
+  check('and does not blame a field that had nothing to do with it',
+    t.screen.indexOf("reading 'isAdmin'") < 0);
+  check('it says the server sent nothing back',
+    /sent nothing back/.test(t.screen), 'the message has to point somewhere useful');
+  check('and names where to look if it persists',
+    /page=diag/.test(t.screen),
+    'a deployment older than the code is the likeliest cause and takes ten seconds to rule out');
+})();
+
+check('the dashboard is equally unbothered', (() => {
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', `
+    srv().withSuccessHandler(render).apiProbeNothing();
+  `);
+  return !t.threw;
+})());
+
 section('An answer for a screen nobody is looking at any more');
 
 // The reported fault: open the waiting list, wait, click another tab, and the

@@ -478,6 +478,19 @@ function apiAdminDecideDocument(docId, approve, note) {
   return { ok: true, docStatus: app ? Documents.rollUp(doc.appId, student) : null };
 }
 
+/**
+ * Offer every empty bed to the waiting list.
+ *
+ * Withdrawal does this by itself for the one bed it frees. This is for the
+ * other ways a room empties - a cancellation entered by hand, a batch of
+ * no-shows written off at the counter - and for catching up an installation
+ * where beds were freed before promotion existed.
+ */
+function apiAdminFillVacancies(limit) {
+  var s = Auth.requireAdmin();
+  return Vacancy.fillAll(limit || 25, s.email);
+}
+
 /** Generate allotment letters in bounded batches. */
 function apiAdminGenerateLetters(runId, limit) {
   Auth.requireAdmin();

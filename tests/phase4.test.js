@@ -409,15 +409,29 @@ section('Withdrawing gives the room back');
   check('the allotment is cancelled with it',
     Db.byId('Allocations', alloc.allocId).status === 'CANCELLED',
     Db.byId('Allocations', alloc.allocId).status);
-  check('and the bed is genuinely empty again', (() => {
+  check('the bed no longer belongs to the student who left', (() => {
     const bed = Db.byId('Beds', alloc.bedId);
-    return bed.status === 'VACANT' && !bed.occupantAppId;
+    return bed.occupantAppId !== app.appId;
   })(), 'a bed nobody is in but nothing reports as free is a bed permanently lost');
   check('the caller is told which bed came back', out.bedFreed === alloc.bedId);
   check('and the release is on the ledger',
     Db.readAll('AuditLog').some(e => e.action === 'ALLOTMENT_RELEASED'));
   check('the letter is not left pointing at a room they no longer hold',
     !Db.byId('Allocations', alloc.allocId).letterUrl);
+
+  // The bed is then offered straight on, so it ends up either taken by the next
+  // eligible person or genuinely vacant - never held by somebody who has gone.
+  const bed = Db.byId('Beds', alloc.bedId);
+  if (out.promoted) {
+    check('the room went to the next eligible applicant',
+      bed.status === 'OCCUPIED' && bed.occupantAppId === out.promoted.appId,
+      JSON.stringify(out.promoted));
+    check('and they came off the waiting list',
+      Db.byId('Applications', out.promoted.appId).status === 'ALLOTTED');
+  } else {
+    check('or it is left properly vacant',
+      bed.status === 'VACANT' && !bed.occupantAppId, bed.status);
+  }
 })();
 
 // Back to the administrator for everything after this.
