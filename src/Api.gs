@@ -58,11 +58,19 @@ function apiCall(sessionToken, fnName, args) {
  * What cannot be encoded is easy to produce here by accident, because the data
  * comes out of a spreadsheet:
  *
+ *   Date       THE BIG ONE. google.script.run's legal types are primitives and
+ *              arrays or objects of primitives. A Date is not one, and a single
+ *              Date anywhere in the payload nulls all of it. This is not
+ *              theoretical: apiGetApplyForm returns the Students row, whose
+ *              registeredAt is a Date the moment a student self-registers, and
+ *              Identity.statusFor returns verifiedAt, which is a Date the
+ *              moment the office verifies somebody. Both pages went blank at
+ *              exactly those two moments and blamed whichever field the
+ *              handler happened to read first.
  *   NaN        Db.decode does Number(cell) on a NUM column. One cell holding
  *              text - a stray apostrophe, "N/A", a pasted dash - is enough,
  *              and it takes the WHOLE response down with it, not just itself.
  *   Infinity   any division by a zero that should not have been zero.
- *   Invalid Date  new Date(cell) on a DATE column with anything unparseable.
  *   undefined  inside an array, where the encoder has no key to drop.
  *
  * All four become null. A response that is missing one field is a page with a
@@ -83,8 +91,13 @@ function jsonSafe_(value, depth) {
   if (t === 'string' || t === 'boolean') return value;
   if (t === 'function') return null;
 
+  // Formatted, not passed through. Most payloads already run their dates
+  // through fmtDate_ and hand the browser a string; the ones that leaked a raw
+  // Date did so by returning a sheet row whole. Formatting here makes every
+  // date on every endpoint look the same and removes the whole hazard, and
+  // nothing on the client does arithmetic on a date it was given.
   if (value instanceof Date) {
-    return isNaN(value.getTime()) ? null : value;
+    return isNaN(value.getTime()) ? null : fmtDate_(value);
   }
 
   if (Object.prototype.toString.call(value) === '[object Array]') {

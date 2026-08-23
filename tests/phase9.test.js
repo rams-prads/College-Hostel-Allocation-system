@@ -226,10 +226,36 @@ check('nor is Infinity',
   jsonSafe_({ a: Infinity, b: -Infinity }).b === null);
 check('an unparseable date is dropped rather than sent',
   jsonSafe_({ d: new Date('not a date') }).d === null);
-check('but a real date survives untouched', (() => {
-  const d = new Date(2026, 7, 23);
-  return jsonSafe_({ d: d }).d instanceof Date && +jsonSafe_({ d: d }).d === +d;
-})(), 'the fix must not cost the pages the dates they format');
+check('and a real date is handed over as text, never as a Date', (() => {
+  // THE fault behind both blank pages. google.script.run's legal types are
+  // primitives and arrays or objects of them; a Date is not one, and a single
+  // Date anywhere in a payload nulls the whole payload rather than failing.
+  const out = jsonSafe_({ d: new Date(2026, 7, 23) });
+  return typeof out.d === 'string' && out.d.length > 0 && !(out.d instanceof Date);
+})(), 'a raw Date is what apiGetApplyForm and apiGetStudentView were both sending');
+
+check('every date on every endpoint is now a string', (() => {
+  // Walked rather than spot-checked: the two that leaked did so by returning a
+  // sheet row whole, which is a thing any endpoint can start doing tomorrow.
+  function dates(v, depth) {
+    if (depth > 10 || v === null || typeof v !== 'object') return 0;
+    if (v instanceof Date) return 1;
+    var n = 0;
+    for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) n += dates(v[k], depth + 1);
+    return n;
+  }
+  const st = Db.readAll('Students')[0];
+  asGoogle(st.email);
+  // A registered student carries registeredAt; a verified one carries verifiedAt.
+  Db.update('Students', st.studentId, { registeredAt: new Date() });
+  Db.invalidate('Students');
+
+  const found = ['apiGetApplyForm', 'apiGetStudentView', 'apiWhoAmI']
+    .map(fn => dates(apiCall(null, fn, []), 0))
+    .reduce((a, b) => a + b, 0);
+  anonymous();
+  return found === 0;
+})(), 'one Date is enough to blank the page it was sent to');
 check('undefined inside an array becomes null, not a hole',
   jsonSafe_([1, undefined, 3])[1] === null,
   'an array has no key for the encoder to drop, so the encoder gives up instead');
