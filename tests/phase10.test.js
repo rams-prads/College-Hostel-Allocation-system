@@ -94,24 +94,74 @@ check('short tokens are ignored',
   'initials match everything and prove nothing');
 
 // ============================================================ the verdict
-section('An Aadhaar that agrees is not sent to anybody');
+section('An admission page that agrees is not sent to anybody');
 
 const student = Db.readAll('Students').find(s => Number(s.homePincode) > 700000);
 const app = Db.findOne('Applications', { studentId: student.studentId });
 Documents.provision(app.appId, student);
 
 const addrDoc = Db.findOne('Applications', { appId: app.appId }) &&
-  Db.where('Documents', { appId: app.appId }).find(d => d.docType === 'AADHAAR');
+  Db.where('Documents', { appId: app.appId }).find(d => d.docType === 'ADMISSION_FORM');
 Db.update('Documents', addrDoc.docId, { driveFileId: 'file-1', status: 'UPLOADED' });
 Db.invalidate('Documents');
+
+
+/**
+ * What OCR returns from a GGSIPU admission confirmation page.
+ *
+ * It is a generated document with a fixed label-then-value table, which is
+ * exactly why it can be read reliably - and why the tests below can be honest
+ * about what the reader does, rather than feeding it text shaped to suit.
+ */
+function formText(st, over) {
+  const o = Object.assign({
+    pin: String(st.homePincode),
+    // The region the QUALIFYING EXAM was passed in, which is not the state on
+    // the correspondence address. A student can live in Delhi and have sat
+    // their board exam elsewhere - that is precisely the distinction the
+    // brochure draws, and the first version of this generator collapsed the
+    // two, which the region check then correctly reported as a contradiction.
+    region: st.residenceCategory === 'DELHI' ? 'Delhi (NCT)' : 'Maharashtra',
+    category: { GEN: 'General', OBC: 'Other Backward Classes', SC: 'Scheduled Caste',
+                ST: 'Scheduled Tribe', EWS: 'Economically Weaker Section' }[st.category] || 'General',
+    pwd: st.isPwD ? 'Yes' : 'No',
+    percent: Number(st.meritPercent) || 75,
+    appNo: '131241' + String(Math.abs(hashOf(st.studentId)) % 1000000).padStart(6, '0'),
+    name: st.name
+  }, over || {});
+
+  return 'Guru Gobind Singh Indraprastha University, Delhi\n' +
+    'GGSIPU B.Tech 2024 [CODE-131]\nConfirmation Page\nPersonal Details\n' +
+    'Application Number ' + o.appNo + ' Candidate Name ' + o.name + '\n' +
+    'Father Name Ramesh Kumar Mother Name Sunita Kumar\n' +
+    'Gender Male Date of Birth (DOB) 14-03-2006\n' +
+    'Region from where Qualifying Exam has passed or appeared as per the ' +
+    'Eligibility Criteria mentioned in the admission brochure ' + o.region +
+    ' Religion HINDUISM\n' +
+    'Category ' + o.category + '\nSub Category List\n' +
+    'Physically handicapped ' + o.pwd + '\nDefence Personnel No\n' +
+    'Class 10th or Equivalent Details\nPercentage Marks 88.2\n' +
+    '(Qualifying Exam Details as per Eligibility Criteria) Details\n' +
+    'Percentage Marks ' + o.percent + '\n' +
+    'Contact Details\nCorrespondence Address\n' +
+    'Premises No./Village Name House 12, Main Road\n' +
+    'Locality/City/Town/Village/Post Office ' + (st.homeCity || 'Town') + '\n' +
+    'Country India\nState ' + (st.homeState || 'State') + '\n' +
+    'District NORTH\nPin Code ' + o.pin + '\nMobile Number 966****066';
+}
+
+function hashOf(s) {
+  let h = 0;
+  for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0;
+  return h;
+}
 
 function scan(text, doc) {
   OCR = { ok: true, text: text, reason: '' };
   return DocScan.checkDocument(doc || Db.byId('Documents', addrDoc.docId), student, reader);
 }
 
-const agree = scan('Government of India\n' + student.name +
-  '\nS/O Someone\nHouse 12, Main Road\n' + student.homeCity + '\n' + student.homePincode);
+const agree = scan(formText(student));
 check('it reads as a match', agree.verdict === 'MATCH', JSON.stringify(agree.findings));
 check('with nothing for a person to do', agree.findings.length === 0);
 check('and it recorded which PIN it confirmed',
@@ -121,7 +171,7 @@ section('A conflict that changes the outcome IS raised');
 
 // Declared: far from campus and eligible. Document: a Delhi PIN, inside the
 // exclusion radius. This is the fraud the check exists for.
-const gamed = scan('Government of India\n' + student.name + '\nDwarka, New Delhi\n110078');
+const gamed = scan(formText(student, { pin: '110078' }));
 check('it reads as a conflict', gamed.verdict === 'CONFLICT', JSON.stringify(gamed.findings));
 check('and is blocking', gamed.findings.some(f => f.severity === 'BLOCK'));
 check('the reason names both distances and the rule crossed',
@@ -132,8 +182,7 @@ section('A difference that changes nothing is NOT raised');
 
 // A neighbouring PIN in the same town: both a similar distance from campus.
 const near = String(Number(student.homePincode) + 1);
-const clerical = scan('Government of India\n' + student.name + '\n' +
-  student.homeCity + '\n' + near);
+const clerical = scan(formText(student, { pin: near }));
 check('it is not a conflict', clerical.verdict !== 'CONFLICT', clerical.verdict);
 check('nothing blocking is produced',
   !clerical.findings.some(f => f.severity === 'BLOCK'));
@@ -143,7 +192,7 @@ check('it is recorded, not raised',
 console.log('        ' + (clerical.findings[0] || {}).text);
 
 section('Somebody else\'s document is caught');
-const wrongPerson = scan('Government of India\nVikram Patel\nSomewhere\n' + student.homePincode);
+const wrongPerson = scan(formText(student, { name: 'Vikram Patel' }));
 check('the name mismatch blocks it',
   wrongPerson.findings.some(f => f.code === 'NAME_NOT_ON_DOCUMENT'));
 check('and the verdict is a conflict', wrongPerson.verdict === 'CONFLICT');
@@ -199,18 +248,11 @@ allApps.forEach(a => Documents.provision(a.appId, students[a.studentId]));
 Db.invalidate('Documents');
 
 /** What an OCR pass over a real address proof looks like. */
-function aadhaarText(st, pin) {
-  return 'GOVERNMENT OF INDIA\n' +
-         'Unique Identification Authority of India\n' +
-         st.name + '\nDOB: 14/03/2006\n' +
-         'S/O Ramesh Kumar, House 12, Main Road,\n' +
-         (st.homeCity || 'Town') + ', ' + (st.homeState || 'State') + '\n' + pin + '\n' +
-         'XXXX XXXX 4321';
-}
+
 
 let liars = 0;
 Db.readAll('Documents')
-  .filter(d => d.docType === 'AADHAAR' &&
+  .filter(d => d.docType === 'ADMISSION_FORM' &&
                allApps.some(a => a.appId === d.appId))
   .forEach((d, i) => {
     const st = students[Db.byId('Applications', d.appId).studentId];
@@ -225,7 +267,7 @@ Db.readAll('Documents')
     const cheat = i % 12 === 0 && far.resolved && far.km > 400;
     if (cheat) liars++;
 
-    OCR = { ok: true, text: aadhaarText(st, cheat ? '110078' : st.homePincode) };
+    OCR = { ok: true, text: formText(st, cheat ? { pin: '110078' } : {}) };
     Documents.scanIfNeeded(Db.byId('Documents', d.docId), st, true);
   });
 Db.invalidate('Documents');
@@ -253,7 +295,7 @@ check('the queue defaults to only what needs a person',
                            r.scanVerdict === 'UNSCANNED'),
   conflictsOnly.map(r => r.scanVerdict).join(','));
 const addressConflicts = conflictsOnly.filter(
-  r => r.scanVerdict === 'CONFLICT' && r.docType === 'AADHAAR');
+  r => r.scanVerdict === 'CONFLICT' && r.docType === 'ADMISSION_FORM');
 check('every planted misdeclaration is in it, and nothing else is',
   addressConflicts.length === liars,
   addressConflicts.length + ' raised vs ' + liars + ' planted');

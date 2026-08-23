@@ -38,7 +38,9 @@ function readyCase(over, wantContinuing) {
   for (let i = 0; i < apps.length; i++) {
     if (used[apps[i].appId]) continue;
     const s = Db.byId('Students', apps[i].studentId);
-    if (wantContinuing && Documents.requiredFor(s, apps[i]).length < 2) continue;
+    // A continuing student is one who has an ALTERNATIVE - two slots, so
+    // "send back the one that is wrong" and "send back everything" differ.
+    if (wantContinuing && Documents.slotsFor(s, apps[i]).length < 2) continue;
     app = apps[i];
     break;
   }
@@ -113,6 +115,37 @@ check('a blocking finding on a document is not left off the risk panel', (() => 
          c.risk.findings.some(f => /PIN code on the document/.test(f.text));
 })(), 'a blocking document finding must make the case blocking');
 
+check('the case compares every field the allocation turns on', (() => {
+  // The point of the swap. Aadhaar let one field be checked - the PIN code.
+  // The admission page lets six be, four of which were previously typed by the
+  // applicant and read by nobody.
+  const a = readyCase({
+    scanVerdict: 'MATCH',
+    scanJson: { findings: [], detail: {
+      nameScore: 1, declaredPincode: '110084', pincodesFound: ['110084'],
+      pincodeConfirmed: true,
+      applicationNo: '131241025461',
+      regionRead: 'Delhi (NCT)', regionIsDelhi: true, regionAgrees: true,
+      categoryOnForm: 'GEN', pwdOnForm: false,
+      percentOnForm: 80.4, percentGap: 0
+    } }
+  });
+  const fields = Verification.caseFor(a.appId).comparisons.map(c => c.field);
+  return ['Name', 'Admission region', 'Category', 'Disability',
+          'Qualifying marks', 'Application number', 'PIN code']
+    .every(f => fields.indexOf(f) >= 0);
+})(), 'one field checked became six');
+
+check('and it explains why the region matters', (() => {
+  const a = readyCase({
+    scanVerdict: 'MATCH',
+    scanJson: { findings: [], detail: { regionRead: 'Maharashtra', regionIsDelhi: false,
+                                        regionAgrees: false } }
+  });
+  const r = Verification.caseFor(a.appId).comparisons.find(c => c.field === 'Admission region');
+  return r && r.ok === false && /exhausted before the next/.test(r.note || '');
+})(), 'an officer who does not know what a field decides cannot weigh a discrepancy in it');
+
 // ========================================================== the decision
 section('Verifying closes the whole case, not part of it');
 
@@ -141,7 +174,7 @@ section('Asking for a better copy does not throw the application away');
 // proves nothing.
 const a2 = readyCase(null, true);
 const r2 = Verification.decide(a2.appId, 'RESUBMIT',
-  { reason: 'UNREADABLE', docTypes: ['AADHAAR'] }, ADMIN);
+  { reason: 'UNREADABLE', docTypes: ['ADMISSION_FORM'] }, ADMIN);
 Db.invalidate('Documents'); Db.invalidate('Applications');
 const app2 = Db.byId('Applications', a2.appId);
 
@@ -158,16 +191,16 @@ check('the applicant stays eligible for a room', (() => {
 
 check('only the document named is sent back', (() => {
   const docs = Db.where('Documents', { appId: a2.appId });
-  const aadhaar = docs.find(d => d.docType === 'AADHAAR');
-  const others = docs.filter(d => d.docType !== 'AADHAAR' && d.driveFileId);
-  return aadhaar.status === 'REJECTED' && others.every(d => d.status !== 'REJECTED');
+  const form = docs.find(d => d.docType === 'ADMISSION_FORM');
+  const others = docs.filter(d => d.docType !== 'ADMISSION_FORM' && d.driveFileId);
+  return form.status === 'REJECTED' && others.every(d => d.status !== 'REJECTED');
 })(), '"the ID card is blurred" must not discard an Aadhaar that was perfectly readable');
 
 check('the student is given an instruction, not a verdict', (() => {
   return /clearer photo or scan/.test(r2.message);
 })(), r2.message);
 check('and the instruction is on the document they have to replace', (() => {
-  const d = Db.where('Documents', { appId: a2.appId }).find(x => x.docType === 'AADHAAR');
+  const d = Db.where('Documents', { appId: a2.appId }).find(x => x.docType === 'ADMISSION_FORM');
   return /clearer/.test(String(d.note));
 })());
 

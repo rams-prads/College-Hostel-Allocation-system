@@ -1,4 +1,28 @@
 /**
+ * Identity.gs - RETIRED, and kept deliberately.
+ *
+ * Aadhaar is no longer collected anywhere in this system. The GGSIPU admission
+ * confirmation page replaced it: every student holds one before they have a
+ * college email address, it carries the same correspondence address, and it
+ * additionally carries the four fields the allocation actually turns on - the
+ * region the qualifying exam was passed in, the reservation category, the
+ * disability sub-category and the qualifying percentage - none of which an
+ * Aadhaar card carries and all of which were previously self-declared and
+ * checked by nobody.
+ *
+ * What is left here is not dead weight. screen() is still the applicant-level
+ * cross-check that the verification console shows, and it still finds reused
+ * documents, malformed enrolment numbers, implausible ages and addresses that
+ * do not resolve. Only the Aadhaar-specific parts are dormant: the vault, the
+ * Verhoeff validation, and the submit/decide pair that the portal no longer
+ * calls.
+ *
+ * They are kept rather than deleted because the decision to stop asking for
+ * Aadhaar is a policy decision, and reversing it should be a configuration
+ * change rather than a rewrite. Nothing writes to the Identity tab any more,
+ * so nothing here runs unless something calls it.
+ *
+ * ---------------------------------------------------------------------------
  * Identity.gs - identity verification for hostel applicants.
  *
  * WHAT THIS IS NOT

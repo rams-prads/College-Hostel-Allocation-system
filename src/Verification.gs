@@ -328,6 +328,58 @@ var Verification = (function () {
         });
       }
 
+      // The four fields that used to be self-declared and checked by nobody.
+      // They decide which priority group the applicant is in, which quota they
+      // draw on, and where they sit inside their group - which is to say, they
+      // decide the outcome.
+      if (detail.regionRead) {
+        out.push({
+          docType: d.docType, source: label, field: 'Admission region',
+          declared: student.residenceCategory === 'DELHI' ? 'Delhi' : 'Outside Delhi',
+          found: detail.regionRead + (detail.regionIsDelhi ? ' (Delhi)' : ' (outside Delhi)'),
+          ok: detail.regionAgrees !== false,
+          note: 'This decides which priority group the applicant is in. One group is ' +
+                'exhausted before the next is looked at.'
+        });
+      }
+      if (detail.categoryOnForm) {
+        out.push({
+          docType: d.docType, source: label, field: 'Category',
+          declared: String(student.category || ''),
+          found: detail.categoryOnForm,
+          ok: detail.categoryOnForm === String(student.category)
+        });
+      }
+      if (detail.pwdOnForm !== undefined) {
+        out.push({
+          docType: d.docType, source: label, field: 'Disability',
+          declared: student.isPwD ? 'Declared' : 'Not declared',
+          found: detail.pwdOnForm ? 'Recorded on the form' : 'Not recorded',
+          ok: !!student.isPwD === !!detail.pwdOnForm,
+          note: 'Disabled applicants are the first priority group.'
+        });
+      }
+      if (detail.percentOnForm !== undefined) {
+        out.push({
+          docType: d.docType, source: label, field: 'Qualifying marks',
+          declared: String(student.meritPercent || '') + '%',
+          found: detail.percentOnForm + '%',
+          ok: Number(detail.percentGap || 0) <= 0.5,
+          minor: Number(detail.percentGap || 0) > 0.5,
+          note: 'A continuing student is ranked on a semester result, which is not ' +
+                'on this page at all.'
+        });
+      }
+      if (detail.applicationNo) {
+        out.push({
+          docType: d.docType, source: label, field: 'Application number',
+          declared: '—',
+          found: detail.applicationNo,
+          ok: true,
+          note: 'Checkable against the university admission list.'
+        });
+      }
+
       if (detail.enrolmentFound !== undefined) {
         out.push({
           docType: d.docType, source: label, field: 'Enrolment number',

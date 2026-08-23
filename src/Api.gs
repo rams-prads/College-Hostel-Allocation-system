@@ -530,16 +530,17 @@ function editability_(app, student) {
               'changed. Contact the hostel office if something is wrong.' };
   }
 
-  var idStatus = 'REQUIRED';
-  try {
-    if (student) idStatus = Identity.statusFor(student.studentId).status;
-  } catch (e) { /* no Identity tab yet - treat as not verified */ }
+  // One check now, not two. Aadhaar is no longer collected, so "both have
+  // passed" collapsed into "the office has accepted the evidence" - which is
+  // what verifyStatus records, and what closes the door.
+  var settled = app.verifyStatus === 'VERIFIED' ||
+                (!app.verifyStatus && String(app.docStatus) === 'VERIFIED');
 
-  if (idStatus === 'VERIFIED' && String(app.docStatus) === 'VERIFIED') {
+  if (settled) {
     return { editable: false,
-      reason: 'Your identity and your documents have both been verified, so your ' +
-              'application is now fixed as the office checked it. Contact the hostel ' +
-              'office if something still needs to change.' };
+      reason: 'Your documents have been checked and accepted, so your application ' +
+              'is now fixed as the office verified it. Contact the hostel office if ' +
+              'something still needs to change.' };
   }
   return { editable: true, reason: '' };
 }

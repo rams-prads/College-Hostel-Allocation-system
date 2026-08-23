@@ -137,6 +137,239 @@ var DocScan = (function () {
     return out;
   }
 
+
+  // ============================================ the admission confirmation page
+
+  /**
+   * Read a GGSIPU admission confirmation page.
+   *
+   * This is a GENERATED document with a fixed label-then-value table, which is
+   * why it can be read far more reliably than a photographed plastic card. The
+   * approach is deliberately dumb and therefore robust: find the label, take
+   * what follows it on the same line or the next. OCR reorders columns and
+   * loses table borders; it very rarely loses the label text itself.
+   *
+   * Every field returned is one the ALLOCATION turns on. Four of them - the
+   * region, the category, the disability sub-category and the qualifying
+   * percentage - were previously typed by the applicant and checked by nobody.
+   */
+  function readAdmissionForm(text) {
+    var t = String(text || '').replace(/\r/g, '');
+    var flat = t.replace(/[ \t]+/g, ' ');
+
+    function after(labels, pattern) {
+      for (var i = 0; i < labels.length; i++) {
+        var re = new RegExp(labels[i] + '[^A-Za-z0-9]{0,12}(' + pattern + ')', 'i');
+        var m = flat.match(re);
+        if (m) return String(m[1]).trim();
+      }
+      return '';
+    }
+
+    var out = {};
+
+    // 131241025461 - twelve digits, and the university's own key for this
+    // admission. It is the field that makes a later cross-check possible.
+    out.applicationNo = after(['Application\\s*(?:Number|No\\.?)'], '\\d[\\d\\s-]{9,16}\\d')
+      .replace(/[\s-]/g, '');
+
+    // Bounded, or the capture runs straight into the next column: the page is
+    // two columns wide and OCR flattens it onto one line.
+    out.candidateName = after(['Candidate\\s*Name'],
+      "[A-Za-z][A-Za-z .'-]{2,60}?(?=\\s+(?:Father|Mother|Gender|Date)|$)");
+    out.fatherName = after(['Father\\s*Name'],
+      "[A-Za-z][A-Za-z .'-]{2,60}?(?=\\s+(?:Mother|Gender|Date)|$)");
+
+    // THE field. It decides which priority group the applicant is in, and the
+    // brochure exhausts one group before it looks at the next.
+    //
+    // Its label is not a label, it is a sentence - "Region from where Qualifying
+    // Exam has passed or appeared as per the Eligibility Criteria mentioned in
+    // the admission brochure" - so anchoring on the first two words captures the
+    // rest of the QUESTION rather than the answer. Anchor on its last word.
+    var region = '';
+    var rm = flat.match(
+      /Region\s*from\s*where[\s\S]{0,260}?brochure[^A-Za-z]{0,12}([A-Za-z][A-Za-z ()&.-]{2,40}?)(?=\s+(?:Religion|Category|Sub|Personal)|$)/i);
+    if (rm) region = rm[1].trim();
+    if (!region) {
+      // A page whose boilerplate the OCR mangled. The answer still sits between
+      // the end of that sentence and "Religion".
+      var rm2 = flat.match(/brochure[^A-Za-z]{0,12}([A-Za-z][A-Za-z ()&.-]{2,40}?)\s+Religion/i);
+      if (rm2) region = rm2[1].trim();
+    }
+    out.region = region;
+    out.regionIsDelhi = /delhi|nct/i.test(region);
+
+    // GEN / OBC / SC / ST / EWS, written out on the page.
+    //
+    // Anchored to the start of a line, because "Sub Category List" is also on
+    // the page and a floating \bCategory\b matches that one first. The value
+    // can be as short as two letters, so the length floor has to allow "SC".
+    var cat = '';
+    var cm = t.match(/(?:^|\n)[ \t]*Category[^A-Za-z0-9\n]{0,12}([A-Za-z][A-Za-z \/()&.-]{0,40})/i);
+    if (cm) cat = cm[1].trim();
+    out.categoryText = cat;
+    out.category = normaliseCategory_(cat);
+
+    // "Physically handicapped   No" - the first priority group in the brochure.
+    var pwd = after(['Physically\\s*handicapped', 'Person\\s*with\\s*Disability', '\\bPwD\\b'],
+                    '[A-Za-z]{2,3}');
+    out.pwdText = pwd;
+    out.isPwD = /^y(es)?$/i.test(pwd);
+    out.pwdRead = /^(y(es)?|no?)$/i.test(pwd);
+
+    // The qualifying exam, not class 10: the page carries both, and the
+    // brochure ranks a first-year on the qualifying one. Taking the LAST
+    // percentage on the page is what gets that right, because the qualifying
+    // block is printed below the class 10 block.
+    var pcts = [];
+    var re = /Percentage\s*Marks[^0-9]{0,12}(\d{1,3}(?:\.\d{1,2})?)/gi;
+    var m;
+    while ((m = re.exec(flat)) !== null) pcts.push(Number(m[1]));
+    out.percentages = pcts;
+    out.qualifyingPercent = pcts.length ? pcts[pcts.length - 1] : null;
+
+    out.pincodes = pincodes(t);
+    out.state = after(['\\bState\\b'], '[A-Za-z][A-Za-z ()&.-]{2,40}');
+    out.district = after(['\\bDistrict\\b'], '[A-Za-z][A-Za-z ()&.-]{2,40}');
+
+    return out;
+  }
+
+  function normaliseCategory_(text) {
+    var t = String(text || '').toUpperCase();
+    if (/EWS|ECONOMICALLY/.test(t)) return 'EWS';
+    if (/\bST\b|SCHEDULED\s*TRIBE/.test(t)) return 'ST';
+    if (/\bSC\b|SCHEDULED\s*CASTE/.test(t)) return 'SC';
+    if (/OBC|BACKWARD/.test(t)) return 'OBC';
+    if (/GEN|GENERAL|UNRESERVED|\bUR\b/.test(t)) return 'GEN';
+    return '';
+  }
+
+  /**
+   * Compare a confirmation page against what the applicant typed.
+   *
+   * Every disagreement here is one that changes the outcome, which is the
+   * difference between this and the old address-only check: getting the region
+   * wrong moves an applicant between priority groups that are exhausted in
+   * order, and no amount of marks moves anybody between them.
+   */
+  function checkAdmissionForm_(doc, student, text, findings, detail) {
+    var f = readAdmissionForm(text);
+    detail.form = f;
+
+    // --- the application number ------------------------------------------
+    detail.applicationNo = f.applicationNo;
+    if (!f.applicationNo) {
+      findings.push({
+        code: 'NO_APPLICATION_NUMBER', severity: 'REVIEW',
+        text: 'No application number could be read from the page, so it cannot be ' +
+              'checked against the university admission list.'
+      });
+    }
+
+    // --- the priority group ----------------------------------------------
+    var declaredDelhi = String(student.residenceCategory) === 'DELHI';
+    detail.regionRead = f.region;
+    detail.regionIsDelhi = f.regionIsDelhi;
+    if (f.region) {
+      detail.regionAgrees = (f.regionIsDelhi === declaredDelhi);
+      if (!detail.regionAgrees) {
+        findings.push({
+          code: 'REGION_CONFLICT', severity: 'BLOCK',
+          text: 'The admission page says the qualifying examination was passed in "' +
+                f.region + '", but the application claims the ' +
+                (declaredDelhi ? 'Delhi' : 'outside-Delhi') + ' category. That decides ' +
+                'which priority group this applicant is in, and one group is exhausted ' +
+                'before the next is looked at.'
+        });
+      }
+    }
+
+    // --- the first priority group ----------------------------------------
+    if (f.pwdRead) {
+      detail.pwdOnForm = f.isPwD;
+      if (!!student.isPwD !== f.isPwD) {
+        findings.push({
+          code: 'PWD_CONFLICT', severity: 'BLOCK',
+          text: f.isPwD
+            ? 'The admission page records a disability, but the application does not. ' +
+              'That would place this applicant in the first priority group.'
+            : 'The application claims a disability but the admission page records ' +
+              '"' + f.pwdText + '" against Physically handicapped. The disabled group ' +
+              'is considered before every other.'
+        });
+      }
+    }
+
+    // --- the quota --------------------------------------------------------
+    if (f.category) {
+      detail.categoryOnForm = f.category;
+      if (f.category !== String(student.category)) {
+        findings.push({
+          code: 'CATEGORY_CONFLICT', severity: 'BLOCK',
+          text: 'The admission page records the category as ' + f.category +
+                ', but the application claims ' + student.category +
+                '. Reserved seats are apportioned on that.'
+        });
+      }
+    }
+
+    // --- the ordering measure --------------------------------------------
+    if (f.qualifyingPercent !== null && Number(student.meritPercent) > 0) {
+      detail.percentOnForm = f.qualifyingPercent;
+      var gap = Math.abs(f.qualifyingPercent - Number(student.meritPercent));
+      detail.percentGap = Math.round(gap * 100) / 100;
+      if (gap > 0.5) {
+        findings.push({
+          // Not blocking on its own: the page carries two percentages and a
+          // continuing student is ranked on a semester result that is not on
+          // this page at all. It is a discrepancy for a person to look at.
+          code: 'MERIT_DIFFERS', severity: 'REVIEW',
+          text: 'The admission page shows ' + f.qualifyingPercent + '% for the ' +
+                'qualifying examination; the application claims ' +
+                student.meritPercent + '%. Applicants are ordered on that number ' +
+                'inside their group.'
+        });
+      }
+    }
+
+    // --- the address ------------------------------------------------------
+    var declared = String(student.homePincode || '').replace(/\D/g, '');
+    detail.declaredPincode = declared;
+    detail.pincodesFound = f.pincodes;
+
+    if (!f.pincodes.length) {
+      findings.push({
+        code: 'NO_PINCODE_ON_DOCUMENT', severity: 'REVIEW',
+        text: 'No PIN code could be read from the correspondence address, so the ' +
+              'distance from home could not be confirmed automatically.'
+      });
+      return { verdict: 'UNREADABLE', findings: findings, detail: detail };
+    }
+
+    if (f.pincodes.indexOf(declared) >= 0) {
+      detail.pincodeConfirmed = true;
+      return { verdict: verdictOf_(findings), findings: findings, detail: detail };
+    }
+
+    var assessment = materiality_(declared, f.pincodes, student.campus);
+    detail.declaredKm = assessment.declaredKm;
+    detail.documentKm = assessment.documentKm;
+    detail.material = assessment.material;
+
+    if (assessment.material) {
+      findings.push({ code: 'ADDRESS_CONFLICT', severity: 'BLOCK', text: assessment.text });
+      return { verdict: 'CONFLICT', findings: findings, detail: detail };
+    }
+
+    findings.push({
+      code: 'ADDRESS_MINOR_DIFFERENCE', severity: 'INFO',
+      text: assessment.text
+    });
+    return { verdict: verdictOf_(findings), findings: findings, detail: detail };
+  }
+
   /** Digit runs long enough to be an enrolment number. */
   function longNumbers(text, length) {
     var out = [], seen = {};
@@ -240,6 +473,11 @@ var DocScan = (function () {
         text: 'The name "' + student.name + '" does not appear on the uploaded ' +
               'document. It may belong to somebody else.'
       });
+    }
+
+    // --- the admission page: everything the allocation turns on ----------
+    if (doc.docType === 'ADMISSION_FORM') {
+      return checkAdmissionForm_(doc, student, text, findings, detail);
     }
 
     // --- the college ID proves enrolment, not address --------------------
@@ -378,6 +616,7 @@ var DocScan = (function () {
 
   return {
     ocrText: ocrText,
+    readAdmissionForm: readAdmissionForm,
     pincodes: pincodes,
     aadhaarLast4: aadhaarLast4,
     longNumbers: longNumbers,

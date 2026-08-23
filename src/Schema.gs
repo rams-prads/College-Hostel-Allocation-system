@@ -382,7 +382,10 @@ var SCHEMA = {
       { name: 'appId',      type: T.STR },
       // Two documents. The rest of the brochure checklist is collected on paper
       // at the counter; see Documents.gs for why it is not collected twice.
-      { name: 'docType',    type: T.ENUM, values: ['AADHAAR', 'ID_CARD'] },
+      // AADHAAR is retired, not removed: no slot is provisioned for it any
+      // more, and rows created before the change still have to read back.
+      { name: 'docType',    type: T.ENUM,
+        values: ['ADMISSION_FORM', 'ID_CARD', 'AADHAAR'] },
       { name: 'status',     type: T.ENUM, values: ['REQUIRED', 'UPLOADED', 'VERIFIED', 'REJECTED', 'WAIVED'] },
       { name: 'driveFileId',type: T.STR },
       { name: 'fileName',   type: T.STR },

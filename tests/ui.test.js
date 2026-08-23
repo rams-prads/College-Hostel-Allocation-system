@@ -208,16 +208,30 @@ check('preferences and documents are stacked, not side by side', (() => {
     .test(r.screen);
 })(), 'documents belong full width, below the preferences');
 
-check('at most two documents are ever asked for', (() => {
+check('one document is asked for, and it is the university\'s own', (() => {
   const asked = (r.screen.match(/id="u-([A-Z_]+)"/g) || [])
     .map(m => m.replace(/[^A-Z_]/g, ''));
   const uniq = asked.filter((v, i) => asked.indexOf(v) === i);
-  return uniq.length <= 2 && uniq.every(t => t === 'AADHAAR' || t === 'ID_CARD');
-})(), 'the rest of the checklist is collected on paper at the counter');
+  return uniq.length >= 1 && uniq.indexOf('ADMISSION_FORM') >= 0 &&
+         uniq.every(t => t === 'ADMISSION_FORM' || t === 'ID_CARD');
+})(), 'the admission confirmation page carries the region, the category, the disability ' +
+      'sub-category, the marks and the address - Aadhaar carried one of the five');
+
+check('and no Aadhaar is asked for anywhere on the page',
+  !/aadhaar/i.test(r.screen),
+  'it proved one field this system uses and cost a keyed vault to hold');
 
 // A student the office has not finished checking. That is who the form is for
 // now - an allotted application is settled, and settled is not editable.
-const openApp = Db.readAll('Applications').find(a => a.status === 'SUBMITTED');
+// Undecided, not merely submitted. The seed marks some applications as
+// document-verified for realism, and a verified application is - correctly - no
+// longer the student's to change.
+const openApp = (() => {
+  const a = Db.readAll('Applications').find(x => x.status === 'SUBMITTED');
+  Db.update('Applications', a.appId, { docStatus: 'PENDING', verifyStatus: '' });
+  Db.invalidate('Applications');
+  return Db.byId('Applications', a.appId);
+})();
 const openStudent = Db.byId('Students', openApp.studentId);
 const openEmail = openStudent.email;
 
@@ -371,8 +385,12 @@ section('The student is told what to do, not that something was rejected');
 
 (() => {
   // A decision the student cannot act on is a decision that costs a week.
-  const app = Db.readAll('Applications').find(a => a.status === 'SUBMITTED') ||
-              Db.readAll('Applications')[0];
+  // Not one another section is using. This test VERIFIES the application, and a
+  // verified application is no longer editable - which is correct, and which
+  // silently broke the "can I still fix this?" section when the two shared one.
+  const app = Db.readAll('Applications').slice().reverse()
+    .find(a => a.status === 'SUBMITTED' && a.appId !== openApp.appId) ||
+    Db.readAll('Applications')[Db.readAll('Applications').length - 1];
   const st = Db.byId('Students', app.studentId);
   Documents.provision(app.appId, st);
   Db.invalidate('Documents');
@@ -395,7 +413,7 @@ section('The student is told what to do, not that something was rejected');
     /clearer photo or scan/.test(t.screen),
     'the reason is chosen from a fixed list precisely so that it is an instruction');
   check('with the upload button right there',
-    /pickFile\(&quot;AADHAAR/.test(t.screen),
+    /pickFile\(&quot;ADMISSION_FORM/.test(t.screen),
     'being told to resubmit with no way to resubmit is the worst version of this screen');
   check('and reassurance that they have not lost their place',
     /place in the queue is not affected/.test(t.screen),
@@ -458,16 +476,18 @@ check('the accept list matches what the server allows',
 check('the size limit is stated before the upload, not after',
   r.screen.indexOf('8 MB') > 0);
 
-section('Identity verification - the student side');
+section('Aadhaar is not asked for anywhere');
 r = renderPage('student.html', studentEmail);
-check('the identity card is present', r.screen.indexOf('Identity verification') > 0);
-check('an unverified student is offered the field',
-  r.screen.indexOf('aadhaarInput') > 0);
-check('the storage promise is stated where the number is asked for',
-  r.screen.indexOf('never saved') > 0,
-  'a student handing over an Aadhaar number is owed this before they type it');
+check('no identity card is offered', r.screen.indexOf('Identity verification') < 0,
+  'the admission confirmation page replaced it and carries four more fields besides');
+check('and no field exists to type a number into',
+  r.screen.indexOf('aadhaarInput') < 0);
+check('the word does not appear on the page at all',
+  !/aadhaar/i.test(r.screen),
+  'the swap removed the obligation, not just the display of it');
 
-// A submitted identity, so the admin queue below has something real in it.
+// Identity.gs is retired but kept, and a record written by an older version of
+// the portal still exists on live sheets. It must not reappear on any screen.
 const idStudent = Db.readAll('Students').find(s => s.email !== studentEmail);
 const IDNUM = (function () {
   const p = '45678901234';
@@ -477,14 +497,15 @@ global.Session = { getActiveUser: () => ({ getEmail: () => idStudent.email }) };
 Identity.submit(idStudent.studentId, IDNUM);
 
 r = renderPage('student.html', idStudent.email);
-check('a submitted identity shows the masked number',
-  r.screen.indexOf('XXXX XXXX ' + IDNUM.slice(-4)) > 0);
-check('and the field is withdrawn once it is submitted',
-  r.screen.indexOf('aadhaarInput') < 0,
-  'an input that can no longer be used should not be on screen');
-check('the full number never reaches the page',
+check('a number left over from the old flow is not shown at all',
+  r.screen.indexOf('XXXX XXXX ' + IDNUM.slice(-4)) < 0,
+  'the portal stopped asking; it must also stop displaying');
+check('and the full number certainly never reaches the page',
   r.screen.indexOf(IDNUM.slice(0, 8)) < 0,
   'the rendered HTML is the last place it could leak');
+check('the module itself still works, so turning it back on is configuration',
+  Identity.statusFor(idStudent.studentId).status === 'SUBMITTED',
+  'kept deliberately: the decision to stop asking is policy, not architecture');
 
 section('Admin dashboard');
 r = renderPage('admin.html', 'admin@ipu.ac.in');

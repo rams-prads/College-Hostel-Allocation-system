@@ -158,7 +158,12 @@
     // other, in the order they matter.
     html.push(preferencesCard(v));
     html.push(documentsCard(v));
-    html.push(identityCard(v));
+    // No identity card. Aadhaar is no longer collected: the admission
+    // confirmation page carries the same address and, unlike Aadhaar, the four
+    // other fields the allocation actually turns on. identityCard() and
+    // Identity.gs are both still here, unused, so that turning it back on is a
+    // configuration change rather than a rewrite.
+
     // Wander sits directly above grievances, not under the explanation panel.
     // The explanation is what prompts most questions, so putting the assistant
     // beneath it is tempting - but that pushes documents down, and documents
