@@ -1109,6 +1109,64 @@ check('a campus with no rooms on record says so instead of "all chosen"', (() =>
          t.screen.indexOf('already in your list') < 0;
 })(), 'telling somebody with an empty list that it is full is how a form reads as broken');
 
+section('Where has my document got to?');
+
+(() => {
+  // The reported situation: a student's portal says "under review", and the
+  // verification tab says "nothing waiting" - both correct, because the machine
+  // read it and it agreed. What was missing was any screen that could answer
+  // the question the office is actually being asked on the phone.
+  const someApp = Db.readAll('Applications')[0];
+  Documents.provision(someApp.appId, Db.byId('Students', someApp.studentId));
+  Db.invalidate('Documents');
+  const doc = Db.where('Documents', { appId: someApp.appId })[0];
+  Db.update('Documents', doc.docId, {
+    status: 'UPLOADED', scanVerdict: 'MATCH', driveFileId: 'file-here',
+    fileName: 'aadhaar.jpg'
+  });
+  Db.invalidate('Documents');
+
+  const waiting = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
+  check('a document that agrees is still kept out of the decision queue',
+    waiting.screen.indexOf(doc.docId) < 0,
+    'the queue only works if it holds what needs a person');
+  check('but the empty state now says where to look instead',
+    /Every document held/.test(waiting.screen),
+    'a dead end with a green tick on it is still a dead end');
+
+  const all = renderPage('admin.html', 'admin@ipu.ac.in',
+    'goTab("verification"); showAllDocs(true);');
+  check('and the full view finds it', all.screen.indexOf(doc.docId) > 0,
+    'this is the view an officer needs with a student on the phone');
+  check('the toggle is on both views, so neither is a dead end',
+    /showAllDocs\(false\)/.test(all.screen) && /showAllDocs\(true\)/.test(waiting.screen));
+
+  // A decided document is a record, not a task.
+  Db.update('Documents', doc.docId, { status: 'VERIFIED', verifiedBy: 'warden@ipu.ac.in' });
+  Db.invalidate('Documents');
+  const after = renderPage('admin.html', 'admin@ipu.ac.in',
+    'goTab("verification"); showAllDocs(true);');
+  const owner = Db.byId('Students', someApp.studentId);
+  check('an already-decided document is still findable',
+    after.screen.indexOf(owner.enrollmentNo) > 0 &&
+    after.screen.indexOf('file-here') > 0,
+    'by the student it belongs to, and with a link to the file itself');
+  check('and is not offered Accept and Reject again',
+    after.screen.indexOf('decideDoc(&quot;' + doc.docId) < 0,
+    'a second decision overwrites the first without anybody meaning to');
+  check('it says who decided it', after.screen.indexOf('warden@ipu.ac.in') > 0);
+})();
+
+check('the summary does not claim everything agrees when things were decided', (() => {
+  // Two contradictions and two unreadable scans, all settled by hand earlier,
+  // used to be reported as "every document held agrees with its declaration".
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
+  const s = apiAdminVerificationSummary();
+  if (!s.decided) return true;
+  return t.screen.indexOf('Every document held has been read and agrees') < 0 &&
+         /have been decided/.test(t.screen);
+})(), 'an untrue sentence in a green box is the worst place for one');
+
 section('Occupancy lists buildings, not spreadsheet rows');
 
 (() => {

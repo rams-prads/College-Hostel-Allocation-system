@@ -281,7 +281,10 @@
         '<div class="s">' + (s.needsPerson
           ? 'Out of ' + s.total + '. The rest either agree with what was declared or ' +
             'differ by too little to matter.'
-          : 'Every document held has been read and agrees with its declaration.') +
+          : (s.decided
+              ? s.decided + ' of ' + s.total + ' have been decided; the rest agree with ' +
+                'what was declared or differ by too little to matter.'
+              : 'Every document held has been read and agrees with its declaration.')) +
         '</div></div></div>' +
       '<div class="btn-row" style="margin-top:13px">' +
         (s.unscanned
@@ -330,18 +333,47 @@
    * apiAdminDocQueue has existed since Phase 4 and no page ever rendered it, so
    * the only way to act on a single document was to edit the sheet by hand.
    */
+  // Which of the two questions the queue is answering. "What is waiting on me"
+  // is the one an officer opens the tab for; "where is this student's document"
+  // is the one they open it for on the phone, and it used to have no answer on
+  // any screen at all.
+  var DOCQ_ALL = false;
+
   function loadDocQueue() {
-    srv().withSuccessHandler(paintDocQueue)
-      .withFailureHandler(function () { setHtml('queueCard', ''); })
-      .apiAdminDocQueue(40, true);
+    setHtml('queueCard', card(docQueueTitle(), loadingState('Reading the queue')));
+    srv('queueCard').withSuccessHandler(paintDocQueue)
+      .apiAdminDocQueue(200, !DOCQ_ALL);
+  }
+
+  function docQueueTitle() {
+    return DOCQ_ALL ? 'All documents held' : 'Documents needing a decision';
+  }
+
+  function showAllDocs(all) {
+    DOCQ_ALL = !!all;
+    loadDocQueue();
+  }
+
+  /** The switch between the two, on both views so it is never a dead end. */
+  function docQueueToggle() {
+    return '<div class="btn-row" style="margin-bottom:14px">' +
+      '<button class="btn ' + (DOCQ_ALL ? 'ghost ' : '') + 'sm" ' +
+      'onclick="showAllDocs(false)">Needing a decision</button>' +
+      '<button class="btn ' + (DOCQ_ALL ? '' : 'ghost ') + 'sm" ' +
+      'onclick="showAllDocs(true)">Every document held</button>' +
+      '<span class="small muted">' + (DOCQ_ALL
+        ? 'Everything uploaded, including what has already been decided.'
+        : 'Only what the automatic reading could not settle.') + '</span></div>';
   }
 
   function paintDocQueue(rows) {
     if (!rows || !rows.length) {
-      setHtml('queueCard', card('Documents needing a decision',
-        emptyState('&#9989;', 'Nothing waiting',
-          'Every document held either agrees with its declaration or has already ' +
-          'been decided.')));
+      setHtml('queueCard', card(docQueueTitle(), docQueueToggle() +
+        emptyState('&#9989;', DOCQ_ALL ? 'Nothing has been uploaded yet' : 'Nothing waiting',
+          DOCQ_ALL
+            ? 'No student has uploaded a document to check.'
+            : 'Every document held either agrees with its declaration or has already ' +
+              'been decided. Switch to "Every document held" to find a particular one.')));
       return;
     }
 
@@ -367,7 +399,13 @@
           '<div class="vname">' + esc(r.studentName) + '</div>' +
           '<div class="small muted">' + esc(r.label) + ' &middot; ' + esc(r.enrollmentNo) +
           (r.campus ? ' &middot; ' + esc(label('campus', r.campus)) : '') + '</div>' +
-        '</div>' + pill(verdict[0], verdict[1]) + '</div>' +
+        '</div>' +
+        // Two different facts, and in the full view both matter: what the
+        // machine made of the document, and what became of it afterwards.
+        '<span style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">' +
+        (DOCQ_ALL && r.status !== 'UPLOADED'
+          ? pill(r.status === 'VERIFIED' ? 'ok' : 'bad', label('doc', r.status)) : '') +
+        pill(verdict[0], verdict[1]) + '</span></div>' +
         '<div class="vmeta">' +
           '<span>Uploaded ' + esc(r.uploadedAt) + '</span>' +
           (r.sizeKb ? '<span>' + esc(r.sizeKb) + ' KB</span>' : '') +
@@ -377,18 +415,32 @@
             ? '<a href="https://drive.google.com/file/d/' + esc(r.driveFileId) +
               '/view" target="_blank" rel="noopener noreferrer">Open the document</a>' : '') +
         '</div>' + findings +
-        '<div class="btn-row" style="margin-top:11px">' +
-          '<button class="btn sm" onclick="decideDoc(&quot;' + esc(r.docId) +
-            '&quot;,true)">Accept</button>' +
-          '<button class="btn ghost sm" onclick="decideDoc(&quot;' + esc(r.docId) +
-            '&quot;,false)">Reject</button>' +
-        '</div></div>';
+        // A document already decided is a record, not a task. Offering Accept
+        // and Reject on it invites a second decision that overwrites the first
+        // without anybody meaning to.
+        (r.status === 'UPLOADED'
+          ? '<div class="btn-row" style="margin-top:11px">' +
+              '<button class="btn sm" onclick="decideDoc(&quot;' + esc(r.docId) +
+                '&quot;,true)">Accept</button>' +
+              '<button class="btn ghost sm" onclick="decideDoc(&quot;' + esc(r.docId) +
+                '&quot;,false)">Reject</button>' +
+            '</div>'
+          : '<p class="small muted" style="margin:9px 0 0"><strong>' +
+            esc(label('doc', r.status)) + '</strong>' +
+            (r.decidedBy ? ' by ' + esc(r.decidedBy) : '') +
+            (r.decidedAt ? ' on ' + esc(r.decidedAt) : '') +
+            (r.note ? ' &mdash; ' + esc(r.note) : '') + '</p>') +
+        '</div>';
     }).join('');
 
-    setHtml('queueCard', card('Documents needing a decision',
-      '<p class="small muted" style="margin:0 0 14px">' + rows.length + ' waiting, worst ' +
-      'first. Anything that agreed with its declaration has been left out of this list ' +
-      'entirely.</p>' + body));
+    setHtml('queueCard', card(docQueueTitle(), docQueueToggle() +
+      '<p class="small muted" style="margin:0 0 14px">' + (DOCQ_ALL
+        ? rows.length + ' uploaded, worst first. This is everything the office holds, ' +
+          'including documents already accepted or rejected — it is the view to use ' +
+          'when a student asks where theirs has got to.'
+        : rows.length + ' waiting, worst first. Anything that agreed with its declaration ' +
+          'has been left out of this list entirely.') +
+      '</p>' + body));
   }
 
   function decideDoc(docId, approve) {

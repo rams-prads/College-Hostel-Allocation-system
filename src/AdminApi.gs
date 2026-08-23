@@ -246,11 +246,21 @@ function apiAdminVerificationSummary() {
     return d.status === 'UPLOADED' && (d.scanVerdict === 'MATCH' || d.scanVerdict === 'MINOR');
   }).length;
 
+  // How many are finished, so the card can say what is true rather than what
+  // sounds tidy. "Everything agrees" over two contradictions and two unreadable
+  // scans - all of them settled by hand earlier - was an untrue sentence in a
+  // green box, which is the worst place for one.
+  var decided = docs.filter(function (d) {
+    return d.status === 'VERIFIED' || d.status === 'REJECTED' || d.status === 'WAIVED';
+  }).length;
+
   return {
     total: docs.length,
     byVerdict: byVerdict,
     needsPerson: needsPerson,
     clearable: clearable,
+    decided: decided,
+    held: docs.filter(function (d) { return d.status === 'UPLOADED'; }).length,
     unscanned: byVerdict.UNSCANNED || 0
   };
 }
@@ -329,6 +339,22 @@ function apiAdminLedgerBadge() {
  * four hundred clean ones. Each entry carries the automated findings, so the
  * verifier opens the scan already knowing what to look for.
  */
+/**
+ * Documents an officer might want to look at.
+ *
+ * TWO VIEWS, because there are two questions and they have different answers.
+ *
+ *   onlyConflicts (the default) - "what is waiting on me?" Held documents the
+ *   machine could not settle. Everything it COULD settle is deliberately left
+ *   out; without that the queue is every applicant again and nothing has been
+ *   gained by reading them automatically.
+ *
+ *   onlyConflicts = false - "where is a particular document?" Every document
+ *   with a file behind it, whatever its state, including the ones already
+ *   decided. This view exists because the first one cannot answer that
+ *   question, and a student whose portal says "under review" while the office
+ *   can find no trace of it is a support call the office cannot resolve.
+ */
 function apiAdminDocQueue(limit, onlyConflicts) {
   Auth.requireAdmin();
   limit = limit || 40;
@@ -338,9 +364,12 @@ function apiAdminDocQueue(limit, onlyConflicts) {
   var screened = {};
 
   var rows = Db.readAll('Documents')
-    .filter(function (d) { return d.status === 'UPLOADED'; })
-    // Anything the machine could settle is not the officer's problem. Without
-    // this the queue is still every applicant and nothing has been gained.
+    .filter(function (d) {
+      // The full view still needs a FILE - a slot nobody has uploaded to is not
+      // a document, it is an absence, and the student's own page reports it.
+      if (!onlyConflicts) return !!d.driveFileId;
+      return d.status === 'UPLOADED';
+    })
     .filter(function (d) {
       if (!onlyConflicts) return true;
       return d.scanVerdict === 'CONFLICT' || d.scanVerdict === 'UNREADABLE' ||
@@ -359,6 +388,12 @@ function apiAdminDocQueue(limit, onlyConflicts) {
       return {
         docId: d.docId, appId: d.appId, docType: d.docType,
         label: (DOC_TYPES[d.docType] || {}).label || d.docType,
+        // Carried so the full view can say what became of it, and so the
+        // decision buttons are not offered on something already decided.
+        status: d.status,
+        decidedBy: d.verifiedBy || '',
+        decidedAt: fmtDate_(d.verifiedAt),
+        note: d.note || '',
         fileName: d.fileName, driveFileId: d.driveFileId,
         mimeType: d.mimeType || '',
         sizeKb: d.sizeBytes ? Math.round(Number(d.sizeBytes) / 1024) : 0,
