@@ -596,14 +596,20 @@ check('it offers a way to actually sign in',
   'this page shipped with no button on it - a page whose only job is to get ' +
   'the visitor somewhere must give them something to press');
 check('it asks for an email address', r.screen.indexOf('siEmail') > 0);
-check('the address may be any address', (() => {
-  return r.screen.indexOf('Any email address works') > 0 &&
-         /first-year|first years/i.test(r.screen);
-})(), 'a first-year has no college address for months after allocation, and the page has ' +
-      'to say so before they conclude this is not for them');
-check('it says why there is no password, before asking for anything',
-  r.screen.indexOf('No password to remember') > 0,
+check('the address may be any address',
+  /Any address works/i.test(r.screen) && /college one/i.test(r.screen),
+  'a first-year has no college address for months after allocation, and the page has ' +
+  'to say so before they conclude this is not for them');
+check('it says a code is coming, before asking for anything',
+  /six-digit code/i.test(r.screen),
   'a login box that behaves unusually and explains nothing reads as broken');
+check('and it does not argue its own case at length', (() => {
+  // The whole job of this page is to take one email address. Word count is the
+  // measure that actually went wrong here: the copy grew until the field it
+  // was introducing was the smallest thing on the screen.
+  const words = r.screen.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).length;
+  return words < 70;
+})(), 'a sign-in page reading like a brochure is the thing being fixed');
 check('it does not demand a Google account',
   r.screen.toLowerCase().indexOf('google account') < 0,
   'the whole point is that the students who need this most do not have one');
@@ -613,7 +619,7 @@ check('the code step can send another without retyping the address', (() => {
     _siEmail = 'someone@example.com';
     setHtml('signinBody', codeStep(_siEmail));
   `);
-  return t.screen.indexOf('Send another code') > 0 &&
+  return /send another code/i.test(t.screen) &&
          t.screen.indexOf('someone@example.com') > 0 &&
          t.screen.indexOf('siCode') > 0;
 })(), 'the only way to resend used to be going back and typing the address in again');
@@ -666,6 +672,57 @@ section('The application form says how much is left');
 
   check('and it says what happens after submitting', last.screen.indexOf('class="next"') > 0);
 })();
+
+section('An account is one thing or the other');
+
+// The rule: an administrator sees the dashboard and never the student portal;
+// a student sees their application and never the dashboard. Neither has a link
+// to the other, and neither has to know the other's address.
+(() => {
+  const asAdmin = renderPage('student.html', 'admin@ipu.ac.in');
+  check('an administrator opening the portal is taken to the dashboard',
+    /\?page=admin$/.test(window.top.location.href), window.top.location.href);
+  check('and is not shown a student portal on the way',
+    asAdmin.screen.indexOf('Your allotment') < 0 &&
+    asAdmin.screen.indexOf('Room preferences') < 0,
+    'the dashboard used to be reachable only by finding a tab on this page');
+
+  const asStudent = renderPage('student.html', studentEmail);
+  check('a student still gets their own portal',
+    asStudent.screen.indexOf('Your allotment') > 0);
+  check('and is offered no route into administration',
+    asStudent.chrome.indexOf('page=admin') < 0,
+    'a tab nobody may use is a question the reader has to answer for themselves');
+
+  const admin = renderPage('admin.html', 'admin@ipu.ac.in');
+  check('the dashboard offers no route into a student portal either',
+    admin.chrome.indexOf('Student View') < 0,
+    'an administrator has no application of their own to look at');
+  check('but can still open a student inside the dashboard',
+    admin.screen.indexOf('viewStudent(') > 0 ||
+    renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("students");')
+      .screen.indexOf('Look up a student') > 0,
+    'looking IN at a student is a different thing from using the portal as one');
+})();
+
+check('an administrator gets no application form either', (() => {
+  renderPage('apply.html', 'admin@ipu.ac.in');
+  return /\?page=admin$/.test(window.top.location.href);
+})(), window.top.location.href);
+
+check('a student who reaches the dashboard is told plainly, not shown an error', (() => {
+  // Signed in, not an administrator. That is somebody who followed a link, not
+  // a fault, and what they need is the way back rather than a red box.
+  const t = renderPage('admin.html', studentEmail, 'SESSION.token = "x"; load();');
+  return t.screen.indexOf('for hostel administrators') > 0 &&
+         t.screen.indexOf('Go to my application') > 0;
+})());
+
+check('signing in lands each account in its own place', (() => {
+  const src = codeOf('index.html');
+  // Not "go to the portal and let it bounce you": ask, then move once.
+  return /homeFor\(who\)/.test(src) && /apiWhoAmI/.test(src);
+})(), 'the extra hop was a page load spent on a screen the reader may not use');
 
 section('Every page can sign someone in, not just the front one');
 // A student portal reached without a session used to be a dead end that told

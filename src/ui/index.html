@@ -16,10 +16,24 @@
   paintChrome({ unit: 'Hostel Allocation Portal' });
   loadToken();
 
-  // Already holding a session? Go where they were trying to go.
+  /**
+   * Called by the shared sign-in panel the moment a session exists.
+   *
+   * Asking who it is before moving saves the hop this page used to take: it
+   * sent everybody to the student portal, which then had to bounce every
+   * administrator straight back out again.
+   */
+  function onSignedIn() {
+    setHtml('root', loadingState('Signing you in'));
+    srv().withSuccessHandler(function (who) { reloadTop(homeFor(who)); })
+      .withFailureHandler(function () { reloadTop(); })
+      .apiWhoAmI();
+  }
+
+  // Already holding a session? Go where that account belongs.
   if (SESSION.token) {
     srv().withSuccessHandler(function (who) {
-      if (who.signedIn) { reloadTop(); return; }
+      if (who.signedIn) { reloadTop(homeFor(who)); return; }
       saveToken(null);
       setHtml('root', signInPanel('Your previous sign-in has expired.'));
     }).withFailureHandler(function () {

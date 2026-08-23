@@ -306,6 +306,7 @@ function apiGetApplyForm() {
       signedIn: true,
       needsRegistration: true,
       email: s.email,
+      isAdmin: !!s.isAdmin,
       applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
       registration: apiGetRegistrationOptions(),
       maxPreferences: Number(Db.cfg('MAX_PREFERENCES', 5))
@@ -333,6 +334,9 @@ function apiGetApplyForm() {
   return {
     signedIn: true,
     email: s.email,
+    // So the form can send an administrator where they belong rather than
+    // offering them an application they will never submit.
+    isAdmin: !!s.isAdmin,
     applicationsOpen: String(Db.cfg('APPLICATIONS_OPEN', 'TRUE')).toUpperCase() === 'TRUE',
     student: s.student,
     maxPreferences: Number(Db.cfg('MAX_PREFERENCES', 5)),

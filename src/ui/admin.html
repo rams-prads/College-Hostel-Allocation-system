@@ -93,7 +93,14 @@
   /** Called by the shared sign-in panel once a session exists. */
   function onSignedIn() {
     setHtml('root', loadingState('Loading dashboard'));
-    load();
+    // Signing out of an administrator account and back in as a student happens
+    // on this page, so the account that just arrived is not necessarily one
+    // this page is for. Ask, and send them where they belong rather than
+    // letting the first call fail and explaining afterwards.
+    srv().withSuccessHandler(function (who) {
+      if (!who.isAdmin) { reloadTop(homeFor(who)); return; }
+      load();
+    }).withFailureHandler(function () { load(); }).apiWhoAmI();
   }
 
   /**
@@ -114,6 +121,19 @@
           signInPanel('This page is for hostel administrators.') + '</div>');
         return;
       }
+      // Signed in, and not an administrator. That is not an error to report -
+      // it is an ordinary student who followed a link, and what they need is
+      // the way back to their own application.
+      if (SESSION.token && /administrator|admin/i.test(e.message)) {
+        paintChrome({ unit: 'Hostel Administration' });
+        setHtml('root', '<div class="wrap narrow">' + card('',
+          emptyState('&#128274;', 'This page is for hostel administrators',
+                     'Your account does not administer the hostel system.') +
+          '<div style="text-align:center;margin-top:4px">' +
+          '<a class="btn" href="' + appUrl('?') + '" target="_top">' +
+          'Go to my application</a></div>') + '</div>');
+        return;
+      }
       setHtml('root', '<div class="wrap">' + banner('err', e.message) + '</div>');
     }).apiAdminOverview();
   }
@@ -125,7 +145,10 @@
       unit: 'Hostel Administration',
       user: { name: d.admin.name || d.admin.email, role: d.admin.role.replace(/_/g, ' '),
               signOut: !!SESSION.token },
-      tabs: [{ label: 'Student View', href: '?' }]
+      // Nothing here links to the student portal. An administrator has no
+      // application of their own to look at, and the way to see a student's
+      // screen is the Students tab, which opens it inside this page.
+      tabs: []
     });
 
     setHtml('root', '<div class="ashell">' +

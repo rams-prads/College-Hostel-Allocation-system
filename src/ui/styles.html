@@ -436,99 +436,65 @@
   .findings li.info:before{content:"\2139"}
 
   /* ============================================================= sign-in
-     Two panels, not one centred box. The old page was a card floating in a
-     field of white with an emoji on top: correct, and completely silent about
-     what this is or why it does not want a password. The navy half gives the
-     page somewhere to stand and answers both questions before the field is
-     reached; the white half is still one input and one button.
+     A form on the left, a picture on the right, one card holding both.
 
-     On a narrow screen the form comes FIRST and the navy panel drops beneath
-     it. Somebody who already knows what this is should not have to scroll past
-     an explanation to reach the box. */
+     The version before this one filled the right-hand side with a headline and
+     three explained bullet points, and the explaining was the problem: a page
+     whose whole job is to take one email address should not read like a
+     brochure arguing for itself. What survived is the single fact a first-year
+     needs - that any address will do - and it sits under the field it applies
+     to, where it is answering a question rather than making a case. */
   .signin-split{
-    display:grid;grid-template-columns:1.02fr 1fr;
+    display:grid;grid-template-columns:1fr 1fr;
     border:1px solid var(--border);border-radius:var(--r-lg);
     box-shadow:var(--sh-2);overflow:hidden;background:var(--surface);
-    /* Capped and centred: the admin shell is a 1120px page, and a sign-in panel
-       stretched across all of it reads as a form nobody finished designing. */
-    max-width:880px;margin:8px auto 18px;
+    max-width:840px;margin:20px auto 24px;
   }
-  .signin-aside{
-    position:relative;overflow:hidden;
-    background:
-      radial-gradient(120% 120% at 88% -10%, var(--navy-700) 0%, transparent 58%),
-      linear-gradient(160deg, var(--navy-800) 0%, var(--navy-900) 100%);
-    color:#fff;padding:34px 32px;
-    display:flex;flex-direction:column;justify-content:center;gap:5px;
+  .signin-form{
+    padding:44px 40px;display:flex;flex-direction:column;justify-content:center;
+    min-height:352px;
   }
-  /* The crest again, very faintly, as a watermark. Large, cropped, and low
-     contrast: it should read as letterhead, not as a second logo competing
-     with the one in the masthead directly above it. */
-  .signin-aside .wm{
-    position:absolute;right:-46px;bottom:-52px;width:230px;height:230px;
-    opacity:.075;pointer-events:none;filter:grayscale(1) brightness(3);
-  }
-  .signin-aside .wm img{width:100%;height:100%;object-fit:contain}
-  .signin-aside .eyebrow{
-    font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
-    color:var(--amber);margin-bottom:9px;
-  }
-  .signin-aside h1{
-    font-family:var(--display);font-size:29px;line-height:1.18;font-weight:700;
-    margin:0 0 10px;letter-spacing:-.015em;
-  }
-  .signin-aside p{
-    margin:0 0 18px;font-size:14px;line-height:1.6;color:#c9d4e4;max-width:34ch;
-  }
-  .signin-points{list-style:none;margin:0;padding:0;display:grid;gap:11px;position:relative}
-  .signin-points li{display:flex;gap:11px;align-items:flex-start;font-size:13.5px}
-  .signin-points .tick{
-    flex:none;width:19px;height:19px;border-radius:50%;margin-top:1px;
-    background:rgba(232,151,26,.16);color:var(--amber);
-    display:grid;place-items:center;font-size:11px;font-weight:800;
-  }
-  .signin-points strong{display:block;font-weight:600;color:#fff}
-  .signin-points span.d{display:block;color:#a9b7cb;font-size:12.5px;line-height:1.45}
-
-  .signin-form{padding:34px 32px;display:flex;flex-direction:column;justify-content:center}
-  .signin-form h2{
-    margin:0 0 5px;font-size:20px;font-weight:700;letter-spacing:-.015em;
-    font-family:var(--display);
-  }
-  .signin-form .lede{margin:0 0 20px;font-size:13.5px;color:var(--muted);line-height:1.55}
-  .signin-field{margin-bottom:14px}
-  .signin-field input{font-size:16px}   /* 16px: iOS zooms into anything smaller */
-  .signin-form .btn{width:100%}
-  .signin-form .btn-row .btn{width:auto}
-  .signin-foot{
-    margin:18px 0 0;padding-top:15px;border-top:1px solid var(--border);
-    font-size:12.5px;color:var(--muted);line-height:1.55;
-  }
+  .signin-form h2{margin:0 0 4px;font-size:23px;font-weight:700;letter-spacing:-.02em}
+  .signin-form .lede{margin:0 0 26px;font-size:13.5px;color:var(--muted)}
+  .signin-field{margin-bottom:20px}
+  .signin-field input{font-size:16px;padding:11px 13px}  /* 16px: iOS zooms below it */
+  .signin-form .btn{width:100%;padding:12px 18px}
+  .signin-foot{margin:20px 0 0;font-size:12.5px;color:var(--muted);line-height:1.55}
   .signin-foot a,.linkish{
     background:none;border:0;padding:0;font:inherit;font-size:inherit;
     color:var(--info);text-decoration:underline;cursor:pointer;
   }
   .linkish:disabled{color:var(--muted);text-decoration:none;cursor:default}
 
-  /* The code step. Six digits deserve to look like six digits. */
-  .signin-to{
-    display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-    background:var(--surface-2);border:1px solid var(--border);
-    border-radius:var(--r);padding:10px 13px;margin:0 0 18px;font-size:13.5px;
+  /* The picture. Navy rather than a bright panel: this sits directly under a
+     navy masthead, and a second strong colour between them would be the only
+     thing on the page shouting. */
+  .signin-art{
+    background:var(--navy-800);display:grid;place-items:center;padding:30px;
   }
-  .signin-to .addr{font-weight:600;word-break:break-all}
+  .signin-art svg{width:100%;max-width:290px;height:auto;display:block}
+
+  /* Where the code is typed. Six digits, spaced like six digits. */
+  .signin-to{
+    display:flex;align-items:center;gap:9px;
+    background:var(--surface-2);border:1px solid var(--border);
+    border-radius:var(--r);padding:9px 13px;margin:0 0 20px;font-size:13px;
+  }
+  .signin-to .addr{font-weight:600;word-break:break-all;flex:1;min-width:0}
   .signin-field input#siCode{
-    text-align:center;letter-spacing:.42em;font-size:26px;font-weight:700;
+    text-align:center;letter-spacing:.42em;font-size:25px;font-weight:700;
     font-variant-numeric:tabular-nums;padding:12px 10px 12px 22px;
   }
 
-  @media (max-width:800px){
-    .signin-split{grid-template-columns:1fr}
-    .signin-form{order:1;padding:26px 20px}
-    .signin-aside{order:2;padding:26px 20px}
-    .signin-aside h1{font-size:24px}
-    .signin-aside .wm{width:170px;height:170px;right:-38px;bottom:-44px}
+  @media (max-width:760px){
+    .signin-split{grid-template-columns:1fr;margin:12px auto 18px}
+    .signin-form{order:1;padding:30px 22px;min-height:0}
+    /* Kept, but as a band rather than a panel: it is decoration, and on a phone
+       decoration goes underneath the thing it decorates. */
+    .signin-art{order:2;padding:24px}
+    .signin-art svg{max-width:210px}
   }
+
   .signout{
     background:none;border:0;color:var(--muted);font:inherit;font-size:12px;
     cursor:pointer;padding:2px 0 2px 10px;text-decoration:underline;width:auto

@@ -141,6 +141,14 @@
 
   function boot(f) {
     FORM = f;
+
+    // Same rule as the portal: an administrator has no application to fill in,
+    // and landing on this form as one is a wrong turn, not a feature.
+    if (f.isAdmin && f.signedIn) {
+      setHtml('root', loadingState('Opening the administration dashboard'));
+      reloadTop('?page=admin');
+      return;
+    }
     paintChrome({
       unit: 'Hostel Application',
       user: f.student ? { name: f.student.name } : (f.email ? { name: f.email } : null),

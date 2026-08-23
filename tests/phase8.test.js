@@ -391,6 +391,22 @@ try { apiAdminDecideIdentity(other.studentId, true, 'ok'); } catch (e) { decideD
 check('a student cannot verify their own identity', decideDenied,
   'the whole point of the step is that someone else performs it');
 
+// Every one of them, not the two somebody remembered to name. The portal now
+// keeps students and administrators on separate screens, and a screen is not a
+// security boundary - this is. A new apiAdmin* function added without a guard
+// fails here rather than in a year.
+(() => {
+  const admins = Object.keys(global).filter(k =>
+    /^apiAdmin[A-Z]/.test(k) && typeof global[k] === 'function');
+  const unguarded = admins.filter(fn => {
+    try { global[fn](); return true; }
+    catch (e) { return !/administrator privileges required/.test(e.message); }
+  });
+  check('every admin endpoint refuses a signed-in student',
+    unguarded.length === 0 && admins.length > 8,
+    admins.length + ' checked; unguarded: ' + (unguarded.join(', ') || 'none'));
+})();
+
 section('Read-only preview links');
 
 // Session.getActiveUser() returns an empty string for every visitor except the

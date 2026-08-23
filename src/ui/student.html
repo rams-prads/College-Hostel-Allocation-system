@@ -55,6 +55,19 @@
   function render(v) {
     VIEW = v;
 
+    // An administrator does not have a student portal, and this is the first
+    // moment anything knows they are one. Not a redirect out of tidiness: a
+    // dashboard reachable only by finding a tab on somebody else's page is a
+    // dashboard people go looking for support to find.
+    //
+    // Both exceptions are the administration looking IN at a student, which is
+    // a different thing from an administrator using the portal as themselves.
+    if (v.isAdmin && !v.viewingAs && !v.demoMode) {
+      setHtml('root', loadingState('Opening the administration dashboard'));
+      reloadTop('?page=admin');
+      return;
+    }
+
     if (!v.signedIn) {
       paintChrome({ unit: 'Hostel Allocation Portal' });
       saveToken(null);
@@ -70,13 +83,14 @@
             signOut: !v.viewingAs && !!SESSION.token },
       // A demo visitor has no session, so every tab would land them back on the
       // sign-in wall. Showing navigation that cannot work is worse than none.
+      // No route to the dashboard from here. An account is one thing or the
+      // other, and an administrator never reaches this page as themselves.
       tabs: v.demoMode ? [] : [{ label: 'My Application', href: '?', on: true }]
         // Offered only while the form can still accept it. A tab that leads to
         // a locked page is a promise the next screen has to take back.
         .concat(!v.application || v.editable
           ? [{ label: v.application ? 'Edit Application' : 'Apply', href: '?page=apply' }]
           : [])
-        .concat(v.isAdmin ? [{ label: 'Administration', href: '?page=admin' }] : [])
     });
 
     if (v.unregistered) {

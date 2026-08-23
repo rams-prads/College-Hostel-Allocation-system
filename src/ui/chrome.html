@@ -167,101 +167,108 @@ function srv(ownerId) {
 function signInPanel(note) {
   // The caller writes this string into the page after we return, so the field
   // does not exist yet. One tick later it does, and somebody who came here to
-  // sign in can start typing without reaching for the mouse first.
+  // sign in can start typing without reaching for the mouse.
   setTimeout(function () { focusOn('siEmail'); }, 0);
 
   return '<div class="signin-split">' +
-    signInAside() +
     '<div class="signin-form">' +
       (note ? banner('info', note) : '') +
       '<div id="signinBody">' + emailStep() + '</div>' +
       '<div id="signinMsg"></div>' +
       signInHelp() +
     '</div>' +
+    signInArt() +
   '</div>';
 }
 
-/**
- * Where to write when the code never comes.
- *
- * Read from a page-level template value rather than a view payload: this is
- * needed before there is a session, which is the whole point of the screen it
- * appears on.
- */
+/** Where to write when the code never comes. */
 function signInHelp() {
   var addr = (typeof SUPPORT_EMAIL !== 'undefined' && SUPPORT_EMAIL)
     ? String(SUPPORT_EMAIL) : '';
-  if (!addr) {
-    return '<p class="signin-foot">If the code does not arrive, the hostel office can ' +
-           'sign you in by hand.</p>';
-  }
+  if (!addr) return '';
   return '<p class="signin-foot">Trouble signing in? Write to ' +
-    '<a href="mailto:' + esc(addr) + '">' + esc(addr) + '</a> from any address and the ' +
-    'hostel office will sort it out.</p>';
+    '<a href="mailto:' + esc(addr) + '">' + esc(addr) + '</a>.</p>';
 }
 
 /**
- * The half of the page that is not a form.
+ * The right-hand panel: a hostel, drawn rather than described.
  *
- * It exists to answer the two questions a first-time visitor has before they
- * will type anything - what is this, and why is it not asking for a password -
- * because the previous version answered neither and read as a login box for
- * something the reader was expected to already know about.
+ * Deliberately wordless. Everything this page has to say fits beside the field
+ * it applies to, and a picture holds the other half of the card without adding
+ * another paragraph to read.
+ *
+ * Inline SVG, not an image file: it costs no request, cannot 404 behind a
+ * corporate proxy, and takes its colours from the same palette as the rest.
  */
-function signInAside() {
-  var url = (typeof LOGO_URL !== 'undefined' && LOGO_URL) ? String(LOGO_URL) : '';
-  return '<div class="signin-aside">' +
-    (url ? '<div class="wm"><img src="' + esc(url) + '" alt=""></div>' : '') +
-    '<div class="eyebrow">Hostel allocation</div>' +
-    '<h1>Apply for a hostel seat, and see exactly how it was decided.</h1>' +
-    '<p>One place to apply, upload what is asked for, and follow your ' +
-    'application through to the room you are given.</p>' +
-    '<ul class="signin-points">' +
-      point('&#10003;', 'No password to remember',
-            'We email you a six-digit code each time. Nothing to set up, nothing to forget.') +
-      point('&#9993;', 'Any email address works',
-            'A college address is not needed - first-years are not issued one until months ' +
-            'after allocation.') +
-      point('&#128274;', 'Your details stay yours',
-            'Seen by the hostel office only, and every decision on your application is ' +
-            'recorded and shown to you.') +
-    '</ul>' +
-  '</div>';
-}
+function signInArt() {
+  var lit = { '0-2': 1, '1-0': 1, '1-3': 1, '2-1': 1, '3-2': 1, '3-3': 1 };
+  var windows = '';
+  // Four rows, not five: the fifth would have run through the doorway.
+  for (var r = 0; r < 4; r++) {
+    for (var c = 0; c < 4; c++) {
+      // Written out as a loop because twenty rectangles typed in a row hide the
+      // shape they make, which is the only reason any of them are here.
+      windows += '<rect x="' + (40 + c * 25) + '" y="' + (78 + r * 25) + '" ' +
+        'width="15" height="16" rx="2" ' +
+        (lit[r + '-' + c] ? 'fill="#e8971a"' : 'fill="#ffffff" fill-opacity=".13"') + '/>';
+    }
+  }
 
-function point(icon, title, detail) {
-  return '<li><span class="tick">' + icon + '</span><span>' +
-    '<strong>' + esc(title) + '</strong>' +
-    '<span class="d">' + esc(detail) + '</span></span></li>';
+  return '<div class="signin-art" aria-hidden="true">' +
+    '<svg viewBox="0 0 260 220" xmlns="http://www.w3.org/2000/svg" fill="none" ' +
+         'stroke="#8ea3c4" stroke-width="1.6" stroke-linecap="round" ' +
+         'stroke-linejoin="round">' +
+
+      // The main block, and its roof.
+      '<path d="M28 74h122v130H28z"/>' +
+      '<path d="M20 74l69-30 69 30"/>' +
+      windows +
+
+      // A lower wing to the right, so the silhouette is a place and not a slab.
+      '<path d="M150 128h84v76h-84z"/>' +
+      '<rect x="166" y="146" width="16" height="17" rx="2" fill="#ffffff" fill-opacity=".13"/>' +
+      '<rect x="196" y="146" width="16" height="17" rx="2" fill="#e8971a"/>' +
+      '<path d="M166 204v-22h20v22"/>' +
+
+      // The way in.
+      '<path d="M74 204v-30h30v30"/>' +
+      '<path d="M89 186v6"/>' +
+
+      // Ground, and two plants for scale.
+      '<path d="M8 204h244" stroke="#ffffff" stroke-opacity=".22"/>' +
+      '<path d="M250 204c0-12-7-18-14-18M236 204c0-8 5-12 10-12"/>' +
+      '<path d="M14 204c0-14 8-20 15-20M29 204c0-9-5-13-10-13"/>' +
+    '</svg>' +
+  '</div>';
 }
 
 function emailStep() {
   return '<h2>Sign in</h2>' +
-    '<p class="lede">Enter your email address and we will send you a six-digit code.</p>' +
+    '<p class="lede">We will email you a six-digit code.</p>' +
     '<label class="field signin-field"><span class="lab">Email address</span>' +
     '<input type="email" id="siEmail" autocomplete="email" inputmode="email" ' +
     'placeholder="you@example.com" onkeydown="if(event.key===&quot;Enter&quot;)sendCode()">' +
-    '</label>' +
-    '<button class="btn" id="siBtn" onclick="sendCode()">Email me a code</button>';
+    // The one thing a first-year has to be told, said where it answers the
+    // question rather than in a panel arguing the case for the whole portal.
+    '<span class="help">Any address works. You do not need a college one.</span></label>' +
+    '<button class="btn" id="siBtn" onclick="sendCode()">Send code</button>';
 }
 
 function codeStep(email) {
-  return '<h2>Check your email</h2>' +
-    '<p class="lede">A six-digit code is on its way. It is good for ten minutes.</p>' +
-    '<div class="signin-to"><span>Sent to</span>' +
-      '<span class="addr">' + esc(email) + '</span>' +
-      '<span class="grow" style="flex:1"></span>' +
+  return '<h2>Enter your code</h2>' +
+    '<p class="lede">It is good for ten minutes.</p>' +
+    '<div class="signin-to"><span class="addr">' + esc(email) + '</span>' +
       '<button type="button" class="linkish" onclick="backToEmail()">Change</button></div>' +
     '<label class="field signin-field"><span class="lab">Six-digit code</span>' +
     '<input type="text" id="siCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" ' +
     'placeholder="000000" onkeydown="if(event.key===&quot;Enter&quot;)submitCode()">' +
     '</label>' +
     '<button class="btn" id="siBtn" onclick="submitCode()">Sign in</button>' +
-    // Resending used to mean going back and typing the address again, which is
-    // the last thing somebody wants to do when the first mail has not arrived.
-    '<p class="signin-foot">Not arrived? It can take a minute, and it does end up in spam ' +
-    'sometimes. <button type="button" class="linkish" id="siResend" ' +
-    'onclick="resendCode()">Send another code</button></p>';
+    // Resending used to mean going back and typing the address in again, which
+    // is the last thing anybody wants when the first mail has not arrived.
+    '<p class="signin-foot">Not arrived? Check spam, or ' +
+    '<button type="button" class="linkish" id="siResend" ' +
+    'onclick="resendCode()">send another code</button>.</p>';
 }
 
 var _siEmail = '';
@@ -419,6 +426,20 @@ function takeFlash() {
  *
  * @param {string=} query e.g. '?page=admin'. Defaults to the student portal.
  */
+/**
+ * Where this account belongs.
+ *
+ * An administrator's home is the dashboard and a student's is their own
+ * application, and neither has any business on the other. doGet cannot make
+ * this decision: a visitor signed in with an email code carries their session
+ * in the browser, and the token arrives on the API call rather than the page
+ * request - so the server building the page genuinely does not know who is
+ * asking. The pages settle it on their first answer instead.
+ */
+function homeFor(who) {
+  return (who && who.isAdmin) ? '?page=admin' : '?';
+}
+
 function reloadTop(query) {
   var url = appUrl(query || '?');
   try {
