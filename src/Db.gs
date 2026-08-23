@@ -75,24 +75,58 @@ var Db = (function () {
   /**
    * Every row of a tab as objects keyed by column name.
    * Cached per execution - repeated calls in one allocation run are free.
+   *
+   * BLANK ROWS ARE NOT ROWS. getLastRow() reports the last row holding anything
+   * at all, so one stray character typed into row 400 of a sheet - or residue
+   * from a larger seed that a later, smaller one wrote over - turns every row
+   * between into a record. They cost nothing to store and everything to read:
+   * a hostel with no name and no beds appears in the occupancy table, a student
+   * with no name is counted in the applications total, and the allocator is
+   * handed applicants who do not exist.
+   *
+   * A row counts as blank when its primary key is empty; for the two tabs with
+   * no key of their own, when every column is. That is a cheap test done in
+   * memory on data already fetched, and it is the difference between a table
+   * that describes the hostel and one that describes the spreadsheet.
    */
   function readAll(tab, opts) {
     opts = opts || {};
     if (!opts.fresh && _tableCache[tab]) return _tableCache[tab];
 
     var cols = SCHEMA[tab].cols;
+    var pk = SCHEMA[tab].pk;
     var sh = sheet(tab);
     var lastRow = sh.getLastRow();
     if (lastRow < 2) { _tableCache[tab] = []; return []; }
 
     var values = sh.getRange(2, 1, lastRow - 1, cols.length).getValues();
-    var out = values.map(function (row, i) {
+    var out = [];
+    for (var i = 0; i < values.length; i++) {
+      if (isBlankRow_(values[i], cols, pk)) continue;
       var obj = { _row: i + 2 };
-      for (var c = 0; c < cols.length; c++) obj[cols[c].name] = decode(row[c], cols[c]);
-      return obj;
-    });
+      for (var c = 0; c < cols.length; c++) obj[cols[c].name] = decode(values[i][c], cols[c]);
+      out.push(obj);
+    }
     _tableCache[tab] = out;
     return out;
+  }
+
+  /** True when this row of raw cell values carries no record. */
+  function isBlankRow_(row, cols, pk) {
+    if (pk) {
+      var i = 0;
+      for (; i < cols.length; i++) if (cols[i].name === pk) break;
+      if (i < cols.length) return String(row[i] == null ? '' : row[i]).trim() === '';
+    }
+    // No primary key: blank only when nothing at all was written.
+    for (var c = 0; c < cols.length; c++) {
+      var v = row[c];
+      if (v === '' || v === null || v === undefined) continue;
+      // A BOOL column written as an unticked checkbox is not content either.
+      if (v === false) continue;
+      return false;
+    }
+    return true;
   }
 
   /**

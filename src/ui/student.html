@@ -218,8 +218,12 @@
       '<div class="main">' +
         '<div class="eyebrow">Waiting list</div>' +
         '<h1 class="big">Position ' + esc(w.position) + '</h1>' +
-        '<div class="where">Estimated chance of allotment if students withdraw: <strong>' +
-          esc(w.etaPercent) + '%</strong></div>' +
+        // Honest about what has to happen for this number to matter. Freed
+        // beds are not handed out automatically - the allocation is run again -
+        // and a percentage that reads as a promise of an automatic offer is a
+        // percentage that will be quoted back to the office as one.
+        '<div class="where">Estimated chance of a place if students withdraw and the ' +
+        'allocation is run again: <strong>' + esc(w.etaPercent) + '%</strong></div>' +
         '<div class="tags"><span class="pill">Not yet allotted</span></div>' +
       '</div>' +
     '</div></div>';

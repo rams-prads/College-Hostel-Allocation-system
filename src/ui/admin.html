@@ -676,7 +676,20 @@
 
   /* -------------------------------------------------------- occupancy */
   function occupancyCard(d) {
-    var rows = (d.occupancy || []).map(function (h) {
+    // Only hostels that have beds. A hostel with none is either a row somebody
+    // began and abandoned or residue from an earlier inventory, and either way
+    // "0 / 0, none vacant" is a line that tells the reader nothing and makes
+    // the table longer than the building list it is supposed to be.
+    var live = (d.occupancy || []).filter(function (h) { return Number(h.total) > 0; });
+    var hidden = (d.occupancy || []).length - live.length;
+
+    if (!live.length) {
+      return card('', emptyState('&#127968;', 'No rooms are on record',
+        'The hostel inventory is empty, so there is nothing to be occupied. ' +
+        'Seed or import the inventory first.'));
+    }
+
+    var rows = live.map(function (h) {
       var cls = h.pct >= 99 ? 'full' : (h.pct >= 90 ? 'hot' : '');
       return '<tr><td><strong>' + esc(h.name) + '</strong>' +
         '<div class="muted small">' + esc(label('campus', h.campus)) + ' &middot; ' +
@@ -691,7 +704,11 @@
     return card('', '<div class="scroll-x"><table class="grid"><thead><tr>' +
       '<th>Hostel</th><th>Occupancy</th><th class="num">%</th>' +
       '<th class="num">Beds used</th><th class="num">Vacant</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table></div>', { tight: true });
+      '<tbody>' + rows + '</tbody></table></div>' +
+      (hidden ? '<p class="small muted" style="padding:12px 18px;margin:0">' +
+        esc(hidden) + ' hostel' + (hidden === 1 ? '' : 's') + ' with no rooms on record ' +
+        (hidden === 1 ? 'is' : 'are') + ' not shown.</p>' : ''),
+      { tight: true });
   }
 
   /* ----------------------------------------------------- student lookup */

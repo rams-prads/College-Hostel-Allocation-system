@@ -797,12 +797,65 @@ function validateApplication_(payload, student) {
 }
 
 /** Withdraw an application. */
+/**
+ * Withdraw, and give the bed back.
+ *
+ * This used to set the status and stop there, which left the worst possible
+ * state behind: an application marked WITHDRAWN, an allocation still ACTIVE,
+ * and a bed still OCCUPIED by somebody who has said they are not coming. The
+ * room was then invisible - not on the occupancy report as vacant, not
+ * available to the next run, and not returned by anything an officer could
+ * look at. A student leaving must free the room they were holding.
+ *
+ * The bed is released, NOT reassigned. Handing it straight to the next person
+ * on the list is a real thing to want and is not what this does; see the note
+ * on waiting-list promotion in PROJECT_CONTEXT. What this guarantees is that
+ * the bed is genuinely empty, so the next run can give it to somebody.
+ */
 function apiWithdrawApplication() {
   var s = Auth.session();
   if (!s.application) throw new Error('You have no application to withdraw.');
-  Db.update('Applications', s.application.appId, { status: 'WITHDRAWN', updatedAt: new Date() });
-  Ledger.append('APPLICATION_WITHDRAWN', { appId: s.application.appId }, s.email);
-  return { ok: true };
+
+  var appId = s.application.appId;
+  var released = releaseAllotment_(appId, 'the student withdrew', s.email);
+
+  Db.update('Applications', appId, { status: 'WITHDRAWN', updatedAt: new Date() });
+  Ledger.append('APPLICATION_WITHDRAWN', {
+    appId: appId, bedFreed: released.bedId || null
+  }, s.email);
+
+  return { ok: true, bedFreed: released.bedId || null };
+}
+
+/**
+ * Cancel an active allotment and empty the bed behind it.
+ *
+ * Shared, because there is more than one way for a student to stop needing a
+ * room and every one of them has to leave the same state behind. Doing nothing
+ * when there is no allocation is deliberate: this is called on paths that do
+ * not know whether one exists.
+ */
+function releaseAllotment_(appId, reason, actor) {
+  var alloc = Db.rowsWhere('Allocations', 'appId', appId)
+    .filter(function (a) { return a.status === 'ACTIVE'; })[0];
+  if (!alloc) return { released: false, bedId: null };
+
+  Db.update('Allocations', alloc.allocId, {
+    status: 'CANCELLED',
+    // The letter that was issued describes a room this student no longer holds.
+    letterUrl: '', letterAt: ''
+  });
+  if (alloc.bedId) {
+    Db.update('Beds', alloc.bedId, { status: 'VACANT', occupantAppId: '' });
+  }
+  Db.invalidate('Allocations');
+  Db.invalidate('Beds');
+
+  Ledger.append('ALLOTMENT_RELEASED', {
+    appId: appId, allocId: alloc.allocId, bedId: alloc.bedId, reason: reason
+  }, actor || 'system');
+
+  return { released: true, bedId: alloc.bedId, allocId: alloc.allocId };
 }
 
 // ============================================================ documents

@@ -1064,6 +1064,46 @@ check('a throwing handler also replaces the spinner it owns', (() => {
   return here.indexOf('Opening') < 0 && here.indexOf('render blew up') > 0;
 })());
 
+check('a campus with no rooms on record says so instead of "all chosen"', (() => {
+  // The state a half-loaded inventory leaves an applicant in. Dwarka has no
+  // hostels seeded, so anybody admitted there gets an empty option list - and
+  // the list used to announce that everything available was already in it.
+  const t = renderPage('apply.html', 'someone.brand.new@example.com', `
+    step = STEPS.indexOf("Preferences");
+    FORM.options = [];
+    reg.campus = "DWARKA"; reg.gender = "M";
+    paint();
+  `);
+  return /No hostel rooms are on record/.test(t.screen) &&
+         t.screen.indexOf('already in your list') < 0;
+})(), 'telling somebody with an empty list that it is full is how a form reads as broken');
+
+section('Occupancy lists buildings, not spreadsheet rows');
+
+(() => {
+  // A hostel with no rooms behind it: either a row somebody began and left, or
+  // residue from an inventory that was replaced by a smaller one.
+  Db.append('Hostels', { hostelId: 'GHOST-1', name: 'Ghost Hostel', campus: 'EDC',
+                         gender: 'M', warden: '', contact: '', active: true });
+  Db.invalidate('Hostels');
+
+  const t = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("occupancy");');
+  check('a hostel with no beds is not given a row',
+    t.screen.indexOf('Ghost Hostel') < 0,
+    '"0 / 0, none vacant" tells the reader nothing and makes the table longer than the ' +
+    'building list it is meant to be');
+  check('but it is not hidden silently either',
+    /1 hostel with no rooms on record is not shown/.test(t.screen),
+    'a row quietly missing is worse than a row that says why it is missing');
+  check('the real hostels are still listed',
+    t.screen.indexOf('EDC Boys Hostel') > 0 && t.screen.indexOf('EDC Girls Hostel') > 0);
+
+  const rows = (t.screen.match(/<tbody>[\s\S]*?<\/tbody>/) || [''])[0];
+  check('and the table is exactly as long as the buildings that exist',
+    (rows.match(/<tr>/g) || []).length === 2,
+    (rows.match(/<tr>/g) || []).length + ' rows');
+})();
+
 section('After clearing, the dashboard shows nothing rather than last time');
 
 (() => {

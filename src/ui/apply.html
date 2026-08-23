@@ -809,6 +809,23 @@
     if (!box || !FORM.options) return;
     var avail = FORM.options.filter(function (o) { return chosen.indexOf(o.key) < 0; });
     var full = chosen.length >= FORM.maxPreferences;
+
+    // Nothing to offer AT ALL is a different thing from nothing LEFT to offer,
+    // and saying "everything available is already in your list" to somebody
+    // holding an empty list is how an applicant concludes the form is broken.
+    // It happens for real: a campus whose hostel inventory has not been loaded
+    // yet has no options for anybody, and the applicant cannot submit without
+    // one.
+    if (!FORM.options.length) {
+      box.innerHTML = '<div class="hint warn">No hostel rooms are on record for ' +
+        esc(campusLabel(myCampus())) + ' yet, so there is nothing to choose from and ' +
+        'this application cannot be submitted. This is ours to fix, not yours &mdash; ' +
+        'please tell the hostel office' +
+        (typeof SUPPORT_EMAIL !== 'undefined' && SUPPORT_EMAIL
+          ? ' at ' + esc(SUPPORT_EMAIL) : '') + '.</div>';
+      return;
+    }
+
     box.innerHTML = avail.length
       ? '<ul class="rows" style="border:1px solid var(--border);border-radius:var(--r)">' +
         avail.map(function (o) {

@@ -389,6 +389,40 @@ check('preview leaves applications untouched',
 check('preview writes no run record',
   Db.readAll('Runs').every(r => r.runId !== prev.runId));
 
+section('Withdrawing gives the room back');
+
+(() => {
+  // The state this used to leave behind: application WITHDRAWN, allocation
+  // still ACTIVE, bed still OCCUPIED by somebody who has said they are not
+  // coming. The room was invisible - not vacant on the occupancy report, not
+  // available to the next run, and not on any screen an officer could reach.
+  const alloc = Db.readAll('Allocations').find(a => a.status === 'ACTIVE');
+  const app = Db.byId('Applications', alloc.appId);
+  const who = Db.byId('Students', app.studentId);
+  global.Session = { getActiveUser: () => ({ getEmail: () => who.email }) };
+
+  const out = apiWithdrawApplication();
+  Db.invalidate('Allocations'); Db.invalidate('Beds'); Db.invalidate('Applications');
+
+  check('the application is withdrawn',
+    Db.byId('Applications', app.appId).status === 'WITHDRAWN');
+  check('the allotment is cancelled with it',
+    Db.byId('Allocations', alloc.allocId).status === 'CANCELLED',
+    Db.byId('Allocations', alloc.allocId).status);
+  check('and the bed is genuinely empty again', (() => {
+    const bed = Db.byId('Beds', alloc.bedId);
+    return bed.status === 'VACANT' && !bed.occupantAppId;
+  })(), 'a bed nobody is in but nothing reports as free is a bed permanently lost');
+  check('the caller is told which bed came back', out.bedFreed === alloc.bedId);
+  check('and the release is on the ledger',
+    Db.readAll('AuditLog').some(e => e.action === 'ALLOTMENT_RELEASED'));
+  check('the letter is not left pointing at a room they no longer hold',
+    !Db.byId('Allocations', alloc.allocId).letterUrl);
+})();
+
+// Back to the administrator for everything after this.
+global.Session = { getActiveUser: () => ({ getEmail: () => 'admin@ipu.ac.in' }) };
+
 section('Clearing an allocation clears the numbers with it');
 
 // Last: this section empties the hostel, and everything above it wants a full
