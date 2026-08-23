@@ -505,6 +505,7 @@ function seedConfig_() {
     { key: 'APPLICATIONS_OPEN',    value: 'TRUE',  notes: 'Set FALSE to close the intake form' },
     { key: 'MAX_PREFERENCES',      value: '3',     notes: 'How many ranked choices a student may give. A campus has one hostel per gender and three room types, so three is the whole menu.' },
     { key: 'EMAIL_ENABLED',        value: 'FALSE', notes: 'Keep FALSE while testing so no real mail goes out' },
+    { key: 'SLACK_ENABLED',        value: 'FALSE', notes: 'Post every new grievance to the wardens\' Slack channel. Needs SLACK_WEBHOOK_URL in Script Properties.' },
     { key: 'EMAIL_DAILY_CAP',      value: '90',    notes: 'Stay under the free-tier Gmail quota of 100/day' },
     { key: 'LETTER_FOLDER_ID',     value: '',      notes: 'Drive folder for generated allotment letters' },
     { key: 'SUPPORT_EMAIL',        value: 'hostel@ipu.ac.in', notes: 'Shown on letters and notifications' },

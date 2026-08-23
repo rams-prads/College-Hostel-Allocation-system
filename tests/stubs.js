@@ -297,7 +297,7 @@ global.Db = {
 };
 
 // ----------------------------------------------------------- load engine code
-['Util', 'Ledger', 'Geo', 'Catalogue', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'DocScan', 'SignIn', 'Auth', 'Identity', 'Registration', 'RuleText', 'RuleBook', 'Gemini', 'Chatbot', 'Api', 'QrCode', 'Letters', 'Notify', 'Simulator', 'Swap', 'Vacancy', 'Grievance', 'DemoScenario', 'DryRun', 'AdminApi'].forEach(loadSrc);
+['Util', 'Ledger', 'Geo', 'Catalogue', 'SeedData', 'Policy', 'Eligibility', 'Roommate', 'Metrics', 'Allocator', 'Documents', 'DocScan', 'SignIn', 'Auth', 'Identity', 'Registration', 'RuleText', 'RuleBook', 'Gemini', 'Chatbot', 'Api', 'QrCode', 'Letters', 'Notify', 'Slack', 'Simulator', 'Swap', 'Vacancy', 'Grievance', 'DemoScenario', 'DryRun', 'AdminApi'].forEach(loadSrc);
 
 // Setup.gs seeds Config/Policy; we call only its seed functions, not the
 // sheet-building parts, which need a real SpreadsheetApp.

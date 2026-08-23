@@ -92,7 +92,20 @@ var Grievance = (function () {
       ticketId: ticketId, appId: appId, category: classify(text)
     }, actor || appId);
 
-    return triage(ticketId);
+    var result = triage(ticketId);
+
+    // Read the row back rather than reusing what was just written: triage()
+    // persists the status and the verdict, and the wardens' copy should say what
+    // the ticket now is, not what it was a line ago.
+    try {
+      Slack.notifyGrievance(Db.byId('Grievances', ticketId),
+        Db.byId('Students', app.studentId), residence_(appId), result);
+    } catch (e) {
+      // Belt and braces on top of notifyGrievance's own catch. A student
+      // reporting a broken tap must never see an error because of Slack.
+    }
+
+    return result;
   }
 
   /** Run triage on an existing ticket. */

@@ -121,6 +121,66 @@ if (byCode.ROHAN) {
   check('a ledger entry is cited', !!g.ledgerRef);
 }
 
+section('Grievances reach the wardens on Slack');
+if (byCode.ARJUN) {
+  const complaint = 'There has been no hot water in the washroom for three days.';
+  const lastLog = () => {
+    const rows = Db.readAll('AuditLog').filter(e => e.action === 'GRIEVANCE_SLACK_NOTIFIED');
+    const e = rows[rows.length - 1];
+    if (!e) return {};
+    return typeof e.payloadJson === 'string' ? JSON.parse(e.payloadJson) : e.payloadJson;
+  };
+
+  UrlFetchApp._reset();
+  Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  check('nothing leaves the machine while SLACK_ENABLED is FALSE',
+    global.__fetches.length === 0, global.__fetches.length + ' calls');
+  check('the skipped send is still on the record', lastLog().status === 'SKIPPED');
+
+  // Switched on, but nobody has pasted a webhook URL in yet - the likeliest
+  // half-finished setup there is, and the one that must not lose a ticket.
+  Db.setCfg('SLACK_ENABLED', 'TRUE');
+  UrlFetchApp._reset();
+  const noUrl = Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  check('a ticket is raised anyway with no webhook configured', !!noUrl.ticketId);
+  const missing = lastLog();
+  check('the ledger names the property that is missing',
+    (missing.error || '').indexOf('SLACK_WEBHOOK_URL') >= 0, missing.error);
+
+  PropertiesService.getScriptProperties()
+    .setProperty('SLACK_WEBHOOK_URL', 'https://hooks.slack.example/T0/B0/secret');
+
+  UrlFetchApp._reset();
+  global.__fetchQueue = [global.__fetchResponse(200, 'ok')];
+  const sent = Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  check('exactly one call is made', global.__fetches.length === 1,
+    global.__fetches.length + ' calls');
+  check('it is a POST to the webhook',
+    global.__fetches[0].params.method === 'post' &&
+    global.__fetches[0].url.indexOf('hooks.slack.example') > 0);
+
+  const posted = JSON.parse(global.__fetches[0].params.payload).text;
+  check('the warden is told which student', posted.indexOf(byCode.ARJUN.name) > 0);
+  check('the warden is told which room', posted.indexOf(String(byCode.ARJUN.room)) > 0);
+  check('the warden is told what is actually wrong', posted.indexOf('hot water') > 0);
+  check('the ticket id is quotable back', posted.indexOf(sent.ticketId) > 0);
+  check('the triage verdict rides along', posted.indexOf(sent.status) > 0, sent.status);
+  check('the send is recorded', lastLog().status === 'SENT');
+  console.log('        -> ' + posted.split('\n').join(' | '));
+
+  UrlFetchApp._reset();
+  global.__fetchQueue = [global.__fetchResponse(500, 'channel_not_found')];
+  const survived = Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  check('a Slack outage does not stop a student reporting a fault',
+    !!Db.byId('Grievances', survived.ticketId));
+  const failed = lastLog();
+  check('the failure is recorded with its cause',
+    failed.status === 'FAILED' && failed.error.indexOf('500') > 0, failed.error);
+
+  Db.setCfg('SLACK_ENABLED', 'FALSE');
+  UrlFetchApp._reset();
+}
+
 section('View-as is admin-only');
 global.Session = { getActiveUser: () => ({ getEmail: () => 'admin@ipu.ac.in' }) };
 check('an admin may open another student\'s portal',

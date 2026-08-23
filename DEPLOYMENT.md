@@ -251,6 +251,40 @@ edit, not a redeploy.
 
 ---
 
+## 6c. Send grievances to the wardens' Slack
+
+Until this is on, a grievance sits in the `Grievances` tab until somebody opens the
+admin inbox. With it on, every new ticket is posted to one Slack channel the moment
+it is raised, carrying the student's name and enrolment number, their hostel, block
+and room, the complaint itself, and what auto-triage already concluded — so a warden
+can see at a glance whether it needs them at all.
+
+It is **off by default**, and that is deliberate: it puts student names and room
+numbers into a third-party workspace, which is a decision for whoever deploys this.
+
+Three steps:
+
+1. **Create the webhook.** In Slack, add the *Incoming Webhooks* app to the channel
+   the wardens share — [api.slack.com/messaging/webhooks](https://api.slack.com/messaging/webhooks)
+   → *Create an app* → *Incoming Webhooks* → *Add New Webhook to Workspace*, pick the
+   channel, copy the URL.
+2. **Store it.** Apps Script editor → **Project Settings** → scroll to **Script Properties** →
+   add `SLACK_WEBHOOK_URL` with that value. Like `GEMINI_API_KEY`, it is never written
+   to the spreadsheet, so exfiltrating the whole sheet does not hand over a way to post
+   into the wardens' channel.
+3. Set `SLACK_ENABLED` to `TRUE` in the `Config` tab.
+
+**A Slack failure never costs a ticket.** If the webhook is missing, revoked or simply
+down, the grievance is still raised and the student sees no error — the attempt is
+recorded in the `AuditLog` as `GRIEVANCE_SLACK_NOTIFIED` with the reason it failed.
+Check there first if messages are not arriving.
+
+One webhook, one channel. Routing each hostel to its own channel would need a Slack
+app and a bot token; a webhook needs neither, and can be revoked by the person who
+created it without anyone coming back to us.
+
+---
+
 ## 7. Turn on email — deliberately
 
 Email is **off by default** so a rehearsal cannot mail hundreds of real people.
