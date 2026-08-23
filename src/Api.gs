@@ -143,11 +143,17 @@ function apiGetStudentView(asAppId, demoToken) {
   }
 
   // An admin may inspect any applicant's portal exactly as that student sees
-  // it. A warden already has this information; what they have never had is the
-  // student's own view of it, which is what a grievance is usually about.
-  // Students may only ever see themselves - the guard is on the server.
+  // it. Students may only ever see themselves - the guard is on the server.
+  //
+  // Scoped to the roles that hold the Students section. A warden's account is
+  // the vacancies-and-complaints desk, and opening any applicant's file at will
+  // is a wider reach than that job needs.
   if (asAppId) {
     if (!s.isAdmin) throw new Error('Access denied: you may only view your own application.');
+    if (!Auth.canSee(s, 'students')) {
+      throw new Error('Access denied: ' + Auth.roleName(s.role) +
+                      ' may not open another student\'s portal.');
+    }
     var target = Db.byId('Applications', asAppId);
     if (!target) throw new Error('No such application.');
     s = {
@@ -1120,4 +1126,112 @@ function apiGetGrievances() {
       slaDueAt: fmtDate_(g.slaDueAt)
     };
   });
+}
+
+// =============================================================== Wander
+
+/**
+ * Wander is the hostel assistant. It answers from the rule corpus in
+ * RuleChunks and from what this portal already knows about the person asking.
+ *
+ * Both students and administrators reach it through the same two endpoints.
+ * The difference is made server-side in Chatbot.ask: a student's retrieval is
+ * partitioned by their gender and campus, an administrator's is not, because an
+ * administrator legitimately needs to look things up in either brochure.
+ */
+
+/** What the panel needs before it renders anything. Never throws. */
+function apiWanderStatus() {
+  var s = Auth.session();
+  var st = { agent: Chatbot.AGENT, signedIn: !!s.email, isAdmin: !!s.isAdmin,
+             enabled: false, corpus: 0, remaining: 0, note: '' };
+  if (!s.email) { st.note = 'Sign in to ask a question.'; return st; }
+
+  try {
+    var stats = RuleBook.stats();
+    st.corpus = stats.embedded;
+    st.enabled = Chatbot.enabled() && Gemini.available() && stats.embedded > 0;
+    st.remaining = Chatbot.remainingQuota();
+
+    if (!Chatbot.enabled()) {
+      st.note = 'The assistant is switched off. An administrator can set CHATBOT_ENABLED ' +
+                'to TRUE in the Config sheet.';
+    } else if (!Gemini.available()) {
+      st.note = 'The assistant has no API key yet. An administrator needs to add ' +
+                'GEMINI_API_KEY in Project Settings.';
+    } else if (!stats.embedded) {
+      st.note = 'The hostel rules have not been loaded yet, so there is nothing to answer from.';
+    } else if (!st.remaining) {
+      st.note = Chatbot.AGENT + ' has answered its allowance of questions for today.';
+    }
+  } catch (e) {
+    st.note = 'The assistant is not set up on this deployment.';
+  }
+  return st;
+}
+
+/**
+ * Ask one question.
+ *
+ * The rate limit is the FIRST thing that happens, before any lookup and before
+ * anything is spent. This endpoint draws on a shared daily allowance held on
+ * the deploying account, so one person in a loop does not merely inconvenience
+ * themselves - they take the assistant away from everybody until it resets.
+ */
+function apiAskWander(question) {
+  var s = Auth.session();
+  if (!s.email) throw new Error('Please sign in first.');
+
+  var perHour = Number(Policy.value('chatbot', 'RATE_PER_HOUR', 60)) || 60;
+  try {
+    Auth.rateLimit('wander', s.email, perHour, 3600);
+  } catch (e) {
+    // A limit is a pace, not a fault.
+    //
+    // Thrown, it reaches the panel as a red box that says the portal is broken.
+    // Returned, it is Wander saying it needs a moment - which is what actually
+    // happened, and which does not teach the reader to distrust a page that is
+    // working exactly as designed.
+    return {
+      turnId: '', status: 'REFUSED', citations: [], grounded: false,
+      answer: 'You have asked ' + perHour + ' questions in the last hour, which is the ' +
+              'limit per person. The allowance is shared with everyone else using the ' +
+              'portal. Please try again shortly.'
+    };
+  }
+
+  return Chatbot.ask(s, question);
+}
+
+/** This person's past exchanges, so the panel survives a page reload. */
+function apiWanderHistory() {
+  var s = Auth.session();
+  if (!s.email) return [];
+  if (s.application) return Chatbot.history(s.application.appId, 20);
+  // An administrator has no application, so their turns are keyed on the empty
+  // appId that Chatbot.ask recorded for them.
+  return s.isAdmin ? Chatbot.history('', 20) : [];
+}
+
+/**
+ * Mark an answer wrong.
+ *
+ * The only chat path that touches the ledger. A turn nobody disputes is not
+ * evidence and does not belong in a tamper-evident chain; a turn a student has
+ * formally challenged is, and this is the natural hand-off into a grievance.
+ */
+function apiFlagWanderAnswer(turnId) {
+  var s = Auth.session();
+  if (!s.email) throw new Error('Please sign in first.');
+
+  var row = Db.byId('ChatLog', turnId);
+  if (!row) throw new Error('No such answer.');
+  if (s.application && row.appId && row.appId !== s.application.appId && !s.isAdmin) {
+    throw new Error('That is not your conversation.');
+  }
+
+  Db.update('ChatLog', turnId, { flagged: true });
+  Ledger.append('CHAT_ANSWER_FLAGGED',
+    { turnId: turnId, appId: row.appId, question: row.question }, s.email);
+  return { ok: true };
 }

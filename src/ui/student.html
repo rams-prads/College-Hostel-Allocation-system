@@ -1,6 +1,7 @@
 <!-- Student portal. The explanation panel is the centrepiece. -->
 <?!= include('ui/styles'); ?>
 <?!= include('ui/chrome'); ?>
+<?!= include('ui/wander'); ?>
 <script>
   // The app is served inside a sandboxed iframe on a different origin, so a
   // relative link would navigate that frame to the wrong place. Every link is
@@ -154,6 +155,12 @@
     html.push(preferencesCard(v));
     html.push(documentsCard(v));
     html.push(identityCard(v));
+    // Wander sits directly above grievances, not under the explanation panel.
+    // The explanation is what prompts most questions, so putting the assistant
+    // beneath it is tempting - but that pushes documents down, and documents
+    // are the only thing on this page a student must actually act on. Chat is
+    // the soft version of a grievance; the two belong together.
+    html.push('<div id="wanderCardHost"></div>');
     html.push('<div id="swapCard"></div>');
     // Reporting is a residents' desk: it opens with the room. Before allotment
     // the documents and identity cards above already say what is outstanding,
@@ -168,8 +175,19 @@
     // have. Calling them would render two error boxes on an otherwise correct
     // page and teach the viewer nothing.
     if (!v.demoMode) {
+      loadWander('wanderCardHost');
       loadSwaps();
       if (v.allocation) loadGrievances();
+    } else {
+      // A preview visitor has no session, so asking would spend a shared
+      // allowance on behalf of nobody. Show the panel disabled rather than
+      // hiding it - a demo with a missing feature reads as an unfinished
+      // product, and this one is neither missing nor usable here.
+      setHtml('wanderCardHost', card('Wander',
+        emptyState('💬', 'Ask about the hostel rules',
+          'The assistant answers from the hostel brochure and from the application ' +
+          'shown above. It is switched off in a read-only preview.'),
+        { sub: 'Hostel assistant' }));
     }
   }
 

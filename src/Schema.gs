@@ -42,7 +42,7 @@ var SCHEMA = {
       // must have it refreshed. See repairValidation().
       { name: 'category',      type: T.ENUM,
         values: ['reservation', 'eligibility', 'weight', 'capacity', 'roommate', 'identity',
-                 'priority'] },
+                 'priority', 'chatbot'] },
       { name: 'key',           type: T.STR },
       // Text, not a number, even though nearly every rule is numeric.
       //
@@ -424,6 +424,68 @@ var SCHEMA = {
       { name: 'sentAt',   type: T.DATE },
       { name: 'error',    type: T.STR }
     ]
+  },
+
+  RuleChunks: {
+    desc: 'Retrievable rule text and its embedding. One row per chunk. This is ' +
+          'the corpus the assistant is allowed to answer from - nothing else.',
+    pk: 'chunkId',
+    cols: [
+      { name: 'chunkId',   type: T.STR },
+      { name: 'source',    type: T.ENUM,
+        values: ['BROCHURE', 'POLICY', 'CONFIG', 'ENGINE', 'LETTER'] },
+      // What a citation says out loud: 'Boys brochure, rule 12' or 'POL-ELG-ATTN'.
+      { name: 'sourceRef', type: T.STR },
+      // The two hard partitions, mirrored from the allocator.
+      //
+      // There is a boys' brochure and a girls' brochure, and their rules differ -
+      // fees, timings, wardens. Answering a boy out of the girls' brochure would
+      // reintroduce through the assistant exactly what hostelOk_() exists to
+      // prevent at the bed level. Empty means the chunk applies to everyone.
+      { name: 'gender',    type: T.ENUM, values: ['', 'M', 'F', 'ALL'] },
+      { name: 'campus',    type: T.ENUM, values: ['', 'DWARKA', 'EDC', 'ALL'] },
+      { name: 'heading',   type: T.STR },
+      { name: 'text',      type: T.STR },
+      // sha256 prefix of `text`. Re-ingesting re-embeds only what changed, so
+      // editing one policy value costs one embedding rather than the corpus.
+      { name: 'textHash',  type: T.STR },
+      { name: 'dims',      type: T.INT },
+      { name: 'scale',     type: T.NUM },
+      // base64 of int8, NOT a JSON array of floats. A float32 vector as JSON is
+      // ~10KB; at 400 chunks that is 4MB to parse on every single question,
+      // which does not fit the budget. See RuleBook.quantise.
+      //
+      // MUST stay T.STR: refreshColumnRules_ pins T.STR columns to plain-text
+      // format. Typed T.JSON the sheet would be free to reinterpret this.
+      { name: 'vec',        type: T.STR },
+      { name: 'embeddedAt', type: T.DATE },
+      { name: 'active',     type: T.BOOL }
+    ]
+  },
+
+  ChatLog: {
+    desc: 'One row per exchange with the assistant. The transcript a student ' +
+          'sees on their next visit, and the record of what it answered from.',
+    pk: 'turnId',
+    cols: [
+      { name: 'turnId',    type: T.STR },
+      { name: 'appId',     type: T.STR },
+      { name: 'studentId', type: T.STR },
+      { name: 'askedAt',   type: T.DATE },
+      { name: 'question',  type: T.STR },
+      { name: 'answer',    type: T.STR },
+      { name: 'citations', type: T.JSON },
+      // False when nothing cleared the similarity floor, so the assistant said
+      // so instead of answering. Worth counting: a corpus with gaps shows up
+      // here long before anyone complains.
+      { name: 'grounded',  type: T.BOOL },
+      { name: 'model',     type: T.STR },
+      { name: 'latencyMs', type: T.INT },
+      { name: 'status',    type: T.ENUM,
+        values: ['ANSWERED', 'REFUSED', 'QUOTA', 'DISABLED', 'ERROR'] },
+      { name: 'error',     type: T.STR },
+      { name: 'flagged',   type: T.BOOL }
+    ]
   }
 };
 
@@ -434,7 +496,9 @@ var SHEET_ORDER = [
   'Hostels', 'Rooms', 'Beds',
   'Runs', 'Allocations', 'Waitlist',
   'Transfers', 'Grievances', 'Documents', 'Identity',
-  'AuditLog', 'PincodeGeo', 'Notifications'
+  'AuditLog', 'PincodeGeo', 'Notifications',
+  // Appended, never inserted. createDatabase places sheets by ordinal position.
+  'RuleChunks', 'ChatLog'
 ];
 
 /** Column names for a tab, in order. */

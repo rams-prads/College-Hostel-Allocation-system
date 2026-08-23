@@ -20,6 +20,7 @@ function onOpen() {
     .addItem('Run pre-demo dry run', 'runDryRun')
     .addSeparator()
     .addItem('Add me as administrator', 'addMeAsAdmin')
+    .addItem('Add a warden', 'addWardenFromMenu')
     .addItem('Who am I?', 'showWhoAmI')
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('Diagnostics')
@@ -375,6 +376,42 @@ function addMeAsAdmin() {
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
+/**
+ * Enrol a hostel warden.
+ *
+ * A warden's account opens two sections of the dashboard - vacancies, and the
+ * grievance and swap inbox - and nothing else. They cannot run or clear an
+ * allocation, read identity documents, change policy or send letters.
+ */
+function addWardenFromMenu() {
+  var ui = SpreadsheetApp.getUi();
+  var ans = ui.prompt('Add a warden',
+    'Google address of the warden. Their dashboard will show vacancies and ' +
+    'student grievances only.',
+    ui.ButtonSet.OK_CANCEL);
+  if (ans.getSelectedButton() !== ui.Button.OK) return;
+
+  var email = String(ans.getResponseText() || '').trim();
+  if (!email) return;
+
+  var who = ui.prompt('Add a warden',
+    'Their name, as it should appear in the dashboard header. Leave blank for ' +
+    '"Warden".', ui.ButtonSet.OK_CANCEL);
+  var name = who.getSelectedButton() === ui.Button.OK
+    ? String(who.getResponseText() || '').trim() : '';
+
+  try {
+    var res = Auth.enrolAdmin(email, 'WARDEN', name || 'Warden', 'ALL');
+    ui.alert('Warden ' + res.action,
+      res.email + ' can now open ' + (webAppUrl() || 'the web app') + '?page=admin\n\n' +
+      'They will see Occupancy and Requests. Every other section is refused, ' +
+      'on the server as well as in the menu.',
+      ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('Could not add that warden', e.message, ui.ButtonSet.OK);
+  }
+}
+
 /** Diagnostic: exactly what the system thinks you are. */
 function showWhoAmI() {
   var s = Auth.session();
@@ -390,7 +427,10 @@ function showWhoAmI() {
     'Administrators on record:',
     Db.readAll('Admins').map(function (a) {
       return '  ' + a.email + '  ' + a.role + (a.active ? '' : '  [INACTIVE]');
-    }).join('\n') || '  none'
+    }).join('\n') || '  none',
+    '',
+    'Hostel System > Add a warden creates an account limited to vacancies',
+    'and grievances.'
   ];
   SpreadsheetApp.getUi().alert('Who am I?', lines.join('\n'),
     SpreadsheetApp.getUi().ButtonSet.OK);

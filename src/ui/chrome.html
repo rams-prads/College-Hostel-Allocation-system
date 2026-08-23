@@ -73,8 +73,9 @@ var CALL_TIMEOUT_MS = 25000;
  * far above the fold - "Opening…" sat there forever while the explanation of why
  * was written somewhere the user was not looking.
  */
-function srv(ownerId) {
+function srv(ownerId, opts) {
   var ok = null, fail = null;
+  opts = opts || {};
 
   // Whether the panel this call is painting into existed when the call was
   // made. If it did and it does not any more, the person has moved on - to
@@ -126,10 +127,11 @@ function srv(ownerId) {
           if (settled) return;
           settled = true;
           if (abandoned()) return;
-          report('This is taking longer than it should. The server has not answered in ' +
-                 '25 seconds. Try again; if it keeps happening, the deployment may be ' +
-                 'serving an older version of the code.', name);
-        }, CALL_TIMEOUT_MS);
+          report(opts.timeoutMessage ||
+                 ('This is taking longer than it should. The server has not answered in ' +
+                  '25 seconds. Try again; if it keeps happening, the deployment may be ' +
+                  'serving an older version of the code.'), name);
+        }, opts.timeoutMs || CALL_TIMEOUT_MS);
 
         function done() { settled = true; clearTimeout(timer); }
 
