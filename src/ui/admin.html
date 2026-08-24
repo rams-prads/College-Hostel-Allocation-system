@@ -137,7 +137,7 @@
       if (SESSION.token && /administrator|admin/i.test(e.message)) {
         paintChrome({ unit: 'Hostel Administration' });
         setHtml('root', '<div class="wrap narrow">' + card('',
-          emptyState('&#128274;', 'This page is for hostel administrators',
+          emptyState('lock', 'This page is for hostel administrators',
                      'Your account does not administer the hostel system.') +
           '<div style="text-align:center;margin-top:4px">' +
           '<a class="btn" href="' + appUrl('?') + '" target="_top">' +
@@ -441,7 +441,7 @@
     // thing to be told - one is a job not started, the other a job undone on
     // purpose, and only one of them means somebody is waiting for a result.
     var cleared = !!(d && d.hadRun);
-    return card('', '<div class="empty"><div class="big">&#9881;</div>' +
+    return card('', '<div class="empty"><div class="big">' + icon('spark', 30) + '</div>' +
       '<h3 style="margin:0 0 5px">' + (cleared
         ? 'The allocation has been cleared'
         : 'No allocation has been run yet') + '</h3>' +
@@ -522,7 +522,7 @@
     var hidden = (d.occupancy || []).length - live.length;
 
     if (!live.length) {
-      return card('', emptyState('&#127968;', 'No rooms are on record',
+      return card('', emptyState('building', 'No rooms are on record',
         'The hostel inventory is empty, so there is nothing to be occupied. ' +
         'Seed or import the inventory first.'));
     }
@@ -1136,7 +1136,7 @@
   function paintVCase() {
     var k = V.kase;
     if (!k) {
-      setHtml('vCase', card('', emptyState('&#9989;', 'Nothing to decide',
+      setHtml('vCase', card('', emptyState('check', 'Nothing to decide',
         'No applicant in this list is waiting on you.')));
       return;
     }

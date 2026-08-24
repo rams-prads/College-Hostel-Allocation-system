@@ -703,8 +703,49 @@ function banner(kind, text, icon) {
          '<span>' + esc(text) + '</span></div>';
 }
 
-function emptyState(icon, title, body) {
-  return '<div class="empty"><div class="big">' + icon + '</div>' +
+/**
+ * The line icons this portal uses, and the only ones it uses.
+ *
+ * Emoji were doing this job, and they are the single clearest tell that a
+ * university portal was assembled rather than designed. Every platform draws
+ * them differently - a padlock is flat and grey on Windows, gold and shaded on
+ * a Mac, a different shape again on Android - so the one thing you cannot do
+ * with an emoji is control what the reader sees. At the 34px these were being
+ * shown at, that is not a small difference.
+ *
+ * These are drawn in the same weight as the icons already on the admin rail:
+ * one stroke width, no fill, currentColor. Nothing here is decorative - each
+ * one names the state the page is in, and a page with no state to name gets no
+ * icon at all.
+ */
+var GLYPH = {
+  lock:     'M7 11V8a5 5 0 0110 0v3M5.5 11h13a1 1 0 011 1v8a1 1 0 01-1 1h-13a1 1 0 01-1-1v-8a1 1 0 011-1z',
+  building: 'M3 21h18M5 21V6l7-3 7 3v15M9.5 21v-4h5v4M9 9.5h.01M15 9.5h.01M9 13h.01M15 13h.01',
+  calendar: 'M4 6.5h16v14H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4',
+  check:    'M4.5 12.5l5 5 10-11',
+  spark:    'M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1M12 8a4 4 0 100 8 4 4 0 000-8z',
+  person:   'M12 12a4 4 0 100-8 4 4 0 000 8zM4.5 20.5a7.5 7.5 0 0115 0',
+  chat:     'M4 5h16v11H9l-5 4z',
+  doc:      'M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6'
+};
+
+/** One icon, at the size the caller asks for, in the colour it inherits. */
+function icon(name, size) {
+  var d = GLYPH[name];
+  if (!d) return '';
+  size = size || 22;
+  return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+    '<path d="' + d + '"/></svg>';
+}
+
+/**
+ * @param {string} glyph  a name from GLYPH, or '' for no icon at all
+ */
+function emptyState(glyph, title, body) {
+  return '<div class="empty">' +
+         (glyph ? '<div class="big">' + icon(glyph, 30) + '</div>' : '') +
          '<h3 style="margin:0 0 4px">' + esc(title) + '</h3>' +
          (body ? '<p class="small" style="margin:0;max-width:420px;display:inline-block">' +
            esc(body) + '</p>' : '') + '</div>';

@@ -572,6 +572,57 @@ section('The waiting list has a screen of its own');
     t.screen.indexOf('viewStudent(') > 0);
 })();
 
+check('every status block a page asks for is actually styled', (() => {
+  // warn was used on the verification tab and never defined, so the notice on
+  // the busiest screen in the dashboard drew as an untinted box with a bare
+  // mark floating in it, beside two that drew properly.
+  const css = fs.readFileSync(path.join(UI, 'styles.html'), 'utf8');
+  const used = {};
+  ['admin.html', 'student.html', 'apply.html', 'index.html', 'verify.html'].forEach(f => {
+    const src = codeOf(f);
+    let m;
+    const literal = /class="status ([a-z]+)"/g;
+    while ((m = literal.exec(src)) !== null) used[m[1]] = 1;
+    // Only a ternary that is actually building the class attribute. A bare
+    // `x ? 'false' : 'true'` elsewhere on the page is not a status variant.
+    const chosen = /class="status ' \+ \([^)]*\? '([a-z]+)' : '([a-z]+)'\)/g;
+    while ((m = chosen.exec(src)) !== null) { used[m[1]] = 1; used[m[2]] = 1; }
+  });
+  const missing = Object.keys(used).filter(k => css.indexOf('.status.' + k + '{') < 0);
+  return missing.length === 0;
+})(), 'a variant nobody styled is a box with nothing in it');
+
+check('and every icon a page asks for exists', (() => {
+  const chrome = codeOf('chrome.html');
+  const names = [];
+  ['admin.html', 'student.html', 'apply.html', 'chrome.html', 'wander.html'].forEach(f => {
+    const src = codeOf(f);
+    let m;
+    const re = /(?:emptyState|icon)\('([a-z]+)'/g;
+    while ((m = re.exec(src)) !== null) names.push(m[1]);
+  });
+  const missing = names.filter(n => chrome.indexOf('  ' + n + ':') < 0);
+  return names.length > 0 && missing.length === 0;
+})(), 'an icon name with no glyph behind it renders as nothing at all');
+
+check('no emoji is used as an icon anywhere', (() => {
+  // Every platform draws them differently - a padlock is flat grey on Windows,
+  // gold and shaded on a Mac - so the one thing an emoji cannot do is look to a
+  // judge the way it looks to us.
+  const bad = /&#(?:1[23][0-9]{4}|9989|9881|9749|9888);/;
+  return ['admin.html', 'student.html', 'apply.html', 'index.html', 'verify.html',
+          'chrome.html', 'wander.html']
+    .every(f => {
+      const src = codeOf(f);
+      if (bad.test(src)) return false;
+      for (let i = 0; i < src.length; i++) {
+        const c = src.codePointAt(i);
+        if (c >= 0x1F300 && c <= 0x1FAFF) return false;
+      }
+      return true;
+    });
+})(), 'drawn line icons at one stroke weight, or nothing at all');
+
 section('The dashboard is a workspace, not one long page');
 r = renderPage('admin.html', 'admin@ipu.ac.in');
 check('it holds itself to the light palette',

@@ -580,15 +580,24 @@
     border:1px solid transparent;
   }
   .status .sic{
-    flex:none;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
-    font-size:19px;font-weight:800;
+    flex:none;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    font-size:17px;font-weight:700;line-height:1;
   }
+  .status .sic svg{display:block}
   .status .t{font-weight:700;font-size:15px}
   .status .s{font-size:12.5px;margin-top:2px;opacity:.9}
   .status.good{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok)}
   .status.good .sic{background:var(--ok);color:#fff}
   .status.bad{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
   .status.bad .sic{background:var(--bad);color:#fff}
+  /* warn and info were being asked for and never defined, so the notice that
+     says allocation is not gated by verification - the one on the busiest
+     screen in the dashboard - drew as an untinted box with a bare mark floating
+     in it, while good and bad beside it got a proper block. */
+  .status.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .status.warn .sic{background:var(--warn);color:#fff}
+  .status.info{background:var(--info-soft);border-color:var(--info-line);color:var(--info)}
+  .status.info .sic{background:var(--info);color:#fff}
 
   /* ============================================== technical details block
      Reference numbers, hashes and seeds are evidence, not decoration. They
@@ -621,7 +630,12 @@
   .center{text-align:center}
   .divider{height:1px;background:var(--border);margin:16px 0}
   .empty{padding:44px 20px;text-align:center;color:var(--muted)}
-  .empty .big{font-size:34px;opacity:.35;margin-bottom:9px}
+  /* A drawn icon, not a typeface character: it inherits the text colour and
+     sits at the weight everything else on the page is drawn at. */
+  .empty .big{
+    display:flex;justify-content:center;margin-bottom:11px;color:var(--border-strong);
+  }
+  .empty .big svg{display:block}
   .scroll-x{overflow-x:auto}
   .foot-note{
     margin-top:26px;padding-top:15px;border-top:1px solid var(--border);

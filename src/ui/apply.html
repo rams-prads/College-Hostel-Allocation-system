@@ -178,7 +178,7 @@
       return;
     }
     if (!f.applicationsOpen) {
-      setHtml('root', card('', emptyState('&#128197;', 'Applications are closed',
+      setHtml('root', card('', emptyState('calendar', 'Applications are closed',
         'The hostel application window is not currently open.')));
       return;
     }
@@ -187,7 +187,7 @@
     // Rendering one that the server will refuse to save is how a student ends
     // up typing a correction twice and losing it twice.
     if (f.draft && f.editable === false) {
-      setHtml('root', card('', emptyState('&#128274;', 'Your application is now fixed', f.lockReason)) +
+      setHtml('root', card('', emptyState('lock', 'Your application is now fixed', f.lockReason)) +
         card('', '<div style="text-align:center"><a class="btn" href="' + appUrl('?') +
              '" target="_top">Back to my application</a></div>'));
       return;

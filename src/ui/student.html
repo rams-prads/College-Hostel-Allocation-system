@@ -106,7 +106,7 @@
 
     if (v.unregistered) {
       setHtml('root', card('',
-        '<div class="empty"><div class="big">&#128075;</div>' +
+        '<div class="empty"><div class="big">' + icon('person', 30) + '</div>' +
         '<h3 style="margin:0 0 6px">Welcome — let\u2019s get you registered</h3>' +
         '<p class="small" style="max-width:460px;display:inline-block;margin:0 0 18px">' +
         'We have no record for <strong>' + esc(v.email) + '</strong> yet. Register your ' +
@@ -193,7 +193,7 @@
       // hiding it - a demo with a missing feature reads as an unfinished
       // product, and this one is neither missing nor usable here.
       setHtml('wanderCardHost', card('Wander',
-        emptyState('💬', 'Ask about the hostel rules',
+        emptyState('chat', 'Ask about the hostel rules',
           'The assistant answers from the hostel brochure and from the application ' +
           'shown above. It is switched off in a read-only preview.'),
         { sub: 'Hostel assistant' }));
@@ -656,10 +656,10 @@
 
   function noApplication(v) {
     if (!v.applicationsOpen) {
-      return card('', emptyState('&#128197;', 'Applications are closed',
+      return card('', emptyState('calendar', 'Applications are closed',
         'The hostel application window is not currently open.'));
     }
-    return card('', '<div class="empty"><div class="big">&#127968;</div>' +
+    return card('', '<div class="empty"><div class="big">' + icon('building', 30) + '</div>' +
       '<h3 style="margin:0 0 5px">You have not applied yet</h3>' +
       '<p class="small" style="max-width:420px;display:inline-block;margin:0 0 16px">' +
       'Submit an application to be considered in this year’s hostel allocation.</p><br>' +
