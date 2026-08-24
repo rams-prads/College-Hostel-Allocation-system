@@ -222,6 +222,7 @@ if (byCode.ARJUN) {
       k: key,
       payload: JSON.stringify({
         team: { id: 'T-TEST' },
+        response_url: 'https://slack.example/respond/T0/B0',
         user: { username: 'warden.meera' },
         actions: [{ action_id: 'grievance_done', value: ticketId }],
         message: { text: 'New grievance [' + ticketId + ']', blocks: [
@@ -252,7 +253,19 @@ if (byCode.ARJUN) {
     Db.readAll('AuditLog').some(e => e.action === 'SLACK_ACTION_REJECTED'));
 
   const t = open().ticketId;
+  UrlFetchApp._reset();
   const done = click(t, KEY);
+  // Slack discards the HTTP response after three seconds, which Apps Script
+  // regularly overruns, so the button has to be removed through response_url too
+  // or the channel keeps showing work that is already finished.
+  check('the message is also updated out of band',
+    global.__fetches.some(f => f.url.indexOf('slack.example/respond') >= 0),
+    global.__fetches.map(f => f.url).join(' '));
+  const late = JSON.parse((global.__fetches.find(
+    f => f.url.indexOf('slack.example/respond') >= 0) || { params: { payload: '{}' } }).params.payload);
+  check('the out-of-band copy also drops the button',
+    late.replace_original === true &&
+    !(late.blocks || []).some(b => b.block_id === 'grievance_actions'));
   const row = Db.byId('Grievances', t);
   check('the right key closes the ticket', row.status === 'RESOLVED', row.status);
   check('the student is told who closed it', row.resolution.indexOf('warden.meera') > 0,

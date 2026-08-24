@@ -255,6 +255,38 @@ var Slack = (function () {
   }
 
   /**
+   * Update the message a second time, through the back door.
+   *
+   * Slack gives up on the HTTP response after three seconds and throws it away.
+   * A cold Apps Script start alone can eat two of those before a line of this
+   * file runs, and then the ticket has to be read, written, and hashed onto the
+   * ledger - so the reply that removes the button routinely arrives too late to
+   * be used. The warden sees a timeout and a button still sitting there, on work
+   * that in fact completed.
+   *
+   * response_url is the way out: it stays valid for thirty minutes, so posting
+   * the same replacement here lands whether or not the response did. Slack's own
+   * guidance for a handler that cannot answer in three seconds, and the closest
+   * thing to "acknowledge now, finish later" that Apps Script can reach - there
+   * are no background tasks here, only this.
+   *
+   * Best effort, and silent. The ticket is already closed and the ledger already
+   * says so by the time this runs; failing to redraw a chat message must not
+   * turn that into an error.
+   */
+  function updateMessage_(responseUrl, body) {
+    if (!responseUrl) return;
+    try {
+      UrlFetchApp.fetch(responseUrl, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify(body),
+        muteHttpExceptions: true
+      });
+    } catch (e) { /* the record is right; only the picture of it is stale */ }
+  }
+
+  /**
    * A warden pressed "Mark done".
    *
    * Returns the JSON Slack should render; never throws, because a thrown error
@@ -322,11 +354,16 @@ var Slack = (function () {
         elements: [{ type: 'mrkdwn', text: ':white_check_mark: *Done* — ' + escape_(note) }]
       });
 
-      return {
+      var replacement = {
         replace_original: true,
         text: ((payload.message || {}).text || ticketId) + '\n:white_check_mark: ' + note,
         blocks: blocks
       };
+
+      // Sent AND returned. Whichever of the two Slack is still listening to wins,
+      // and they carry the same message, so arriving twice changes nothing.
+      updateMessage_(payload.response_url, replacement);
+      return replacement;
     } catch (err) {
       try {
         Ledger.append('SLACK_ACTION_FAILED', { error: String(err && err.message || err) },
