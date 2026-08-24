@@ -34,6 +34,15 @@
 
 var Grievance = (function () {
 
+  // How long the same words from the same student count as one complaint.
+  //
+  // Two minutes is chosen against the human behaviour, not the network: someone
+  // who taps "Report it" and sees nothing happen taps it again within seconds,
+  // and may reload and retype the same sentence a minute later. Someone with a
+  // genuinely different problem takes longer than that to write it down, and in
+  // any case writes different words - which this check requires.
+  var DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
+
   var KEYWORDS = [
     ['DOCUMENT', ['document', 'certificate', 'upload', 'verifi', 'scan', 'proof', 'admission letter', 'id card']],
     ['FEE',      ['fee', 'payment', 'refund', 'money', 'charge', 'paid', 'receipt']],
@@ -72,6 +81,27 @@ var Grievance = (function () {
     var app = Db.byId('Applications', appId);
     if (!app) throw new Error('No such application.');
 
+    // Two taps on "Report it" are one complaint, not two.
+    //
+    // The portal disables the button now, but that only covers the tidy case: a
+    // slow network, a reload mid-submit, or the same student on a second device
+    // still lands the same words twice. Every duplicate that gets through wakes
+    // every warden in the channel, which is how a useful notification becomes
+    // one people learn to ignore.
+    //
+    // Handing back the existing ticket rather than refusing is deliberate. The
+    // student did nothing wrong and does not care which of their taps counted -
+    // they care that the problem is logged, and it is.
+    var body = String(text).trim();
+    var dupe = Db.rowsWhere('Grievances', 'appId', appId).filter(function (g) {
+      return String(g.text) === body &&
+             (new Date() - new Date(g.createdAt)) < DUPLICATE_WINDOW_MS;
+    })[0];
+    if (dupe) {
+      return Object.assign({ ticketId: dupe.ticketId, category: dupe.category },
+                           dupe.autoTriage || {});
+    }
+
     // A non-numeric or blank setting produced NaN here, and NaN days later
     // becomes an Invalid Date - which is written to the sheet as a value nothing
     // can read back, and which breaks the whole response when the inbox is read.
@@ -92,7 +122,31 @@ var Grievance = (function () {
       ticketId: ticketId, appId: appId, category: classify(text)
     }, actor || appId);
 
-    return triage(ticketId);
+    var result = triage(ticketId);
+
+    // Read the row back rather than reusing what was just written: triage()
+    // persists the status and the verdict, and the wardens' copy should say what
+    // the ticket now is, not what it was a line ago.
+    //
+    // The fallback is not paranoia. Two students reporting a problem in the same
+    // second race inside Db.appendMany, which picks its target row from
+    // getLastRow() without holding a lock - so one row can be written and then
+    // overwritten, and this read-back finds nothing. That sent Slack a message
+    // with every field empty, which is worse than sending nothing: a warden
+    // cannot act on it and cannot tell whose room it was about.
+    try {
+      var row = Db.byId('Grievances', ticketId) || {
+        ticketId: ticketId, category: classify(text),
+        text: String(text).trim(), status: 'OPEN'
+      };
+      Slack.notifyGrievance(row,
+        Db.byId('Students', app.studentId), residence_(appId), result);
+    } catch (e) {
+      // Belt and braces on top of notifyGrievance's own catch. A student
+      // reporting a broken tap must never see an error because of Slack.
+    }
+
+    return result;
   }
 
   /** Run triage on an existing ticket. */

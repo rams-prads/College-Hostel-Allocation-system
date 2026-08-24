@@ -251,6 +251,96 @@ edit, not a redeploy.
 
 ---
 
+## 6c. Send grievances to the wardens' Slack
+
+Until this is on, a grievance sits in the `Grievances` tab until somebody opens the
+admin inbox. With it on, every new ticket is posted to one Slack channel the moment
+it is raised, carrying the student's name and enrolment number, their hostel, block
+and room, the complaint itself, and what auto-triage already concluded — so a warden
+can see at a glance whether it needs them at all.
+
+It is **off by default**, and that is deliberate: it puts student names and room
+numbers into a third-party workspace, which is a decision for whoever deploys this.
+
+Three steps:
+
+1. **Create the webhook.** In Slack, add the *Incoming Webhooks* app to the channel
+   the wardens share — [api.slack.com/messaging/webhooks](https://api.slack.com/messaging/webhooks)
+   → *Create an app* → *Incoming Webhooks* → *Add New Webhook to Workspace*, pick the
+   channel, copy the URL.
+2. **Store it.** Apps Script editor → **Project Settings** → scroll to **Script Properties** →
+   add `SLACK_WEBHOOK_URL` with that value. Like `GEMINI_API_KEY`, it is never written
+   to the spreadsheet, so exfiltrating the whole sheet does not hand over a way to post
+   into the wardens' channel.
+3. Set `SLACK_ENABLED` to `TRUE` in the `Config` tab.
+
+**A Slack failure never costs a ticket.** If the webhook is missing, revoked or simply
+down, the grievance is still raised and the student sees no error — the attempt is
+recorded in the `AuditLog` as `GRIEVANCE_SLACK_NOTIFIED` with the reason it failed.
+Check there first if messages are not arriving.
+
+One webhook, one channel. Routing each hostel to its own channel would need a Slack
+app and a bot token; a webhook needs neither, and can be revoked by the person who
+created it without anyone coming back to us.
+
+---
+
+## 6d. Let wardens close tickets from Slack — read this one properly
+
+With 6c on, a warden reads a grievance in Slack and then opens the admin dashboard to
+mark it done. This puts a **Mark done** button on the message itself: one tap resolves
+the ticket, tells the student, and writes the warden's Slack name to the audit ledger.
+
+This is a **separate switch from `SLACK_ENABLED`**, because it is a different size of
+decision. Posting a notification sends data out. This accepts writes *in*, from the
+public internet, onto a resident's record.
+
+**Understand the weakness before switching it on.** Slack signs every button press
+with an `X-Slack-Signature` header, and the correct way to trust one is to recompute
+that signature. **Apps Script cannot do this** — `doPost(e)` receives the body and the
+query string but *no HTTP headers at all*, so the signature cannot be read, let alone
+checked. Instead the Request URL carries a long random secret, and only Slack's app
+configuration knows it. That is a bearer token, not a signature: **anyone who learns
+that URL can close tickets.** It is a platform limit, not a shortcut. If that trade is
+not acceptable for your deployment, leave `SLACK_ACTIONS_ENABLED` at `FALSE` — 6c works
+perfectly well on its own.
+
+Four steps:
+
+1. **Make a secret.** Any long random string, 32+ characters. Apps Script editor →
+   **Project Settings** → **Script Properties** → add `SLACK_ACTION_KEY` with it.
+2. **Point Slack at this deployment.** [api.slack.com/apps](https://api.slack.com/apps) →
+   your app → **Interactivity & Shortcuts** → switch on → **Request URL**:
+
+   ```
+   https://script.google.com/macros/s/<YOUR-DEPLOYMENT-ID>/exec?k=<SLACK_ACTION_KEY>
+   ```
+
+   The `?k=` is the whole of the authentication. Treat that URL like a password.
+3. **Optional, and worth it.** Add `SLACK_TEAM_ID` (your `T…` workspace id) to Script
+   Properties. Presses from any other workspace are then refused even if the URL leaks.
+4. Set `SLACK_ACTIONS_ENABLED` to `TRUE` in the `Config` tab.
+
+**Redeploy after any code change.** The Request URL points at a *versioned* deployment.
+`clasp push` updates the editor's copy but not that version — run
+`clasp deploy -i <DEPLOYMENT-ID>` or the button will keep running old code.
+
+Notes on behaviour:
+
+- The button is **not** offered on an auto-answered ticket. The system already closed
+  that one; a button saying "mark done" for work nobody did invites a meaningless click.
+- Pressing it asks for confirmation first. One tap writes to the ledger, and a mis-tap
+  on a phone should not.
+- If two wardens press it, the second is told it was already closed and the first
+  warden's name stays on the record.
+- The ledger actor is recorded as `slack:<username>`, which names the channel of
+  authority honestly. It is a Slack identity, not a verified administrator — the
+  guarantee is that only members of that private channel can press the button.
+- Rotate the secret by changing `SLACK_ACTION_KEY` and the `?k=` in the Request URL.
+- Rejected presses are recorded in `AuditLog` as `SLACK_ACTION_REJECTED`.
+
+---
+
 ## 7. Turn on email — deliberately
 
 Email is **off by default** so a rehearsal cannot mail hundreds of real people.

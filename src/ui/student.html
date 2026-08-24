@@ -764,15 +764,32 @@
     var tickets = (list || []).map(function (g) {
       var kind = { AUTO_ANSWERED:'ok', RESOLVED:'ok', ESCALATED:'warn',
                    OPEN:'info', CLOSED:'ok' }[g.status] || 'info';
+
+      // Once a person has dealt with it, what they did is the whole story. The
+      // triage note was a holding answer - "logged against your room, due by the
+      // 31st" - and leaving it on screen after the job is done reads as though
+      // nothing happened, which is exactly the complaint this box exists for.
+      var done = g.status === 'RESOLVED' || g.status === 'CLOSED';
+      var heading = done ? 'Dealt with' : g.headline;
+      var detail  = done ? (g.resolution || 'This has been dealt with.') : g.body;
+
+      // Waiting on a person, with nothing written yet: the student's own words
+      // become the heading rather than the raw category. Falling back to
+      // "FACILITY" would put a database value on a page meant for the person who
+      // typed the sentence underneath it.
       return '<li style="display:block">' +
         '<div style="display:flex;gap:11px;align-items:flex-start">' +
-          '<span class="body"><span class="n">' + esc(g.headline || g.category) + '</span>' +
-          '<span class="d">You wrote: “' + esc(g.text) + '”</span></span>' +
+          '<span class="body">' +
+          (heading ? '<span class="n">' + esc(heading) + '</span>' +
+                     '<span class="d">You wrote: “' + esc(g.text) + '”</span>'
+                   : '<span class="n">“' + esc(g.text) + '”</span>' +
+                     '<span class="d">Waiting on the hostel office</span>') +
+          '</span>' +
           pill(kind, label('grievance', g.status)) + '</div>' +
-        (g.body ? '<div class="why-head" style="margin:12px 0 0;background:var(--surface-2);' +
-          'border-color:var(--border)"><div style="font-size:13.5px">' + esc(g.body) +
+        (detail ? '<div class="why-head" style="margin:12px 0 0;background:var(--surface-2);' +
+          'border-color:var(--border)"><div style="font-size:13.5px">' + esc(detail) +
           '</div></div>' : '') +
-        (g.findings && g.findings.length
+        (!done && g.findings && g.findings.length
           ? '<ul class="reasons" style="margin-top:9px">' + g.findings.map(function (f) {
               return '<li class="' + (f.ok ? 'yes' : 'no') + '"><span class="mk">' +
                 (f.ok ? '&#10003;' : '&#10007;') + '</span><span>' + esc(f.text) + '</span></li>';
@@ -792,16 +809,41 @@
       'A maintenance report goes to your warden with your room and block already attached; a ' +
       'question about your allotment is re-checked against the recorded run and usually ' +
       'answered within seconds.</span></label>' +
-      '<div class="btn-row"><button class="btn" onclick="raiseGrievance()">Report it</button></div>';
+      '<div class="btn-row"><button class="btn" id="grievBtn" ' +
+      'onclick="raiseGrievance()">Report it</button></div>';
 
     setHtml('grievCard', card('Report a problem', '<div id="grievMsg"></div>' + body));
   }
 
+  // Guarded against a second tap. The round trip runs the classifier and, for an
+  // allocation dispute, a full re-audit of the run - seconds during which the
+  // button sits there looking untouched, which is exactly when someone presses
+  // it again. The flag is what holds; disabling the button is what explains why.
+  var grievBusy = false;
+
   function raiseGrievance() {
+    if (grievBusy) return;
     var text = (el('grievText') || {}).value || '';
+    var btn = el('grievBtn');
+
+    grievBusy = true;
+    if (btn) { btn.disabled = true; btn.textContent = 'Logging…'; }
     setHtml('grievMsg', banner('info', 'Logging your report…'));
-    srv().withSuccessHandler(loadGrievances)
+
+    function done() {
+      grievBusy = false;
+      var b = el('grievBtn');
+      if (b) { b.disabled = false; b.textContent = 'Report it'; }
+    }
+
+    srv().withSuccessHandler(function (r) {
+        // loadGrievances redraws the card, which replaces the button entirely -
+        // so the flag has to be cleared here rather than left to the redraw.
+        done();
+        loadGrievances(r);
+      })
       .withFailureHandler(function (e) {
+        done();
         setHtml('grievMsg', banner('err', e.message));
       }).apiRaiseGrievance(text);
   }

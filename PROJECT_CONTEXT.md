@@ -222,6 +222,7 @@ manual admin work.
   │ Roommate   │          │  Ledger (hash)  │        │  Admin dashboard│
   │ Waitlist   │          │  Simulator      │        │  Verify page    │
   │ Swap       │          │  Grievance      │        │  (Tailwind CDN) │
+  │            │          │  Slack (webhook)│        │                 │
   └────────────┘          └─────────────────┘        └─────────────────┘
 ```
 
@@ -298,6 +299,7 @@ SIH 2026/
     Grievance.gs     lifecycle + auto-triage
     Letters.gs       HTML→PDF letter + QR renderer
     Notify.gs        Gmail templates, batched send
+    Slack.gs         new grievances → the wardens' channel
     Ledger.gs        hash chain append + verify
     Simulator.gs     what-if run + diff
     SeedData.gs      synthetic data generator

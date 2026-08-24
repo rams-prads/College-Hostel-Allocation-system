@@ -1,14 +1,14 @@
 # Demo Script
 
-A twelve-minute run-through. Built around six named students so the audience
+A thirteen-minute run-through. Built around six named students so the audience
 follows a story rather than a dashboard.
 
 **Before you begin:** `Hostel System → Prepare demo scenario`, and enter your own
 Google address when prompted. That names the cast and attaches your account to
 Arjun so you can sign in as him live.
 
-Keep two browser tabs open: the **student portal** (the web app URL) and the
-**admin dashboard** (same URL + `?page=admin`).
+Keep three browser tabs open: the **student portal** (the web app URL), the
+**admin dashboard** (same URL + `?page=admin`), and the wardens' **Slack channel**.
 
 ---
 
@@ -237,6 +237,32 @@ not get a room. Please explain."*
 
 ---
 
+## 10 · The grievance that cannot (1 min) — Slack tab
+
+**Before the demo:** have the wardens' Slack channel open in a third tab, and
+check `SLACK_ENABLED` is `TRUE` (see DEPLOYMENT.md §6c).
+
+**Do:** still as Arjun, raise a second grievance: *"There has been no hot water in
+the washroom for three days."* Then switch to the Slack tab.
+
+**Say:**
+
+> This one no software can answer. A tap needs a person and a toolbox.
+
+**When the message appears:**
+
+> So it did the next best thing, in about a second. The warden has his name, his
+> hostel, his block, his room number and the complaint — without anyone writing
+> back to ask him where he lives, which is the step that actually loses the days.
+
+> Nobody had to open a dashboard to find out this happened.
+
+**If a judge asks what happens when Slack is down:** the ticket is still raised,
+the student sees no error, and the failed attempt is written to the audit log with
+the reason. The complaint is never the thing that gets lost.
+
+---
+
 ## Closing (30 seconds)
 
 > Google Apps Script, Google Sheets, Gmail. Zero rupees a year. Deployable by
@@ -245,8 +271,9 @@ not get a room. Please explain."*
 > The problem statement asked us to fix inefficient utilisation, allocation
 > conflicts, slow grievances and no transparency. Utilisation is 98%. Conflicts
 > are prevented by construction and checked by tests. Grievances answer
-> themselves when the answer is defensible and escalate when it is not. And every
-> student can see exactly why they got what they got.
+> themselves when the answer is defensible and are in a warden's hands within
+> seconds when it is not. And every student can see exactly why they got what
+> they got.
 
 ---
 
@@ -297,4 +324,6 @@ not get a room. Please explain."*
 - [ ] At least 25 letters generated so a PDF is ready to scan
 - [ ] Phone charged, camera tested against the QR beforehand
 - [ ] `EMAIL_ENABLED` left FALSE unless you are demonstrating a send to yourself
-- [ ] Both tabs open and signed in before recording starts
+- [ ] `SLACK_ENABLED` TRUE and `SLACK_WEBHOOK_URL` set — post one throwaway
+      grievance beforehand to prove the webhook is live, then delete the message
+- [ ] All three tabs open and signed in before recording starts

@@ -121,6 +121,184 @@ if (byCode.ROHAN) {
   check('a ledger entry is cited', !!g.ledgerRef);
 }
 
+section('Grievances reach the wardens on Slack');
+if (byCode.ARJUN) {
+  // A different fault per scenario, because raise() now collapses the same words
+  // from the same student inside two minutes into one ticket. Reusing one string
+  // here would test the de-duplicator four times and the Slack path once.
+  const wifi    = 'The wifi on my floor has been down since Monday morning.';
+  const fan     = 'The ceiling fan in my room has stopped working entirely.';
+  const complaint = 'There has been no hot water in the washroom for three days.';
+  const mess    = 'The mess served cold food again this evening, third time.';
+  const lastLog = () => {
+    const rows = Db.readAll('AuditLog').filter(e => e.action === 'GRIEVANCE_SLACK_NOTIFIED');
+    const e = rows[rows.length - 1];
+    if (!e) return {};
+    return typeof e.payloadJson === 'string' ? JSON.parse(e.payloadJson) : e.payloadJson;
+  };
+
+  UrlFetchApp._reset();
+  Grievance.raise(byCode.ARJUN.appId, wifi, 'student');
+  check('nothing leaves the machine while SLACK_ENABLED is FALSE',
+    global.__fetches.length === 0, global.__fetches.length + ' calls');
+  check('the skipped send is still on the record', lastLog().status === 'SKIPPED');
+
+  // Switched on, but nobody has pasted a webhook URL in yet - the likeliest
+  // half-finished setup there is, and the one that must not lose a ticket.
+  Db.setCfg('SLACK_ENABLED', 'TRUE');
+  UrlFetchApp._reset();
+  const noUrl = Grievance.raise(byCode.ARJUN.appId, fan, 'student');
+  check('a ticket is raised anyway with no webhook configured', !!noUrl.ticketId);
+  const missing = lastLog();
+  check('the ledger names the property that is missing',
+    (missing.error || '').indexOf('SLACK_WEBHOOK_URL') >= 0, missing.error);
+
+  PropertiesService.getScriptProperties()
+    .setProperty('SLACK_WEBHOOK_URL', 'https://hooks.slack.example/T0/B0/secret');
+
+  UrlFetchApp._reset();
+  global.__fetchQueue = [global.__fetchResponse(200, 'ok')];
+  const sent = Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  check('exactly one call is made', global.__fetches.length === 1,
+    global.__fetches.length + ' calls');
+  check('it is a POST to the webhook',
+    global.__fetches[0].params.method === 'post' &&
+    global.__fetches[0].url.indexOf('hooks.slack.example') > 0);
+
+  const posted = JSON.parse(global.__fetches[0].params.payload).text;
+  check('the warden is told which student', posted.indexOf(byCode.ARJUN.name) > 0);
+  check('the warden is told which room', posted.indexOf(String(byCode.ARJUN.room)) > 0);
+  check('the warden is told what is actually wrong', posted.indexOf('hot water') > 0);
+  check('the ticket id is quotable back', posted.indexOf(sent.ticketId) > 0);
+  check('the triage verdict rides along', posted.indexOf(sent.status) > 0, sent.status);
+  check('the send is recorded', lastLog().status === 'SENT');
+  console.log('        -> ' + posted.split('\n').join(' | '));
+
+  UrlFetchApp._reset();
+  global.__fetchQueue = [global.__fetchResponse(500, 'channel_not_found')];
+  const survived = Grievance.raise(byCode.ARJUN.appId, mess, 'student');
+  check('a Slack outage does not stop a student reporting a fault',
+    !!Db.byId('Grievances', survived.ticketId));
+  const failed = lastLog();
+  check('the failure is recorded with its cause',
+    failed.status === 'FAILED' && failed.error.indexOf('500') > 0, failed.error);
+
+  // An impatient student taps "Report it" three times. The wardens' channel must
+  // show one complaint, not three, and the student must still be told their
+  // problem is logged rather than shown an error for something they did not do
+  // wrong. This is the case that actually happened in testing.
+  Db.setCfg('SLACK_ENABLED', 'TRUE');
+  UrlFetchApp._reset();
+  global.__fetchQueue = [global.__fetchResponse(200, 'ok'), global.__fetchResponse(200, 'ok'),
+                         global.__fetchResponse(200, 'ok')];
+  const impatient = 'The tap in the corner bathroom will not shut off at all.';
+  const first  = Grievance.raise(byCode.ARJUN.appId, impatient, 'student');
+  const second = Grievance.raise(byCode.ARJUN.appId, impatient, 'student');
+  const third  = Grievance.raise(byCode.ARJUN.appId, impatient, 'student');
+
+  check('three taps wake the wardens once', global.__fetches.length === 1,
+    global.__fetches.length + ' calls');
+  check('three taps make one ticket, not three',
+    second.ticketId === first.ticketId && third.ticketId === first.ticketId,
+    [first.ticketId, second.ticketId, third.ticketId].join(' '));
+  check('the student is still told their problem is logged', !!second.status);
+  check('a different fault from the same student still gets through',
+    Grievance.raise(byCode.ARJUN.appId,
+      'The window latch in my room is broken and will not close.',
+      'student').ticketId !== first.ticketId);
+
+  Db.setCfg('SLACK_ENABLED', 'FALSE');
+  UrlFetchApp._reset();
+}
+
+section('A warden can close a ticket from Slack');
+if (byCode.ARJUN) {
+  const KEY = 'test-action-key-not-a-real-one';
+  const open = () => Grievance.raise(byCode.ARJUN.appId,
+    'The corridor light outside room ' + Math.random() + ' has failed.', 'student');
+
+  const click = (ticketId, key, extra) => Slack.handleInteraction({
+    parameter: Object.assign({
+      k: key,
+      payload: JSON.stringify({
+        team: { id: 'T-TEST' },
+        response_url: 'https://slack.example/respond/T0/B0',
+        user: { username: 'warden.meera' },
+        actions: [{ action_id: 'grievance_done', value: ticketId }],
+        message: { text: 'New grievance [' + ticketId + ']', blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: 'the original' } },
+          { type: 'actions', block_id: 'grievance_actions', elements: [] }
+        ] }
+      })
+    }, extra || {})
+  });
+
+  // Switched off is the default, and the default must not accept writes.
+  Db.setCfg('SLACK_ACTIONS_ENABLED', 'FALSE');
+  PropertiesService.getScriptProperties().setProperty('SLACK_ACTION_KEY', KEY);
+  const offTicket = open().ticketId;
+  click(offTicket, KEY);
+  check('a button press does nothing while SLACK_ACTIONS_ENABLED is FALSE',
+    Db.byId('Grievances', offTicket).status !== 'RESOLVED');
+
+  Db.setCfg('SLACK_ACTIONS_ENABLED', 'TRUE');
+
+  // The shared secret is the whole of the authentication, so this is the check
+  // that matters most in this file.
+  const guarded = open().ticketId;
+  click(guarded, 'wrong-key');
+  check('a wrong key resolves nothing',
+    Db.byId('Grievances', guarded).status !== 'RESOLVED');
+  check('the rejection is on the record',
+    Db.readAll('AuditLog').some(e => e.action === 'SLACK_ACTION_REJECTED'));
+
+  const t = open().ticketId;
+  UrlFetchApp._reset();
+  const done = click(t, KEY);
+  // Slack discards the HTTP response after three seconds, which Apps Script
+  // regularly overruns, so the button has to be removed through response_url too
+  // or the channel keeps showing work that is already finished.
+  check('the message is also updated out of band',
+    global.__fetches.some(f => f.url.indexOf('slack.example/respond') >= 0),
+    global.__fetches.map(f => f.url).join(' '));
+  const late = JSON.parse((global.__fetches.find(
+    f => f.url.indexOf('slack.example/respond') >= 0) || { params: { payload: '{}' } }).params.payload);
+  check('the out-of-band copy also drops the button',
+    late.replace_original === true &&
+    !(late.blocks || []).some(b => b.block_id === 'grievance_actions'));
+  const row = Db.byId('Grievances', t);
+  check('the right key closes the ticket', row.status === 'RESOLVED', row.status);
+  check('the student is told who closed it', row.resolution.indexOf('warden.meera') > 0,
+    row.resolution);
+  check('the ledger names the warden, not the system',
+    Db.readAll('AuditLog').some(e => e.action === 'GRIEVANCE_RESOLVED' &&
+      String(e.actor).indexOf('warden.meera') > 0));
+  check('the channel message is replaced, not added to', done.replace_original === true);
+  check('the button is taken away once it is done',
+    !(done.blocks || []).some(b => b.block_id === 'grievance_actions'));
+
+  // Two wardens reading the same channel both tap it.
+  const twice = click(t, KEY);
+  check('a second warden is told it was already handled',
+    (twice.text || '').indexOf('already closed') > 0, twice.text);
+  check('the second tap does not overwrite the first name',
+    Db.byId('Grievances', t).resolution.indexOf('warden.meera') > 0);
+
+  check('a ticket that no longer exists does not throw',
+    (click('GRV-2026-9999', KEY).text || '').indexOf('no longer') > 0);
+
+  // The button itself: offered on work a person must do, withheld on work the
+  // system already did.
+  const withBtn = Slack._blocks({ ticketId: 'GRV-1' }, 'x', { status: 'ESCALATED' });
+  check('an escalated ticket carries a button',
+    withBtn.some(b => b.block_id === 'grievance_actions'));
+  const noBtn = Slack._blocks({ ticketId: 'GRV-2' }, 'x', { status: 'AUTO_ANSWERED' });
+  check('an auto-answered ticket does not',
+    !noBtn.some(b => b.block_id === 'grievance_actions'));
+
+  Db.setCfg('SLACK_ACTIONS_ENABLED', 'FALSE');
+}
+
 section('View-as is admin-only');
 global.Session = { getActiveUser: () => ({ getEmail: () => 'admin@ipu.ac.in' }) };
 check('an admin may open another student\'s portal',
