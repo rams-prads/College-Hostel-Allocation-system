@@ -147,7 +147,7 @@ var Verification = (function () {
     try { idRow = Db.byId('Identity', student.studentId); } catch (e) { idRow = null; }
 
     var risk;
-    try { risk = Identity.screen(appId); }
+    try { risk = Identity.screen(appId); }      // one applicant: it builds its own
     catch (e) { risk = { score: 0, level: 'UNKNOWN', findings: [] }; }
 
     var geo = Geo.distanceFromHome(student.homePincode, student.campus);
@@ -433,10 +433,13 @@ var Verification = (function () {
     var filter = opts.filter || 'NEEDS_DECISION';
     var q = String(opts.q || '').trim().toLowerCase();
 
-    var stu = Db.indexBy('Students', 'studentId');
-    var docsByApp = Db.groupBy('Documents', 'appId');
-    var idByStudent = {};
-    try { idByStudent = Db.indexBy('Identity', 'studentId'); } catch (e) { idByStudent = {}; }
+    // ONE pass over the cohort, shared by every row below. Screening asks
+    // whole-cohort questions - does anybody else hold this enrolment number,
+    // this file - and asking them per applicant made the queue quadratic.
+    var ctx = Identity.buildContext();
+    var stu = ctx.students;
+    var docsByApp = ctx.docsByApp;
+    var idByStudent = ctx.identities;
 
     var counts = { NEEDS_DECISION: 0, FLAGGED: 0, WAITING_ON_STUDENT: 0, DONE: 0, ALL: 0 };
     var rows = [];
@@ -452,7 +455,7 @@ var Verification = (function () {
       counts.ALL++;
 
       var risk;
-      try { risk = Identity.screen(app.appId); }
+      try { risk = Identity.screen(app.appId, ctx); }
       catch (e) { risk = { score: 0, level: 'UNKNOWN', findings: [] }; }
       if (risk.level === 'HIGH' && state !== 'DONE') counts.FLAGGED++;
 
@@ -518,7 +521,9 @@ var Verification = (function () {
     // ever, over a slot they were never going to fill.
     if (student) {
       try {
-        return Documents.outstanding(app.appId, student).length
+        // The rows are already in hand; handing them over saves a scan of every
+        // document in the system, per applicant.
+        return Documents.outstanding(app.appId, student, { app: app, docs: docs }).length
           ? 'WAITING_ON_STUDENT' : 'NEEDS_DECISION';
       } catch (e) { /* fall through to the row-level reading below */ }
     }
@@ -693,7 +698,8 @@ var Verification = (function () {
 
     var byState = { NEEDS_DECISION: 0, WAITING_ON_STUDENT: 0, DONE: 0 };
     var ages = [];
-    var stu = Db.indexBy('Students', 'studentId');
+    var ctx = Identity.buildContext();
+    var stu = ctx.students;
     apps.forEach(function (a) {
       var st = stateOf_(a, docsByApp[a.appId] || [], stu[a.studentId]);
       byState[st] = (byState[st] || 0) + 1;
@@ -718,7 +724,7 @@ var Verification = (function () {
     if (typeof autoClearable_ === 'function') {
       var cache = {};
       var screener = function (appId) {
-        if (cache[appId] === undefined) cache[appId] = Identity.screen(appId);
+        if (cache[appId] === undefined) cache[appId] = Identity.screen(appId, ctx);
         return cache[appId];
       };
       docs.forEach(function (d) {

@@ -313,6 +313,61 @@ section('An unused alternative is not an outstanding task');
   })(), 'the fix must not make everybody look ready');
 })();
 
+// =========================================== batching changes nothing
+section('Screening a thousand gives the same answers as screening one');
+
+check('a shared cohort index produces the identical verdict', (() => {
+  // The queue screens every applicant against one index built once, instead of
+  // rebuilding the comparison for each. Faster is worthless if it is also
+  // different, so: same applicants, both ways, compared field by field.
+  const ctx = Identity.buildContext();
+  const sample = Db.readAll('Applications').slice(0, 40);
+  return sample.every(a => {
+    const alone = Identity.screen(a.appId);
+    const batched = Identity.screen(a.appId, ctx);
+    return alone.level === batched.level &&
+           alone.score === batched.score &&
+           JSON.stringify(alone.findings.map(f => f.code).sort()) ===
+           JSON.stringify(batched.findings.map(f => f.code).sort());
+  });
+})(), 'an optimisation that changes an answer is not an optimisation');
+
+check('and duplicates are still caught through the index', (() => {
+  // The whole point of the cross-application checks. If the index missed them,
+  // everything above would agree and both would be wrong.
+  const docs = Db.readAll('Documents').filter(d => d.driveFileId);
+  if (docs.length < 2) return true;
+  const a = docs[0], b = docs.find(d => d.appId !== a.appId);
+  if (!b) return true;
+  Db.update('Documents', a.docId, { contentHash: 'TWINNED' });
+  Db.update('Documents', b.docId, { contentHash: 'TWINNED' });
+  Db.invalidate('Documents');
+
+  const ctx = Identity.buildContext();
+  const found = Identity.screen(a.appId, ctx).findings.some(f => f.code === 'DOCUMENT_REUSED');
+
+  Db.update('Documents', a.docId, { contentHash: '' });
+  Db.update('Documents', b.docId, { contentHash: '' });
+  Db.invalidate('Documents');
+  return found;
+})(), 'two applications cannot legitimately hold byte-identical documents');
+
+check('a shared enrolment number is caught too', (() => {
+  const students = Db.readAll('Students');
+  const a = students[0], b = students[1];
+  const was = b.enrollmentNo;
+  Db.update('Students', b.studentId, { enrollmentNo: a.enrollmentNo });
+  Db.invalidate('Students');
+
+  const app = Db.findOne('Applications', { studentId: a.studentId });
+  const found = Identity.screen(app.appId, Identity.buildContext())
+    .findings.some(f => f.code === 'ENROLMENT_REUSED');
+
+  Db.update('Students', b.studentId, { enrollmentNo: was });
+  Db.invalidate('Students');
+  return found;
+})());
+
 // ============================================================== the queue
 section('The queue is ordered by what should be done first');
 
@@ -419,6 +474,28 @@ check('the clearable count obeys the same rule the button does', (() => {
   // how a button comes to be labelled with a number it cannot deliver.
   return st.clearable === apiAdminVerificationSummary().clearable;
 })(), st.clearable + ' vs ' + apiAdminVerificationSummary().clearable);
+
+section('One trip, not two');
+
+check('the queue can bring the numbers with it', (() => {
+  // On Google a second call is a second trip that re-opens the spreadsheet and
+  // re-reads every tab the first one just read. Opening this tab asked for the
+  // queue and the summary separately; so did every decision.
+  const both = apiAdminVerificationQueue({ filter: 'ALL', limit: 10, withStats: true });
+  return !!both.rows && !!both.stats && !!both.reasons && !!both.gate;
+})());
+
+check('and gives exactly the same numbers as asking separately', (() => {
+  const both = apiAdminVerificationQueue({ filter: 'ALL', limit: 10, withStats: true });
+  const apart = apiAdminVerificationStats();
+  return JSON.stringify(both.stats) === JSON.stringify(apart.stats) &&
+         JSON.stringify(both.gate) === JSON.stringify(apart.gate);
+})(), 'a shortcut that answers differently is not a shortcut');
+
+check('it does not carry them when nobody asked', (() => {
+  const plain = apiAdminVerificationQueue({ filter: 'ALL', limit: 10 });
+  return plain.stats === undefined && plain.rows !== undefined;
+})(), 'switching a filter does not need the counts recomputed');
 
 section('Only administrators');
 

@@ -663,6 +663,29 @@ check('the queue can be filtered by who is being waited on', (() => {
          /setVFilter\(&quot;FLAGGED/.test(r.screen);
 })(), '"who do I chase" is the question a queue is for');
 
+check('pressing a filter says so before the answer arrives', (() => {
+  // A button that sits looking unpressed while the server thinks reads as a
+  // button that does not work - and the honest response to that is to press it
+  // again, which turns one slow call into three.
+  const src = codeOf('admin.html');
+  const fn = src.slice(src.indexOf('function loadVQueue'),
+                       src.indexOf('function paintVQueue'));
+  return /paintVQueue\(\{ busy: true \}\)/.test(fn) &&
+         fn.indexOf('paintVQueue({ busy: true })') < fn.indexOf('apiAdminVerificationQueue');
+})(), 'the spinner has to be painted before the call, not after it');
+
+check('and the list says it is loading rather than saying it is empty', (() => {
+  const src = codeOf('admin.html');
+  return /busy[\s\S]{0,120}Loading/.test(src);
+})(), '"Nothing in this list" while the list is on its way is a lie');
+
+check('pressing the filter you are already on does nothing', (() => {
+  const src = codeOf('admin.html');
+  const fn = src.slice(src.indexOf('function setVFilter'),
+                       src.indexOf('function vSearch'));
+  return /V\.filter === f\) return/.test(fn);
+})(), 'a re-fetch that cannot change anything is a wait for nothing');
+
 section('One case, on one screen');
 
 (() => {

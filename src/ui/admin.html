@@ -902,20 +902,28 @@
   function loadVerification() {
     if (!el('vQueue')) return;
     setHtml('vQueue', '<div style="padding:18px">' + loadingState('Reading the queue') + '</div>');
-    srv('vStats').withSuccessHandler(function (d) {
-      V.reasons = d.reasons || [];
-      V.gate = d.gate || {};
-      paintVStats(d.stats || {});
-    }).apiAdminVerificationStats();
-    loadVQueue();
+    // One call, not two. See apiAdminVerificationQueue: on Google a second call
+    // is a second trip that re-reads every tab the first one just read.
+    loadVQueue(false, true);
   }
 
-  function loadVQueue(keepCase) {
+  function loadVQueue(keepCase, withStats) {
     var mine = ++V.seq;
+    // Say so IMMEDIATELY. A filter that sits there looking unpressed while the
+    // server thinks reads as a button that does not work, and the honest
+    // response to that is to press it again - which is how one slow call
+    // becomes three.
+    paintVQueue({ busy: true });
+    if (!keepCase) setHtml('vCase', card('', loadingState('Loading')));
     srv('vQueue').withSuccessHandler(function (d) {
       if (mine !== V.seq) return;
       V.rows = d.rows || [];
       V.counts = d.counts || {};
+      if (d.stats) {
+        V.reasons = d.reasons || V.reasons;
+        V.gate = d.gate || V.gate;
+        paintVStats(d.stats);
+      }
       paintVQueue();
       // Land on the first case rather than an empty panel. An officer opening
       // this tab wants to start work, not to choose where to start.
@@ -923,10 +931,16 @@
         if (V.rows.length) openCase(V.rows[0].appId);
         else { V.kase = null; paintVCase(); }
       }
-    }).apiAdminVerificationQueue({ filter: V.filter, q: V.q, limit: 200 });
+    }).apiAdminVerificationQueue({ filter: V.filter, q: V.q, limit: 200,
+                                   withStats: !!withStats });
   }
 
-  function setVFilter(f) { V.filter = f; V.appId = null; loadVQueue(); }
+  function setVFilter(f) {
+    if (V.filter === f) return;          // already there; do not re-fetch
+    V.filter = f;
+    V.appId = null;
+    loadVQueue();
+  }
   function vSearch() {
     V.q = (el('vQ') || {}).value || '';
     V.appId = null;
@@ -950,6 +964,7 @@
    * figure moved next to the buttons that produce it.
    */
   function paintVStats(st) {
+    V.lastStats = st;
     var byState = st.byState || {};
     var todo = byState.NEEDS_DECISION || 0;
     var withStudent = byState.WAITING_ON_STUDENT || 0;
@@ -1061,7 +1076,8 @@
     ['ALL', 'All']
   ];
 
-  function paintVQueue() {
+  function paintVQueue(opts) {
+    var busy = !!(opts && opts.busy);
     var tabs = VFILTERS.map(function (f) {
       var n = V.counts[f[0]] || 0;
       return '<button type="button" aria-pressed="' + (V.filter === f[0]) +
@@ -1095,8 +1111,11 @@
       '<div class="vsearch"><input type="text" id="vQ" value="' + esc(V.q) + '" ' +
         'placeholder="Find a name or enrolment number" ' +
         'onkeydown="if(event.key===&quot;Enter&quot;)vSearch()"></div>' +
-      '<div class="vlist" id="vList">' + (rows ||
-        '<p class="small muted" style="padding:18px">Nothing in this list.</p>') + '</div>');
+      '<div class="vlist" id="vList">' + (busy
+        ? '<p class="small muted" style="padding:18px">' +
+          '<span class="spin"></span> Loading&hellip;</p>'
+        : (rows || '<p class="small muted" style="padding:18px">Nothing in this list.</p>')) +
+      '</div>');
   }
 
   /* ------------------------------------------------------------- one case */
@@ -1350,17 +1369,41 @@
     setHtml('vMsg', banner('info', '<span class="spin"></span> Recording the decision'));
 
     srv('vMsg').withSuccessHandler(function (r) {
-      // Straight on to the next one. Stopping to admire a confirmation after
-      // every case is what turns a queue of two hundred into an afternoon.
+      // Straight on to the next one, out of the rows already in hand. Stopping
+      // to admire a confirmation after every case is what turns a queue of two
+      // hundred into an afternoon - and so is a round trip after each one.
       var note = r.verdict === 'VERIFY' ? 'Verified.' :
         (r.verdict === 'RESUBMIT' ? 'Sent back to the student.' : 'Rejected.');
       PENDING_VNOTE = note + (r.notified ? ' They have been emailed.' : '');
+      // The counts moved by exactly one, and which way is known without asking.
+      adjustVCounts(r.verdict);
       nextCase(appId);
     }).apiAdminVerificationDecide(appId, verdict,
       { reason: reason, note: note, docTypes: picks });
   }
 
   var PENDING_VNOTE = '';
+
+  /**
+   * Move the counts by one, locally.
+   *
+   * A decision changes exactly two of them and the direction is known from the
+   * verdict, so asking the server to recount a thousand applications after each
+   * one is a round trip spent confirming arithmetic we could do here. The next
+   * real load corrects any drift.
+   */
+  function adjustVCounts(verdict) {
+    var from = V.filter === 'ALL' ? 'NEEDS_DECISION' : V.filter;
+    var to = verdict === 'RESUBMIT' ? 'WAITING_ON_STUDENT' : 'DONE';
+    if (V.counts[from] > 0) V.counts[from]--;
+    V.counts[to] = (V.counts[to] || 0) + 1;
+    if (V.lastStats) {
+      var by = V.lastStats.byState || {};
+      if (by[from] > 0) by[from]--;
+      by[to] = (by[to] || 0) + 1;
+      paintVStats(V.lastStats);
+    }
+  }
 
   /** Move to the next case in the list, dropping the one just decided. */
   function nextCase(decidedAppId) {
@@ -1381,9 +1424,6 @@
       setHtml('vMsg', banner('good', PENDING_VNOTE));
       PENDING_VNOTE = '';
     }
-    // The counts moved, so the tabs above are now wrong.
-    srv('vStats').withSuccessHandler(function (d) { paintVStats(d.stats || {}); })
-      .apiAdminVerificationStats();
   }
 
   function prevCase() {

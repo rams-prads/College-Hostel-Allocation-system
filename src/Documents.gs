@@ -242,9 +242,12 @@ var Documents = (function () {
    * verification console therefore filed them under "waiting on the student"
    * and never showed them to anybody.
    */
-  function outstanding(appId, student) {
-    var app = Db.byId('Applications', appId);
-    var rows = Db.where('Documents', { appId: appId });
+  function outstanding(appId, student, prefetched) {
+    // `prefetched` is the applicant's document rows when the caller already has
+    // them. A queue asking this of a thousand applicants otherwise scans every
+    // document in the system a thousand times over.
+    var app = prefetched && prefetched.app ? prefetched.app : Db.byId('Applications', appId);
+    var rows = (prefetched && prefetched.docs) || Db.where('Documents', { appId: appId });
     var byType = {};
     rows.forEach(function (d) { byType[d.docType] = d; });
 

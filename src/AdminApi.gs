@@ -269,11 +269,20 @@ function autoClearable_(doc, screener) {
   return { ok: true, reason: '', level: risk.level };
 }
 
-/** Identity.screen, computed once per application per request. */
+/**
+ * Identity.screen, computed once per application per request, over a cohort
+ * index built once per request.
+ *
+ * Without the shared index this screened every applicant against every other
+ * applicant, once per document - which is how a summary of sixty documents
+ * came to take half a second before anything appeared on screen.
+ */
 function screenerFor_() {
   var cache = {};
+  var ctx = null;
   return function (appId) {
-    if (cache[appId] === undefined) cache[appId] = Identity.screen(appId);
+    if (!ctx) ctx = Identity.buildContext();
+    if (cache[appId] === undefined) cache[appId] = Identity.screen(appId, ctx);
     return cache[appId];
   };
 }
@@ -442,10 +451,13 @@ function apiAdminDocQueue(limit, onlyConflicts) {
   var stu = Db.indexBy('Students', 'studentId');
   var apps = Db.indexBy('Applications', 'appId');
   var screened = {};
+  var queueCtx = null;
   var queueScreener = function (appId) {
     if (screened[appId] === undefined) {
-      try { screened[appId] = Identity.screen(appId); }
-      catch (e) { screened[appId] = { score: 0, level: 'UNKNOWN', findings: [] }; }
+      try {
+        if (!queueCtx) queueCtx = Identity.buildContext();
+        screened[appId] = Identity.screen(appId, queueCtx);
+      } catch (e) { screened[appId] = { score: 0, level: 'UNKNOWN', findings: [] }; }
     }
     return screened[appId];
   };
@@ -620,9 +632,31 @@ function apiAdminFillVacancies(limit) {
  * is how many distinct things the console asks for. The old screen made six
  * and then reconciled them in the browser.
  */
+/**
+ * The queue, and optionally the numbers above it in the same breath.
+ *
+ * On Google the cost of a call is not the work it does, it is the trip: every
+ * separate call re-opens the spreadsheet and re-reads every tab it touches,
+ * because the per-execution cache dies with the execution. Opening this tab
+ * asked for the queue and the summary separately, so it read Applications,
+ * Students, Documents and Identity twice over - and so did every decision, one
+ * round trip to record it and another to refresh the counts.
+ *
+ * They are the same read. `withStats` says so.
+ */
 function apiAdminVerificationQueue(opts) {
   Auth.requireAdmin();
-  return Verification.queue(opts || {});
+  opts = opts || {};
+  var out = Verification.queue(opts);
+  if (opts.withStats) {
+    out.stats = Verification.stats();
+    out.reasons = Verification.reasons();
+    out.gate = {
+      documents: !!Number(Policy.value('eligibility', 'REQUIRE_DOC_VERIFIED', 0)),
+      identity: !!Number(Policy.value('eligibility', 'REQUIRE_IDENTITY_VERIFIED', 0))
+    };
+  }
+  return out;
 }
 
 function apiAdminVerificationCase(appId) {
