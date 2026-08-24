@@ -97,8 +97,19 @@ var Grievance = (function () {
     // Read the row back rather than reusing what was just written: triage()
     // persists the status and the verdict, and the wardens' copy should say what
     // the ticket now is, not what it was a line ago.
+    //
+    // The fallback is not paranoia. Two students reporting a problem in the same
+    // second race inside Db.appendMany, which picks its target row from
+    // getLastRow() without holding a lock - so one row can be written and then
+    // overwritten, and this read-back finds nothing. That sent Slack a message
+    // with every field empty, which is worse than sending nothing: a warden
+    // cannot act on it and cannot tell whose room it was about.
     try {
-      Slack.notifyGrievance(Db.byId('Grievances', ticketId),
+      var row = Db.byId('Grievances', ticketId) || {
+        ticketId: ticketId, category: classify(text),
+        text: String(text).trim(), status: 'OPEN'
+      };
+      Slack.notifyGrievance(row,
         Db.byId('Students', app.studentId), residence_(appId), result);
     } catch (e) {
       // Belt and braces on top of notifyGrievance's own catch. A student
