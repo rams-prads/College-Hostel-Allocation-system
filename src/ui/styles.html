@@ -288,11 +288,15 @@
     background:var(--surface-2);border:1px solid var(--border);
     border-radius:var(--r);padding:14px 16px;
   }
+  /* Each part on its own line. They are SPANS rather than divs because these
+     tiles are buttons now, and a button may only contain phrasing content - so
+     the stacking has to be asked for here rather than inherited from the tag. */
+  .tile .n, .tile .l, .tile .d{display:block}
   .tile .n{
     font-size:27px;font-weight:750;line-height:1.05;letter-spacing:-.03em;
     font-variant-numeric:tabular-nums;
   }
-  .tile .l{font-size:11.5px;color:var(--muted);margin-top:3px;font-weight:550}
+  .tile .l{font-size:11.5px;color:var(--muted);margin-top:5px;font-weight:550}
   .tile.hi{background:var(--amber-soft);border-color:var(--amber-line)}
   .tile.hi .n{color:var(--amber-600)}
   .tile.good .n{color:var(--ok)}
@@ -311,9 +315,12 @@
   button.tile[aria-current="true"]{
     border-color:var(--amber);background:var(--amber-soft);
   }
-  .tile .l{font-weight:650;color:var(--text-2);font-size:12.5px}
-  .tile .d{
-    font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.45;font-weight:400;
+  button.tile .l{
+    font-weight:650;color:var(--text-2);font-size:12.5px;margin-top:7px;
+    line-height:1.3;
+  }
+  button.tile .d{
+    font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.5;font-weight:400;
   }
 
   /* =============================================================== table */
