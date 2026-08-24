@@ -227,6 +227,66 @@ function apiAdminScanDocuments(batch) {
  * open five hundred scans before a run will not do it, and the declaration goes
  * unchecked - which is the situation this replaced.
  */
+/**
+ * Would clearing this document automatically be safe, and if not, why not?
+ *
+ * ONE answer, asked by three callers that used to answer it separately and
+ * disagree: the summary that counts what the button will do, the button that
+ * does it, and the queue that decides whether a person needs to see it.
+ *
+ * When they disagreed, a document fell straight through the gap. Its scan
+ * agreed with the declaration, so the decision queue left it out; its
+ * application was flagged by screening, so auto-clear refused it - silently,
+ * because refusing was a `return` inside a loop. It was on no admin screen at
+ * all, could not be cleared, and the student's portal went on saying "under
+ * review" indefinitely. That is not a rare state: it is what happens to the
+ * first person whose Aadhaar or document turns up twice.
+ *
+ * @return {{ok: boolean, reason: string, level: string}}
+ */
+function autoClearable_(doc, screener) {
+  if (doc.status !== 'UPLOADED') return { ok: false, reason: 'already decided', level: '' };
+  if (doc.scanVerdict !== 'MATCH' && doc.scanVerdict !== 'MINOR') {
+    return { ok: false, reason: 'the reading did not settle it', level: '' };
+  }
+
+  // Never clear an application screening has flagged, whatever the document
+  // says. A reused Aadhaar is not made acceptable by a tidy scan - but the
+  // reason has to travel with the refusal, or the button appears to do nothing.
+  var risk;
+  try { risk = screener(doc.appId); }
+  catch (e) { return { ok: false, reason: 'the applicant could not be screened', level: 'UNKNOWN' }; }
+
+  if (risk.level === 'HIGH') {
+    var blocking = (risk.findings || []).filter(function (f) { return f.severity === 'BLOCK'; });
+    return {
+      ok: false, level: 'HIGH',
+      reason: blocking.length
+        ? blocking[0].text
+        : 'the applicant is flagged by identity screening'
+    };
+  }
+  return { ok: true, reason: '', level: risk.level };
+}
+
+/**
+ * Identity.screen, computed once per application per request, over a cohort
+ * index built once per request.
+ *
+ * Without the shared index this screened every applicant against every other
+ * applicant, once per document - which is how a summary of sixty documents
+ * came to take half a second before anything appeared on screen.
+ */
+function screenerFor_() {
+  var cache = {};
+  var ctx = null;
+  return function (appId) {
+    if (!ctx) ctx = Identity.buildContext();
+    if (cache[appId] === undefined) cache[appId] = Identity.screen(appId, ctx);
+    return cache[appId];
+  };
+}
+
 function apiAdminVerificationSummary() {
   Auth.requireAdmin();
   var docs = Db.readAll('Documents').filter(function (d) { return d.driveFileId; });
@@ -242,9 +302,19 @@ function apiAdminVerificationSummary() {
            (d.scanVerdict === 'CONFLICT' || d.scanVerdict === 'UNREADABLE');
   }).length;
 
-  var clearable = docs.filter(function (d) {
-    return d.status === 'UPLOADED' && (d.scanVerdict === 'MATCH' || d.scanVerdict === 'MINOR');
-  }).length;
+  // Counted by the same rule the button obeys. Counting "agrees with its
+  // declaration" and then clearing rather fewer is how a button comes to be
+  // labelled with a number it cannot deliver.
+  var screener = screenerFor_();
+  var clearable = 0, blocked = 0, blockedReason = '';
+  docs.forEach(function (d) {
+    if (d.status !== 'UPLOADED') return;
+    if (d.scanVerdict !== 'MATCH' && d.scanVerdict !== 'MINOR') return;
+    var can = autoClearable_(d, screener);
+    if (can.ok) { clearable++; return; }
+    blocked++;
+    if (!blockedReason) blockedReason = can.reason;
+  });
 
   // How many are finished, so the card can say what is true rather than what
   // sounds tidy. "Everything agrees" over two contradictions and two unreadable
@@ -257,8 +327,13 @@ function apiAdminVerificationSummary() {
   return {
     total: docs.length,
     byVerdict: byVerdict,
-    needsPerson: needsPerson,
+    needsPerson: needsPerson + blocked,
     clearable: clearable,
+    // Documents whose reading agreed but whose applicant is flagged. They need
+    // a person, they are in the decision queue, and they are the reason the
+    // "clear" button used to report a number it could not deliver.
+    blocked: blocked,
+    blockedReason: blockedReason,
     decided: decided,
     held: docs.filter(function (d) { return d.status === 'UPLOADED'; }).length,
     unscanned: byVerdict.UNSCANNED || 0
@@ -281,17 +356,26 @@ function apiAdminAutoClear() {
 
   var stu = Db.indexBy('Students', 'studentId');
   var apps = Db.indexBy('Applications', 'appId');
-  var cleared = 0, touchedApps = {};
+  var cleared = 0, touchedApps = {}, skipped = [];
+  var screener = screenerFor_();
 
   Db.readAll('Documents').forEach(function (d) {
     if (d.status !== 'UPLOADED') return;
     if (d.scanVerdict !== 'MATCH' && d.scanVerdict !== 'MINOR') return;
 
-    // Never clear an application that screening has flagged, whatever the
-    // document says. A reused Aadhaar is not made acceptable by a tidy scan.
-    var risk;
-    try { risk = Identity.screen(d.appId); } catch (e) { return; }
-    if (risk.level === 'HIGH') return;
+    var can = autoClearable_(d, screener);
+    if (!can.ok) {
+      // Refusing used to be a bare `return`, so the button reported clearing
+      // nothing and gave no reason. Whoever pressed it is owed the reason.
+      var a = apps[d.appId];
+      var who = a ? stu[a.studentId] : null;
+      skipped.push({
+        docId: d.docId, appId: d.appId,
+        studentName: who ? who.name : '(unknown)',
+        reason: can.reason
+      });
+      return;
+    }
 
     Documents.decide(d.docId, true, 'AUTOMATIC (document matched declaration)',
       d.scanVerdict === 'MINOR'
@@ -313,10 +397,15 @@ function apiAdminAutoClear() {
   });
 
   Ledger.append('DOCUMENTS_AUTO_CLEARED', {
-    count: cleared, applications: Object.keys(touchedApps).length
+    count: cleared, applications: Object.keys(touchedApps).length,
+    skipped: skipped.length
   }, s.email);
 
-  return { cleared: cleared, applications: Object.keys(touchedApps).length };
+  return {
+    cleared: cleared,
+    applications: Object.keys(touchedApps).length,
+    skipped: skipped
+  };
 }
 
 /**
@@ -362,6 +451,16 @@ function apiAdminDocQueue(limit, onlyConflicts) {
   var stu = Db.indexBy('Students', 'studentId');
   var apps = Db.indexBy('Applications', 'appId');
   var screened = {};
+  var queueCtx = null;
+  var queueScreener = function (appId) {
+    if (screened[appId] === undefined) {
+      try {
+        if (!queueCtx) queueCtx = Identity.buildContext();
+        screened[appId] = Identity.screen(appId, queueCtx);
+      } catch (e) { screened[appId] = { score: 0, level: 'UNKNOWN', findings: [] }; }
+    }
+    return screened[appId];
+  };
 
   var rows = Db.readAll('Documents')
     .filter(function (d) {
@@ -372,17 +471,17 @@ function apiAdminDocQueue(limit, onlyConflicts) {
     })
     .filter(function (d) {
       if (!onlyConflicts) return true;
-      return d.scanVerdict === 'CONFLICT' || d.scanVerdict === 'UNREADABLE' ||
-             !d.scanVerdict || d.scanVerdict === 'UNSCANNED';
+      if (d.scanVerdict === 'CONFLICT' || d.scanVerdict === 'UNREADABLE' ||
+          !d.scanVerdict || d.scanVerdict === 'UNSCANNED') return true;
+      // A document the reading settled but screening will not let through has
+      // to appear here. It cannot be cleared automatically and it is nobody's
+      // task otherwise, which is exactly how one becomes invisible.
+      return !autoClearable_(d, queueScreener).ok;
     })
     .map(function (d) {
       var app = apps[d.appId];
       var student = app ? stu[app.studentId] : null;
-      if (screened[d.appId] === undefined) {
-        try { screened[d.appId] = Identity.screen(d.appId); }
-        catch (e) { screened[d.appId] = { score: 0, level: 'UNKNOWN', findings: [] }; }
-      }
-      var risk = screened[d.appId];
+      var risk = queueScreener(d.appId);
       var idRow = student ? Db.byId('Identity', student.studentId) : null;
 
       return {
@@ -524,6 +623,80 @@ function apiAdminDecideDocument(docId, approve, note) {
 function apiAdminFillVacancies(limit) {
   var s = Auth.requireAdmin();
   return Vacancy.fillAll(limit || 25, s.email);
+}
+
+// ======================================================== verification console
+
+/**
+ * The queue, the case, the decision and the numbers - four calls, because that
+ * is how many distinct things the console asks for. The old screen made six
+ * and then reconciled them in the browser.
+ */
+/**
+ * The queue, and optionally the numbers above it in the same breath.
+ *
+ * On Google the cost of a call is not the work it does, it is the trip: every
+ * separate call re-opens the spreadsheet and re-reads every tab it touches,
+ * because the per-execution cache dies with the execution. Opening this tab
+ * asked for the queue and the summary separately, so it read Applications,
+ * Students, Documents and Identity twice over - and so did every decision, one
+ * round trip to record it and another to refresh the counts.
+ *
+ * They are the same read. `withStats` says so.
+ */
+function apiAdminVerificationQueue(opts) {
+  Auth.requireAdmin();
+  opts = opts || {};
+  var out = Verification.queue(opts);
+  if (opts.withStats) {
+    out.stats = Verification.stats();
+    out.reasons = Verification.reasons();
+    out.gate = {
+      documents: !!Number(Policy.value('eligibility', 'REQUIRE_DOC_VERIFIED', 0)),
+      identity: !!Number(Policy.value('eligibility', 'REQUIRE_IDENTITY_VERIFIED', 0))
+    };
+  }
+  return out;
+}
+
+function apiAdminVerificationCase(appId) {
+  Auth.requireAdmin();
+  return Verification.caseFor(appId);
+}
+
+function apiAdminVerificationDecide(appId, verdict, opts) {
+  var s = Auth.requireAdmin();
+  return Verification.decide(appId, verdict, opts || {}, s.email);
+}
+
+function apiAdminVerificationStats() {
+  Auth.requireAdmin();
+  return {
+    stats: Verification.stats(),
+    reasons: Verification.reasons(),
+    // Whether an unverified applicant can be allotted a room at all. Shown
+    // rather than buried in the Policy tab, because it is the single setting
+    // that decides whether any of this work gates anything.
+    gate: {
+      documents: !!Number(Policy.value('eligibility', 'REQUIRE_DOC_VERIFIED', 0)),
+      identity: !!Number(Policy.value('eligibility', 'REQUIRE_IDENTITY_VERIFIED', 0))
+    }
+  };
+}
+
+/**
+ * Turn the verification gate on or off.
+ *
+ * A deliberate, recorded act. With it off, verification is advisory and the
+ * allocation ignores it; with it on, an unverified applicant cannot be given a
+ * room. Which of those is right depends on how far through the session the
+ * office is, so it is a switch and not a constant - but it is a switch whose
+ * position is on screen rather than in a settings tab nobody opens.
+ */
+function apiAdminSetVerificationGate(on) {
+  var s = Auth.requireAdmin();
+  Policy.set('eligibility', 'REQUIRE_DOC_VERIFIED', on ? 1 : 0, s.email);
+  return { ok: true, on: !!on };
 }
 
 /** Generate allotment letters in bounded batches. */

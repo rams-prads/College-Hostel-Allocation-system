@@ -1,4 +1,28 @@
 /**
+ * Identity.gs - RETIRED, and kept deliberately.
+ *
+ * Aadhaar is no longer collected anywhere in this system. The GGSIPU admission
+ * confirmation page replaced it: every student holds one before they have a
+ * college email address, it carries the same correspondence address, and it
+ * additionally carries the four fields the allocation actually turns on - the
+ * region the qualifying exam was passed in, the reservation category, the
+ * disability sub-category and the qualifying percentage - none of which an
+ * Aadhaar card carries and all of which were previously self-declared and
+ * checked by nobody.
+ *
+ * What is left here is not dead weight. screen() is still the applicant-level
+ * cross-check that the verification console shows, and it still finds reused
+ * documents, malformed enrolment numbers, implausible ages and addresses that
+ * do not resolve. Only the Aadhaar-specific parts are dormant: the vault, the
+ * Verhoeff validation, and the submit/decide pair that the portal no longer
+ * calls.
+ *
+ * They are kept rather than deleted because the decision to stop asking for
+ * Aadhaar is a policy decision, and reversing it should be a configuration
+ * change rather than a rewrite. Nothing writes to the Identity tab any more,
+ * so nothing here runs unless something calls it.
+ *
+ * ---------------------------------------------------------------------------
  * Identity.gs - identity verification for hostel applicants.
  *
  * WHAT THIS IS NOT
@@ -263,12 +287,68 @@ var Identity = (function () {
    *
    * @return {{score: number, level: string, findings: Array}}
    */
-  function screen(appId) {
+  /**
+   * The cross-application indexes screening needs, built once.
+   *
+   * Every question screen() asks about duplication - "does another student hold
+   * this Aadhaar reference, this enrolment number, this exact file?" - is a
+   * question about the WHOLE cohort. Answering it by filtering the whole cohort
+   * is correct for one applicant and quadratic for a queue: screening a
+   * thousand applications meant a thousand passes over a thousand students and
+   * every document in the system, which is where five seconds went.
+   *
+   * Built once, every one of those becomes a lookup. The screening logic is
+   * unchanged and there is still only one copy of it - screen() takes the
+   * context as an argument and builds its own if nobody hands one over, so a
+   * single call and a batch of a thousand run exactly the same checks.
+   */
+  function buildContext() {
+    var ctx = {
+      apps: Db.indexBy('Applications', 'appId'),
+      students: Db.indexBy('Students', 'studentId'),
+      identities: {},
+      docsByApp: Db.groupBy('Documents', 'appId'),
+      byAadhaarRef: {},
+      byEnrolment: {},
+      byHash: {}
+    };
+    try { ctx.identities = Db.indexBy('Identity', 'studentId'); }
+    catch (e) { ctx.identities = {}; }
+
+    Object.keys(ctx.identities).forEach(function (sid) {
+      var r = ctx.identities[sid];
+      if (!r || !r.aadhaarRef) return;
+      (ctx.byAadhaarRef[r.aadhaarRef] = ctx.byAadhaarRef[r.aadhaarRef] || []).push(sid);
+    });
+
+    Db.readAll('Students').forEach(function (s) {
+      var e = String(s.enrollmentNo || '').trim().toUpperCase();
+      if (!e) return;
+      (ctx.byEnrolment[e] = ctx.byEnrolment[e] || []).push(s.studentId);
+    });
+
+    Db.readAll('Documents').forEach(function (d) {
+      if (!d.contentHash) return;
+      (ctx.byHash[d.contentHash] = ctx.byHash[d.contentHash] || []).push(d);
+    });
+
+    return ctx;
+  }
+
+  /**
+   * Screen one applicant.
+   *
+   * @param {string} appId
+   * @param {Object=} ctx  from buildContext(). Optional: pass one when
+   *                       screening many, omit it when screening one.
+   */
+  function screen(appId, ctx) {
+    ctx = ctx || buildContext();
     var findings = [];
-    var app = Db.byId('Applications', appId);
+    var app = ctx.apps[appId];
     if (!app) return { score: 0, level: 'UNKNOWN', findings: findings };
 
-    var student = Db.byId('Students', app.studentId);
+    var student = ctx.students[app.studentId];
     if (!student) {
       return {
         score: 100, level: 'HIGH',
@@ -277,19 +357,18 @@ var Identity = (function () {
       };
     }
 
-    var idRow = Db.byId('Identity', student.studentId);
+    var idRow = ctx.identities[student.studentId];
 
     // --- 1. one identity, one application --------------------------------
     if (idRow && idRow.aadhaarRef) {
-      var sharing = Db.readAll('Identity').filter(function (r) {
-        return r.studentId !== student.studentId && refsEqual(r.aadhaarRef, idRow.aadhaarRef);
+      var sharing = (ctx.byAadhaarRef[idRow.aadhaarRef] || []).filter(function (sid) {
+        return sid !== student.studentId;
       });
       if (sharing.length) {
         findings.push({
           code: 'AADHAAR_REUSED', severity: 'BLOCK',
           text: 'The same Aadhaar number is registered against ' + sharing.length +
-                ' other student record(s): ' +
-                sharing.map(function (r) { return r.studentId; }).join(', ') + '.'
+                ' other student record(s): ' + sharing.join(', ') + '.'
         });
       }
     }
@@ -297,15 +376,13 @@ var Identity = (function () {
     // --- 2. one enrolment number, one person ------------------------------
     var enrol = String(student.enrollmentNo || '').trim().toUpperCase();
     if (enrol) {
-      var twins = Db.readAll('Students').filter(function (s) {
-        return s.studentId !== student.studentId &&
-               String(s.enrollmentNo || '').trim().toUpperCase() === enrol;
+      var twins = (ctx.byEnrolment[enrol] || []).filter(function (sid) {
+        return sid !== student.studentId;
       });
       if (twins.length) {
         findings.push({
           code: 'ENROLMENT_REUSED', severity: 'BLOCK',
-          text: 'Enrolment number ' + enrol + ' also appears on ' +
-                twins.map(function (s) { return s.studentId; }).join(', ') + '.'
+          text: 'Enrolment number ' + enrol + ' also appears on ' + twins.join(', ') + '.'
         });
       }
     }
@@ -320,13 +397,16 @@ var Identity = (function () {
     // A recycled scan is one of the few fraud signals available offline, and it
     // is decisive: two applications cannot legitimately hold byte-identical
     // documents.
-    var myDocs = Db.where('Documents', { appId: appId })
+    var myDocs = (ctx.docsByApp[appId] || [])
       .filter(function (d) { return d.contentHash; });
     if (myDocs.length) {
       var mine = {};
       myDocs.forEach(function (d) { mine[d.contentHash] = d.docType; });
-      var collisions = Db.readAll('Documents').filter(function (d) {
-        return d.appId !== appId && d.contentHash && mine[d.contentHash];
+      var collisions = [];
+      Object.keys(mine).forEach(function (h) {
+        (ctx.byHash[h] || []).forEach(function (d) {
+          if (d.appId !== appId) collisions.push(d);
+        });
       });
       collisions.forEach(function (d) {
         findings.push({
@@ -554,6 +634,7 @@ var Identity = (function () {
   return {
     verhoeffValid: verhoeffValid,
     verhoeffDigit: verhoeffDigit,
+    buildContext: buildContext,
     checkAadhaar: checkAadhaar,
     checkEnrolment: checkEnrolment,
     mask: mask,

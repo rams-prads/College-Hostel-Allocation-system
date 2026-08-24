@@ -12,7 +12,7 @@ seedConfig_();
 seedPolicy_();
 seedAll();
 
-section('Two documents, and who is asked for which');
+section("One document, and it is the university's own");
 
 const firstYearGen = { year: 1, category: 'GEN', isPwD: false, programme: 'BTMT' };
 const seniorGen    = { year: 3, category: 'GEN', isPwD: false, programme: 'BTMT' };
@@ -20,42 +20,79 @@ const firstYearSC  = { year: 1, category: 'SC',  isPwD: false, programme: 'BTMT'
 const seniorPwdOBC = { year: 2, category: 'OBC', isPwD: true,  programme: 'BTMT' };
 
 const types = s => Documents.requiredFor(s).map(d => d.docType).sort();
+const slots = s => Documents.slotsFor(s).map(d => d.docType).sort();
 
-check('everybody is asked for their Aadhaar',
+check('everybody is asked for their admission confirmation page',
   [firstYearGen, seniorGen, firstYearSC, seniorPwdOBC].every(s =>
-    types(s).includes('AADHAAR')),
-  'it is the identity document and the address the distance is computed from');
-check('a first-year is asked for the Aadhaar and nothing else',
-  types(firstYearGen).join(',') === 'AADHAAR',
-  types(firstYearGen).join(', '));
-check('a continuing student is asked for their ID card as well',
-  types(seniorGen).join(',') === 'AADHAAR,ID_CARD',
+    types(s).includes('ADMISSION_FORM')),
+  'it carries the region, the category, the disability sub-category, the qualifying ' +
+  'marks and the address - every input the allocation turns on');
+
+check('and it is ONE requirement, not a checklist',
+  [firstYearGen, seniorGen, firstYearSC, seniorPwdOBC].every(s => types(s).length === 1),
   types(seniorGen).join(', '));
-check('a first-year is NOT asked for an ID card',
-  !types(firstYearGen).includes('ID_CARD'),
-  'ID cards are not issued yet in year 1');
+
+check('a continuing student may send their ID card instead', (() => {
+  const req = Documents.requiredFor(seniorGen)[0];
+  return req.alternatives.indexOf('ID_CARD') >= 0 &&
+         slots(seniorGen).join(',') === 'ADMISSION_FORM,ID_CARD';
+})(), 'a third-year may no longer have a two-year-old confirmation page to hand');
+
+check('a first-year has no such alternative', (() => {
+  const req = Documents.requiredFor(firstYearGen)[0];
+  return req.alternatives.length === 0 && slots(firstYearGen).join(',') === 'ADMISSION_FORM';
+})(), 'ID cards are not issued yet in year 1');
+
+check('and the offer is spelled out on the requirement itself',
+  /upload your college ID card instead/.test(Documents.requiredFor(seniorGen)[0].hint),
+  'an alternative nobody is told about is not an alternative');
 
 check('a lateral-entry student is a first-year in their second year', (() => {
-  // LE-BTMT starts at year 2, so a year-2 lateral entrant has no ID card either.
   const le = { year: 2, category: 'GEN', isPwD: false, programme: 'LE-BTMT' };
-  return types(le).join(',') === 'AADHAAR';
+  return slots(le).join(',') === 'ADMISSION_FORM';
 })(), 'asking a brand-new student for a card nobody has issued them is a dead end');
+
+check('nobody is asked for an Aadhaar number or card any more',
+  [firstYearGen, seniorGen, firstYearSC, seniorPwdOBC].every(s =>
+    slots(s).indexOf('AADHAAR') < 0),
+  'it proved one field this system uses and cost a keyed vault to hold');
 
 check('nothing is asked for on account of a category or a PwD claim',
   types(firstYearSC).join(',') === types(firstYearGen).join(',') &&
   types(seniorPwdOBC).join(',') === types(seniorGen).join(','),
-  'those certificates are checked on paper at the counter, not uploaded twice');
-
-check('no student is ever asked for more than two documents',
-  [firstYearGen, seniorGen, firstYearSC, seniorPwdOBC].every(s =>
-    types(s).length <= 2));
+  'the admission page already records both, so a certificate would be asking twice');
 
 check('a student with no programme on record still gets a sane answer',
   Documents.requiredFor({ year: 1, category: 'GEN' }).length === 1,
   'an unknown course must not throw on the way to the upload screen');
 
 check('every requirement explains why it is being asked for',
-  Documents.requiredFor(seniorPwdOBC).every(d => d.why && d.why.length > 25));
+  Documents.slotsFor(seniorPwdOBC).every(d => d.why && d.why.length > 25));
+
+section('Either document satisfies the requirement');
+
+(() => {
+  // Taken from the END of the list: the next section works from the start, and
+  // two sections quietly sharing an application is how a test fails three
+  // sections after the thing that broke it.
+  const app = Db.readAll('Applications').slice().reverse().find(a =>
+    Number(Db.byId('Students', a.studentId).year) > 1);
+  const st = Db.byId('Students', app.studentId);
+  Documents.provision(app.appId, st);
+  Db.invalidate('Documents');
+
+  const rows = Db.where('Documents', { appId: app.appId });
+  check('both slots exist, so the student can choose', rows.length === 2,
+    'a slot that only appears once the student has guessed its name is not a slot');
+
+  const card = rows.find(d => d.docType === 'ID_CARD');
+  Documents.decide(card.docId, true, 'warden@ipu.ac.in', '');
+  Db.invalidate('Documents');
+  check('verifying the ID card alone satisfies the requirement',
+    Documents.rollUp(app.appId, st) === 'VERIFIED',
+    'rolling up row by row leaves an applicant permanently pending over a slot ' +
+    'they were never expected to fill');
+})();
 
 section('Document provisioning and roll-up');
 const students = Db.readAll('Students');
@@ -65,8 +102,9 @@ const sampleApp = apps[0];
 const sampleStu = stuById[sampleApp.studentId];
 
 const n = Documents.provision(sampleApp.appId, sampleStu);
-check('provisioning creates a row per required document',
-  n === Documents.requiredFor(sampleStu, sampleApp).length, n + ' rows');
+check('provisioning creates a row per SLOT, alternatives included',
+  n === Documents.slotsFor(sampleStu, sampleApp).length, n + ' rows',
+  'the student has to have somewhere to put whichever one they have');
 check('provisioning is idempotent',
   Documents.provision(sampleApp.appId, sampleStu) === 0);
 check('rolls up to PENDING when nothing is uploaded',
@@ -82,9 +120,23 @@ docs.forEach(d => Documents.decide(d.docId, true, 'warden@ipu.ac.in', ''));
 check('rolls up to VERIFIED once everything is approved',
   Documents.rollUp(sampleApp.appId, sampleStu) === 'VERIFIED');
 
-Documents.decide(docs[0].docId, false, 'warden@ipu.ac.in', 'Blurred scan');
-check('one rejection rolls the whole application up to REJECTED',
+// Rejecting EVERY document that could satisfy the requirement. Rejecting one of
+// two alternatives no longer condemns the application, which is the point of
+// there being two - so the test has to say which it means.
+docs.forEach(d => Documents.decide(d.docId, false, 'warden@ipu.ac.in', 'Blurred scan'));
+check('a requirement with nothing left to satisfy it rolls up to REJECTED',
   Documents.rollUp(sampleApp.appId, sampleStu) === 'REJECTED');
+
+check('but one surviving alternative keeps the requirement met', (() => {
+  const card = docs.find(d => d.docType === 'ID_CARD');
+  if (!card) return true;                      // a first-year has no alternative
+  Documents.decide(card.docId, true, 'warden@ipu.ac.in', 'Accepted instead.');
+  Db.invalidate('Documents');
+  const up = Documents.rollUp(sampleApp.appId, sampleStu) === 'VERIFIED';
+  Documents.decide(card.docId, false, 'warden@ipu.ac.in', 'Blurred scan');
+  Db.invalidate('Documents');
+  return up;
+})(), 'the requirement is met by either document, so one rejection is not the end of it');
 check('verification decisions are written to the ledger',
   Db.readAll('AuditLog').some(e => e.action === 'DOCUMENT_REJECTED'));
 check('ledger chain survives document activity', Ledger.verify().intact);
@@ -112,7 +164,7 @@ check('options never cross the campus partition', (() => {
 check('every option has real rooms behind it', form.options.every(o => o.rooms > 0));
 check('the document list matches this student',
   form.documents.length ===
-  Documents.requiredFor(target, Db.findOne('Applications', { studentId: target.studentId })).length);
+  Documents.slotsFor(target, Db.findOne('Applications', { studentId: target.studentId })).length);
 check('an existing application is returned as a draft', !!form.draft);
 check('the draft preserves the saved preference order', (() => {
   const saved = Db.where('Preferences', { appId: form.draft.appId })
@@ -123,7 +175,12 @@ check('the draft preserves the saved preference order', (() => {
 
 section('Saving an application');
 const myApp = Db.findOne('Applications', { studentId: target.studentId });
-Db.update('Applications', myApp.appId, { status: 'DRAFT' });
+// The seed marks some applications as document-verified for realism, and a
+// verified application is - correctly - no longer the student's to change. This
+// section is about editing one, so it starts from one that has not been decided.
+Db.update('Applications', myApp.appId,
+  { status: 'DRAFT', docStatus: 'PENDING', verifyStatus: '' });
+Db.invalidate('Applications');
 
 // The menu is as long as the room types open to THIS student - two for an
 // undergraduate, three for a PG who may also ask for a single room.
@@ -160,6 +217,46 @@ check('documents are provisioned on submit',
   Db.where('Documents', { appId: saved.appId }).length > 0);
 check('submission is written to the ledger',
   Db.readAll('AuditLog').some(e => e.action === 'APPLICATION_SUBMITTED'));
+
+section('Re-submitting an edited registration');
+
+// The reported fault, in the shape it was reported: open an existing
+// registration, change something, submit. The form sends the roommate answers
+// back exactly as it received them - and it received a raw sheet row, _row and
+// all - so the save died on `Db: no column "_row" in "Lifestyle"`.
+(() => {
+  Db.update('Applications', myApp.appId,
+    { status: 'SUBMITTED', docStatus: 'PENDING', verifyStatus: '' });
+  Db.invalidate('Applications');
+
+  const form = apiCall(null, 'apiGetApplyForm', []);
+  check('the form hands back the roommate answers it holds', !!form.draft.lifestyle,
+    'an edit that starts blank is a re-typing exercise');
+  check('and hands over no sheet coordinates with them',
+    form.draft.lifestyle._row === undefined,
+    'a page that sends _row back is asking Db to write a column that does not exist');
+
+  let threw = null;
+  try {
+    apiSaveApplication({
+      details: details({}),
+      needsAccessible: !!form.draft.needsAccessible,
+      preferences: form.draft.preferences,
+      // Verbatim, the way the page does it.
+      lifestyle: form.draft.lifestyle,
+      submit: true
+    });
+  } catch (e) { threw = e.message; }
+
+  check('re-submitting it works', threw === null, threw || '');
+  check('and the answers survived the round trip', (() => {
+    Db.invalidate('Lifestyle');
+    const life = Db.byId('Lifestyle', myApp.appId);
+    return life && life.studyStyle === form.draft.lifestyle.studyStyle;
+  })());
+  check('the application is submitted, not left half-written',
+    Db.byId('Applications', myApp.appId).status === 'SUBMITTED');
+})();
 
 section('Validation rejects bad input');
 function expectReject(label, payload) {
@@ -365,7 +462,7 @@ check('a correction that touches nothing checkable leaves the checks alone', (()
   return Db.byId('Documents', doc.docId).status === 'VERIFIED';
 })(), 'reopening a check nothing invalidated would just punish people for typing');
 
-section('Once both checks have passed, it is fixed');
+section('Once the office has accepted it, it is fixed');
 
 Db.readAll('Documents').filter(d => d.appId === myApp.appId).forEach(d =>
   Db.update('Documents', d.docId, { status: 'VERIFIED', driveFileId: 'f', scanVerdict: 'MATCH' }));
@@ -374,8 +471,8 @@ Db.update('Applications', myApp.appId, { docStatus: 'VERIFIED' });
 Db.invalidate('Documents'); Db.invalidate('Identity'); Db.invalidate('Applications');
 
 check('the form says so rather than rendering fields', apiGetApplyForm().editable === false);
-check('and the reason names both checks',
-  /identity and your documents/.test(apiGetApplyForm().lockReason),
+check('and the reason says what happened',
+  /checked and accepted/.test(apiGetApplyForm().lockReason),
   apiGetApplyForm().lockReason);
 check('a save is refused', (() => {
   try {
@@ -392,11 +489,11 @@ check('and so is a details correction', (() => {
   } catch (e) { return true; }
 })(), 'the declaration IS what was verified once both have passed');
 
-check('one check alone does not fix it', (() => {
-  Db.update('Applications', myApp.appId, { docStatus: 'SUBMITTED' });
+check('an undecided application is still theirs to correct', (() => {
+  Db.update('Applications', myApp.appId, { docStatus: 'SUBMITTED', verifyStatus: '' });
   Db.invalidate('Applications');
   return apiGetApplyForm().editable === true;
-})(), 'while either check is still open somebody is still going to read this record');
+})(), 'while the office has not finished, somebody is still going to read this record');
 
 Db.update('Applications', myApp.appId, { docStatus: 'PENDING' });
 Db.update('Identity', target.studentId, { status: 'SUBMITTED' });

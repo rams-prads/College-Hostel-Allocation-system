@@ -106,7 +106,7 @@
 
     if (v.unregistered) {
       setHtml('root', card('',
-        '<div class="empty"><div class="big">&#128075;</div>' +
+        '<div class="empty"><div class="big">' + icon('person', 30) + '</div>' +
         '<h3 style="margin:0 0 6px">Welcome — let\u2019s get you registered</h3>' +
         '<p class="small" style="max-width:460px;display:inline-block;margin:0 0 18px">' +
         'We have no record for <strong>' + esc(v.email) + '</strong> yet. Register your ' +
@@ -144,6 +144,10 @@
     // only by a link in the footer, which is not a place anybody looked.
     if (!v.allocation && !v.waitlist) html.push(editNote(v));
 
+    // Above everything else, because it is the only thing on this page the
+    // student has to act on and the clock is running on it.
+    html.push(verificationCard(v));
+
     if (v.explanation && v.explanation.groups) html.push(explanationCard(v));
     if (v.allocation && (v.allocation.roommates || []).length) html.push(roommateCard(v));
 
@@ -154,7 +158,12 @@
     // other, in the order they matter.
     html.push(preferencesCard(v));
     html.push(documentsCard(v));
-    html.push(identityCard(v));
+    // No identity card. Aadhaar is no longer collected: the admission
+    // confirmation page carries the same address and, unlike Aadhaar, the four
+    // other fields the allocation actually turns on. identityCard() and
+    // Identity.gs are both still here, unused, so that turning it back on is a
+    // configuration change rather than a rewrite.
+
     // Wander sits directly above grievances, not under the explanation panel.
     // The explanation is what prompts most questions, so putting the assistant
     // beneath it is tempting - but that pushes documents down, and documents
@@ -184,7 +193,7 @@
       // hiding it - a demo with a missing feature reads as an unfinished
       // product, and this one is neither missing nor usable here.
       setHtml('wanderCardHost', card('Wander',
-        emptyState('💬', 'Ask about the hostel rules',
+        emptyState('chat', 'Ask about the hostel rules',
           'The assistant answers from the hostel brochure and from the application ' +
           'shown above. It is switched off in a read-only preview.'),
         { sub: 'Hostel assistant' }));
@@ -352,6 +361,57 @@
     return card('Your room preferences', '<ul class="rows">' + rows + '</ul>', { tight: true });
   }
 
+  /**
+   * What the hostel office decided, and what to do about it.
+   *
+   * A student whose application was held up used to have to infer it from a
+   * red pill beside one document, with the reason - if there was one - in
+   * small grey text underneath. The reason IS the message: it is written from
+   * a fixed list precisely so that it tells them what to do, and it belongs at
+   * the top of the page in the words the officer chose.
+   */
+  function verificationCard(v) {
+    var a = v.application || {};
+    var st = a.verifyStatus;
+    if (!st || st === 'PENDING') return '';
+
+    if (st === 'VERIFIED') {
+      return card('', '<div class="status good"><div class="sic">&#10003;</div><div>' +
+        '<div class="t">Your documents have been checked and accepted</div>' +
+        '<div class="s">Nothing further is needed from you' +
+        (a.verifiedAt ? ', as of ' + esc(a.verifiedAt) : '') + '.</div></div></div>');
+    }
+
+    var toFix = (v.documents || []).filter(function (d) {
+      return d.status === 'REJECTED' || d.status === 'REQUIRED';
+    });
+
+    if (st === 'ACTION_REQUIRED') {
+      return card('', '<div class="status warn"><div class="sic">!</div><div>' +
+        '<div class="t">The hostel office needs something from you</div>' +
+        '<div class="s">' + esc(a.verifyNote ||
+          'One of your documents has to be uploaded again.') + '</div></div></div>' +
+        (toFix.length
+          ? '<p class="small" style="margin:12px 0 0">To replace: <strong>' +
+            toFix.map(function (d) { return esc(d.label); }).join(', ') + '</strong>. ' +
+            'Your place in the queue is not affected while you sort this out.</p>' +
+            '<div class="btn-row" style="margin-top:10px">' +
+            toFix.map(function (d) {
+              return '<button class="btn" onclick="pickFile(&quot;' + esc(d.docType) +
+                '&quot;)">Upload ' + esc(d.label) + ' again</button>';
+            }).join('') + '</div>'
+          : ''));
+    }
+
+    return card('', '<div class="status bad"><div class="sic">&#10007;</div><div>' +
+      '<div class="t">Your application was not accepted at verification</div>' +
+      '<div class="s">' + esc(a.verifyNote || 'The hostel office can explain why.') +
+      '</div></div></div>' +
+      '<p class="small muted" style="margin:12px 0 0">If you believe this is wrong, ' +
+      'write to ' + esc(v.supportEmail || 'the hostel office') + ' with your ' +
+      'application reference.</p>');
+  }
+
   /* -------------------------------------------------------- documents */
 
   /** Extensions the server will accept, and the type it files them under. */
@@ -363,8 +423,11 @@
   function documentsCard(v) {
     if (!v.documents || !v.documents.length) return '';
     var rows = v.documents.map(function (d) {
-      var kind = { VERIFIED:'ok', UPLOADED:'info', REJECTED:'bad',
-                   WAIVED:'ok', REQUIRED:'warn' }[d.status] || 'warn';
+      // An alternative nobody has used is not an outstanding task, and a warn
+      // pill saying "Not uploaded yet" beside one reads as a job left undone.
+      var spare = !!d.altFor && d.status === 'REQUIRED';
+      var kind = spare ? '' : ({ VERIFIED:'ok', UPLOADED:'info', REJECTED:'bad',
+                                 WAIVED:'ok', REQUIRED:'warn' }[d.status] || 'warn');
 
       // A verified document is finished. Everything else can still be sent or
       // replaced - a rejected one especially, since being told to resubmit with
@@ -387,7 +450,8 @@
         '<span class="d" id="u-' + esc(d.docType) + '"></span>' +
         '</span>' +
         '<span style="display:flex;gap:8px;align-items:center">' +
-        pill(kind, label('doc', d.status)) + act + '</span></li>';
+        pill(kind, spare ? 'Only if you have no admission page' : label('doc', d.status)) +
+        act + '</span></li>';
     }).join('');
 
     return card('Documents required of you',
@@ -582,7 +646,7 @@
         '<div style="flex:1;min-width:260px" class="small">' +
         '<strong>Anything here can still be changed.</strong> Your details, your room ' +
         'choices and the roommate answers stay yours to correct until the hostel office ' +
-        'has verified both your identity and your documents.</div>' +
+        'has checked your documents.</div>' +
         '<a class="btn ghost" href="' + appUrl('?page=apply') + '" target="_top">' +
         'Edit my application</a></div>');
     }
@@ -592,10 +656,10 @@
 
   function noApplication(v) {
     if (!v.applicationsOpen) {
-      return card('', emptyState('&#128197;', 'Applications are closed',
+      return card('', emptyState('calendar', 'Applications are closed',
         'The hostel application window is not currently open.'));
     }
-    return card('', '<div class="empty"><div class="big">&#127968;</div>' +
+    return card('', '<div class="empty"><div class="big">' + icon('building', 30) + '</div>' +
       '<h3 style="margin:0 0 5px">You have not applied yet</h3>' +
       '<p class="small" style="max-width:420px;display:inline-block;margin:0 0 16px">' +
       'Submit an application to be considered in this year’s hostel allocation.</p><br>' +

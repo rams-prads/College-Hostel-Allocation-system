@@ -288,15 +288,40 @@
     background:var(--surface-2);border:1px solid var(--border);
     border-radius:var(--r);padding:14px 16px;
   }
+  /* Each part on its own line. They are SPANS rather than divs because these
+     tiles are buttons now, and a button may only contain phrasing content - so
+     the stacking has to be asked for here rather than inherited from the tag. */
+  .tile .n, .tile .l, .tile .d{display:block}
   .tile .n{
     font-size:27px;font-weight:750;line-height:1.05;letter-spacing:-.03em;
     font-variant-numeric:tabular-nums;
   }
-  .tile .l{font-size:11.5px;color:var(--muted);margin-top:3px;font-weight:550}
+  .tile .l{font-size:11.5px;color:var(--muted);margin-top:5px;font-weight:550}
   .tile.hi{background:var(--amber-soft);border-color:var(--amber-line)}
   .tile.hi .n{color:var(--amber-600)}
   .tile.good .n{color:var(--ok)}
   .tile.bad .n{color:var(--bad)}
+
+  /* A count that is also the way to see what it is counting.
+     Five numbers with nothing to click and nothing explaining them is a
+     scoreboard, and a scoreboard is not a tool - somebody reading "288" has to
+     work out for themselves what 288 of what, and whether it is their problem. */
+  .tiles.wide{grid-template-columns:repeat(auto-fit,minmax(196px,1fr))}
+  button.tile{
+    appearance:none;font:inherit;text-align:left;width:100%;cursor:pointer;
+    display:block;
+  }
+  button.tile:hover{border-color:var(--border-strong);background:var(--surface-2)}
+  button.tile[aria-current="true"]{
+    border-color:var(--amber);background:var(--amber-soft);
+  }
+  button.tile .l{
+    font-weight:650;color:var(--text-2);font-size:12.5px;margin-top:7px;
+    line-height:1.3;
+  }
+  button.tile .d{
+    font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.5;font-weight:400;
+  }
 
   /* =============================================================== table */
   table.grid{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -555,15 +580,24 @@
     border:1px solid transparent;
   }
   .status .sic{
-    flex:none;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
-    font-size:19px;font-weight:800;
+    flex:none;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    font-size:17px;font-weight:700;line-height:1;
   }
+  .status .sic svg{display:block}
   .status .t{font-weight:700;font-size:15px}
   .status .s{font-size:12.5px;margin-top:2px;opacity:.9}
   .status.good{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok)}
   .status.good .sic{background:var(--ok);color:#fff}
   .status.bad{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
   .status.bad .sic{background:var(--bad);color:#fff}
+  /* warn and info were being asked for and never defined, so the notice that
+     says allocation is not gated by verification - the one on the busiest
+     screen in the dashboard - drew as an untinted box with a bare mark floating
+     in it, while good and bad beside it got a proper block. */
+  .status.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .status.warn .sic{background:var(--warn);color:#fff}
+  .status.info{background:var(--info-soft);border-color:var(--info-line);color:var(--info)}
+  .status.info .sic{background:var(--info);color:#fff}
 
   /* ============================================== technical details block
      Reference numbers, hashes and seeds are evidence, not decoration. They
@@ -596,7 +630,12 @@
   .center{text-align:center}
   .divider{height:1px;background:var(--border);margin:16px 0}
   .empty{padding:44px 20px;text-align:center;color:var(--muted)}
-  .empty .big{font-size:34px;opacity:.35;margin-bottom:9px}
+  /* A drawn icon, not a typeface character: it inherits the text colour and
+     sits at the weight everything else on the page is drawn at. */
+  .empty .big{
+    display:flex;justify-content:center;margin-bottom:11px;color:var(--border-strong);
+  }
+  .empty .big svg{display:block}
   .scroll-x{overflow-x:auto}
   .foot-note{
     margin-top:26px;padding-top:15px;border-top:1px solid var(--border);
@@ -673,6 +712,120 @@
     .masthead .org{font-size:13px}
     .btn-row .btn{flex:1 1 100%}
     .signin-field input#siCode{font-size:22px;letter-spacing:.3em;padding-left:14px}
+  }
+
+  /* ================================================= verification console
+     A queue on the left, one case on the right, and the evidence beside the
+     declaration it is evidence for. The shape is not an invention: every
+     review console that has to get through volume - KYC, moderation, claims -
+     converges on it, because the alternative is comparing two things that are
+     never on screen at the same time. */
+  .vconsole{
+    display:grid;grid-template-columns:308px minmax(0,1fr);gap:14px;align-items:start;
+  }
+  .vqueue{
+    border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);
+    overflow:hidden;position:sticky;top:14px;max-height:calc(100vh - 40px);
+    display:flex;flex-direction:column;
+  }
+  .vqueue .vfilters{
+    display:flex;gap:2px;padding:8px;border-bottom:1px solid var(--border);
+    background:var(--surface-2);flex-wrap:wrap;
+  }
+  .vqueue .vfilters button{
+    flex:1 1 auto;padding:6px 8px;font:inherit;font-size:11.5px;font-weight:650;
+    border:1px solid transparent;background:transparent;color:var(--muted);
+    border-radius:var(--r-sm);cursor:pointer;white-space:nowrap;
+  }
+  .vqueue .vfilters button[aria-pressed="true"]{
+    background:var(--surface);border-color:var(--border);color:var(--text);
+  }
+  .vqueue .vfilters .n{
+    display:inline-block;margin-left:5px;font-variant-numeric:tabular-nums;opacity:.75;
+  }
+  .vqueue .vsearch{padding:8px;border-bottom:1px solid var(--border)}
+  .vqueue .vsearch input{font-size:13px;padding:7px 10px}
+  .vlist{overflow-y:auto;flex:1;min-height:0}
+  .vlist button{
+    display:block;width:100%;text-align:left;border:0;background:none;font:inherit;
+    padding:10px 13px;border-bottom:1px solid var(--border);cursor:pointer;
+    border-left:3px solid transparent;
+  }
+  .vlist button:hover{background:var(--surface-2)}
+  .vlist button[aria-current="true"]{
+    background:var(--amber-soft);border-left-color:var(--amber);
+  }
+  .vlist .who{font-weight:650;font-size:13.5px;display:block}
+  .vlist .meta{font-size:11.5px;color:var(--muted);display:block;margin-top:2px}
+  .vlist .tags{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+  .vlist .tag{
+    font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+    padding:2px 6px;border-radius:99px;border:1px solid var(--border);color:var(--muted);
+  }
+  .vlist .tag.bad{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
+  .vlist .tag.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .vlist .tag.ok{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok)}
+
+  /* The case. Two columns again inside it: what was declared, and what the
+     evidence shows. */
+  .vcase{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+  .vcase .full{grid-column:1 / -1}
+
+  .vfacts{width:100%;border-collapse:collapse;font-size:13px}
+  .vfacts th{
+    text-align:left;font-weight:600;color:var(--muted);padding:5px 10px 5px 0;
+    width:38%;vertical-align:top;
+  }
+  .vfacts td{padding:5px 0;vertical-align:top}
+
+  /* Declared against found, which is the whole job written down. */
+  .vcompare{display:grid;gap:8px}
+  .vcmp{
+    display:grid;grid-template-columns:96px minmax(0,1fr) 22px minmax(0,1fr);
+    gap:9px;align-items:start;font-size:13px;padding:9px 11px;border-radius:var(--r-sm);
+    background:var(--surface-2);border:1px solid var(--border);
+  }
+  .vcmp.no{background:var(--bad-soft);border-color:var(--bad-line)}
+  .vcmp.minor{background:var(--warn-soft);border-color:var(--warn-line)}
+  .vcmp .f{color:var(--muted);font-weight:600}
+  .vcmp .mk{text-align:center;font-weight:800}
+  .vcmp.yes .mk{color:var(--ok)}
+  .vcmp.no .mk{color:var(--bad)}
+  .vcmp.minor .mk{color:var(--warn)}
+  .vcmp .note{grid-column:2 / -1;font-size:12px;color:var(--muted)}
+  @media (max-width:560px){
+    .vcmp{grid-template-columns:1fr 22px 1fr}
+    .vcmp .f{grid-column:1 / -1}
+  }
+
+  /* The document itself, on the screen, at a size somebody can read. */
+  .vdoc{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:12px}
+  .vdoc .vdhead{
+    display:flex;align-items:center;gap:9px;padding:9px 12px;background:var(--surface-2);
+    border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;
+  }
+  .vdoc .vdhead .nm{font-weight:650}
+  .vdoc .vdhead .grow{flex:1}
+  .vdoc .shot{
+    display:block;width:100%;max-height:420px;object-fit:contain;background:var(--surface-3);
+  }
+  .vdoc .frame{width:100%;height:420px;border:0;display:block;background:var(--surface-3)}
+  .vdoc .none{padding:26px;text-align:center;color:var(--muted);font-size:13px}
+
+  /* The decision bar, which is the only thing on the page that writes. */
+  .vdecide{
+    position:sticky;bottom:0;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r);padding:13px;box-shadow:var(--sh-2);
+  }
+  .vkeys{font-size:11.5px;color:var(--muted);margin-left:auto}
+  .vkeys kbd{
+    font:inherit;font-size:11px;font-weight:700;border:1px solid var(--border-strong);
+    border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--surface-2);
+  }
+  @media (max-width:980px){
+    .vconsole{grid-template-columns:1fr}
+    .vqueue{position:static;max-height:340px}
+    .vcase{grid-template-columns:1fr}
   }
 
   /* Nobody should have to pinch-zoom to read a table on a phone; they scroll

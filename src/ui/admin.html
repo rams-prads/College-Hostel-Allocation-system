@@ -48,8 +48,9 @@
       title: 'Waiting list',
       blurb: 'Everyone who applied and has no seat, in the order they would be offered one.' },
     { id: 'verification', label: 'Verification',
-      title: 'Verification', blurb: 'Documents that disagree with what was declared. ' +
-                                    'Ordered by risk, not by arrival.' },
+      title: 'Verification',
+      blurb: 'One applicant at a time, with the evidence beside what they declared. ' +
+             'Ordered by risk first and by how long they have waited second.' },
     { id: 'students',     label: 'Students',
       title: 'Students', blurb: 'Open any applicant\u2019s portal exactly as they see it.' },
     { id: 'requests',     label: 'Requests',
@@ -136,7 +137,7 @@
       if (SESSION.token && /administrator|admin/i.test(e.message)) {
         paintChrome({ unit: 'Hostel Administration' });
         setHtml('root', '<div class="wrap narrow">' + card('',
-          emptyState('&#128274;', 'This page is for hostel administrators',
+          emptyState('lock', 'This page is for hostel administrators',
                      'Your account does not administer the hostel system.') +
           '<div style="text-align:center;margin-top:4px">' +
           '<a class="btn" href="' + appUrl('?') + '" target="_top">' +
@@ -198,7 +199,11 @@
     } else if (TAB === 'waitlist') {
       body = '<div id="wlCard"></div>';
     } else if (TAB === 'verification') {
-      body = '<div id="scanCard"></div><div id="queueCard"></div><div id="idCard"></div>';
+      body = '<div id="vStats"></div>' +
+        '<div class="vconsole">' +
+          '<aside class="vqueue" id="vQueue"></aside>' +
+          '<section id="vCase"></section>' +
+        '</div>';
     } else if (TAB === 'students') {
       body = lookupCard();
     } else if (TAB === 'requests') {
@@ -219,7 +224,7 @@
 
     if (TAB === 'overview')     { loadLedgerBadge(); }
     if (TAB === 'waitlist')     { loadWaitlist(); }
-    if (TAB === 'verification') { loadScans(); loadDocQueue(); loadIdentity(); }
+    if (TAB === 'verification') { loadVerification(); }
     if (TAB === 'requests')     { loadGrievances(); loadSwaps(); }
     if (TAB === 'policy')       { loadSimulator(); }
     if (TAB === 'assistant')    { loadRuleBook(); loadWander('wanderCardHost'); }
@@ -245,75 +250,20 @@
         : ''));
   }
 
-  /* -------------------------------------------------- document reading */
-  function loadScans() {
-    srv().withSuccessHandler(paintScans)
-      .withFailureHandler(function () { setHtml('scanCard', ''); })
-      .apiAdminVerificationSummary();
-  }
 
-  function paintScans(s) {
-    if (!s || !s.total) {
-      // Say what this will do before there is anything to do it to. An officer
-      // meeting the panel for the first time should learn what the machine
-      // checks and what it leaves to them.
-      setHtml('scanCard', card('Document reading',
-        '<p class="small muted" style="margin:0">No documents have been uploaded yet. ' +
-        'When they are, each Aadhaar card is read and its PIN code compared with the ' +
-        'one declared &mdash; that is the field distance and eligibility are computed ' +
-        'from. A difference is only raised when it would change the outcome; everything ' +
-        'else is recorded and left alone.</p>'));
-      return;
-    }
-    var v = s.byVerdict || {};
-    var settled = (v.MATCH || 0) + (v.MINOR || 0);
-
-    setHtml('scanCard', card('Document reading',
-      '<p class="small muted" style="margin:0 0 14px">Each Aadhaar card is read and its ' +
-      'PIN code compared with the one declared &mdash; that is the field distance and ' +
-      'eligibility are computed from. A difference is only raised when it would change ' +
-      'the outcome.</p>' +
-      '<div class="tiles" style="margin-bottom:14px">' +
-        tile(s.total, 'Documents held', '') +
-        tile(settled, 'Agree with the declaration', settled ? 'good' : '') +
-        tile(v.CONFLICT || 0, 'Contradict it', (v.CONFLICT ? 'hi' : '')) +
-        tile(v.UNREADABLE || 0, 'Could not be read', (v.UNREADABLE ? 'hi' : '')) +
-        tile(s.unscanned, 'Not read yet', s.unscanned ? 'hi' : '') +
-      '</div>' +
-      '<div class="status ' + (s.needsPerson ? 'warn' : 'good') + '">' +
-        '<div class="sic">' + (s.needsPerson ? '!' : '&#10003;') + '</div>' +
-        '<div><div class="t">' + (s.needsPerson
-          ? s.needsPerson + ' document' + (s.needsPerson === 1 ? '' : 's') + ' need you'
-          : 'Nothing is waiting on a person') + '</div>' +
-        '<div class="s">' + (s.needsPerson
-          ? 'Out of ' + s.total + '. The rest either agree with what was declared or ' +
-            'differ by too little to matter.'
-          : (s.decided
-              ? s.decided + ' of ' + s.total + ' have been decided; the rest agree with ' +
-                'what was declared or differ by too little to matter.'
-              : 'Every document held has been read and agrees with its declaration.')) +
-        '</div></div></div>' +
-      '<div class="btn-row" style="margin-top:13px">' +
-        (s.unscanned
-          ? '<button class="btn" onclick="runScans()">Read ' + s.unscanned + ' document' +
-            (s.unscanned === 1 ? '' : 's') + '</button>' : '') +
-        (s.clearable
-          ? '<button class="btn ghost" onclick="autoClear()">Clear the ' + s.clearable +
-            ' that agree</button>' : '') +
-      '</div><div id="scanMsg"></div>'));
-  }
 
   function runScans() {
-    setHtml('scanMsg', '<div class="hint"><span class="spin"></span> ' +
+    setHtml('vBulkMsg', '<div class="hint"><span class="spin"></span> ' +
       'Reading documents. This takes a few seconds each and continues in batches.</div>');
     srv().withSuccessHandler(function (r) {
-        setHtml('scanMsg', banner(r.remaining ? 'info' : 'good',
+        setHtml('vBulkMsg', banner(r.remaining ? 'info' : 'good',
           'Read ' + r.scanned + '. ' + (r.remaining
-            ? r.remaining + ' still to go — press the button again to continue.'
+            ? r.remaining + ' still to go &mdash; press the button again to continue.'
             : 'All documents have now been read.')));
+        loadVerification();
         loadScans();
       })
-      .withFailureHandler(function (e) { setHtml('scanMsg', banner('err', e.message)); })
+      .withFailureHandler(function (e) { setHtml('vBulkMsg', banner('err', e.message)); })
       .apiAdminScanDocuments(25);
   }
 
@@ -321,14 +271,27 @@
     if (!window.confirm('Mark every document that agrees with its declaration as verified?\n\n' +
         'Conflicts and unreadable scans are left alone. Each one is recorded as a machine ' +
         'decision, not a person\u2019s.')) return;
-    setHtml('scanMsg', loadingState('Clearing'));
-    srv('scanMsg').withSuccessHandler(function (r) {
-        load({ kind: 'good',
-               text: 'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
-                     ' across ' + r.applications + ' application' +
-                     (r.applications === 1 ? '' : 's') + '. Conflicts were left alone.' });
+    setHtml('vBulkMsg', loadingState('Clearing'));
+    srv('vBulkMsg').withSuccessHandler(function (r) {
+        var held = (r.skipped || []).length;
+        // A button that clears nothing and says nothing is a button people
+        // press three times and then report as broken. It was.
+        var text = r.cleared
+          ? 'Verified ' + r.cleared + ' document' + (r.cleared === 1 ? '' : 's') +
+            ' across ' + r.applications + ' application' +
+            (r.applications === 1 ? '' : 's') + '.'
+          : 'Nothing was cleared.';
+        if (held) {
+          text += ' ' + held + ' document' + (held === 1 ? '' : 's') +
+            ' agreed with the declaration but ' + (held === 1 ? 'was' : 'were') +
+            ' held back by identity screening — ' + r.skipped[0].studentName + ': ' +
+            r.skipped[0].reason +
+            (held > 1 ? ' (and ' + (held - 1) + ' other' + (held === 2 ? '' : 's') + ')' : '') +
+            ' Decide ' + (held === 1 ? 'it' : 'them') + ' by hand in the queue below.';
+        }
+        load({ kind: r.cleared ? 'good' : 'warn', text: text });
       })
-      .withFailureHandler(function (e) { setHtml('scanMsg', banner('err', e.message)); })
+      .withFailureHandler(function (e) { setHtml('vBulkMsg', banner('err', e.message)); })
       .apiAdminAutoClear();
   }
 
@@ -344,202 +307,16 @@
   // is the one an officer opens the tab for; "where is this student's document"
   // is the one they open it for on the phone, and it used to have no answer on
   // any screen at all.
-  var DOCQ_ALL = false;
 
-  function loadDocQueue() {
-    setHtml('queueCard', card(docQueueTitle(), loadingState('Reading the queue')));
-    srv('queueCard').withSuccessHandler(paintDocQueue)
-      .apiAdminDocQueue(200, !DOCQ_ALL);
-  }
 
-  function docQueueTitle() {
-    return DOCQ_ALL ? 'All documents held' : 'Documents needing a decision';
-  }
-
-  function showAllDocs(all) {
-    DOCQ_ALL = !!all;
-    loadDocQueue();
-  }
 
   /** The switch between the two, on both views so it is never a dead end. */
-  function docQueueToggle() {
-    return '<div class="btn-row" style="margin-bottom:14px">' +
-      '<button class="btn ' + (DOCQ_ALL ? 'ghost ' : '') + 'sm" ' +
-      'onclick="showAllDocs(false)">Needing a decision</button>' +
-      '<button class="btn ' + (DOCQ_ALL ? '' : 'ghost ') + 'sm" ' +
-      'onclick="showAllDocs(true)">Every document held</button>' +
-      '<span class="small muted">' + (DOCQ_ALL
-        ? 'Everything uploaded, including what has already been decided.'
-        : 'Only what the automatic reading could not settle.') + '</span></div>';
-  }
 
-  function paintDocQueue(rows) {
-    if (!rows || !rows.length) {
-      setHtml('queueCard', card(docQueueTitle(), docQueueToggle() +
-        emptyState('&#9989;', DOCQ_ALL ? 'Nothing has been uploaded yet' : 'Nothing waiting',
-          DOCQ_ALL
-            ? 'No student has uploaded a document to check.'
-            : 'Every document held either agrees with its declaration or has already ' +
-              'been decided. Switch to "Every document held" to find a particular one.')));
-      return;
-    }
 
-    var body = rows.map(function (r) {
-      var kind = { HIGH: 'bad', MEDIUM: 'warn', LOW: 'ok' }[r.riskLevel] || '';
-      var verdict = {
-        CONFLICT:   ['bad',  'Contradicts the declaration'],
-        UNREADABLE: ['warn', 'Could not be read'],
-        UNSCANNED:  ['',     'Not read yet'],
-        MINOR:      ['ok',   'Differs immaterially'],
-        MATCH:      ['ok',   'Agrees']
-      }[r.scanVerdict] || ['', r.scanVerdict];
-
-      var findings = (r.findings || []).length
-        ? '<ul class="findings">' + r.findings.map(function (f) {
-            return '<li class="' + esc(String(f.severity).toLowerCase()) + '">' +
-                   esc(f.text) + '</li>';
-          }).join('') + '</ul>'
-        : '<p class="small muted" style="margin:6px 0 0">Nothing inconsistent was found.</p>';
-
-      return '<div class="vrow">' +
-        '<div class="vhead"><div>' +
-          '<div class="vname">' + esc(r.studentName) + '</div>' +
-          '<div class="small muted">' + esc(r.label) + ' &middot; ' + esc(r.enrollmentNo) +
-          (r.campus ? ' &middot; ' + esc(label('campus', r.campus)) : '') + '</div>' +
-        '</div>' +
-        // Two different facts, and in the full view both matter: what the
-        // machine made of the document, and what became of it afterwards.
-        '<span style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">' +
-        (DOCQ_ALL && r.status !== 'UPLOADED'
-          ? pill(r.status === 'VERIFIED' ? 'ok' : 'bad', label('doc', r.status)) : '') +
-        pill(verdict[0], verdict[1]) + '</span></div>' +
-        '<div class="vmeta">' +
-          '<span>Uploaded ' + esc(r.uploadedAt) + '</span>' +
-          (r.sizeKb ? '<span>' + esc(r.sizeKb) + ' KB</span>' : '') +
-          (r.aadhaarMasked ? '<span>Aadhaar <strong>' + esc(r.aadhaarMasked) +
-                             '</strong></span>' : '') +
-          (r.driveFileId
-            ? '<a href="https://drive.google.com/file/d/' + esc(r.driveFileId) +
-              '/view" target="_blank" rel="noopener noreferrer">Open the document</a>' : '') +
-        '</div>' + findings +
-        // A document already decided is a record, not a task. Offering Accept
-        // and Reject on it invites a second decision that overwrites the first
-        // without anybody meaning to.
-        (r.status === 'UPLOADED'
-          ? '<div class="btn-row" style="margin-top:11px">' +
-              '<button class="btn sm" onclick="decideDoc(&quot;' + esc(r.docId) +
-                '&quot;,true)">Accept</button>' +
-              '<button class="btn ghost sm" onclick="decideDoc(&quot;' + esc(r.docId) +
-                '&quot;,false)">Reject</button>' +
-            '</div>'
-          : '<p class="small muted" style="margin:9px 0 0"><strong>' +
-            esc(label('doc', r.status)) + '</strong>' +
-            (r.decidedBy ? ' by ' + esc(r.decidedBy) : '') +
-            (r.decidedAt ? ' on ' + esc(r.decidedAt) : '') +
-            (r.note ? ' &mdash; ' + esc(r.note) : '') + '</p>') +
-        '</div>';
-    }).join('');
-
-    setHtml('queueCard', card(docQueueTitle(), docQueueToggle() +
-      '<p class="small muted" style="margin:0 0 14px">' + (DOCQ_ALL
-        ? rows.length + ' uploaded, worst first. This is everything the office holds, ' +
-          'including documents already accepted or rejected — it is the view to use ' +
-          'when a student asks where theirs has got to.'
-        : rows.length + ' waiting, worst first. Anything that agreed with its declaration ' +
-          'has been left out of this list entirely.') +
-      '</p>' + body));
-  }
-
-  function decideDoc(docId, approve) {
-    var note = '';
-    if (!approve) {
-      note = window.prompt('Why is this being rejected? The student is shown this text.');
-      if (note === null) return;
-      if (!String(note).trim()) {
-        setHtml('msg', banner('err', 'A rejection needs a reason.'));
-        return;
-      }
-    }
-    setHtml('queueCard', loadingState('Recording the decision'));
-    srv('queueCard').withSuccessHandler(function () { loadDocQueue(); loadScans(); })
-      .apiAdminDecideDocument(docId, approve, note);
-  }
 
   /* ---------------------------------------------------- verification */
-  function loadIdentity() {
-    srv().withSuccessHandler(paintIdentity)
-      .withFailureHandler(function () { setHtml('idCard', ''); })
-      .apiAdminIdentityQueue(40);
-  }
 
-  function paintIdentity(rows) {
-    if (!rows || !rows.length) {
-      setHtml('idCard', card('Identity verification',
-        emptyState('&#9989;', 'Nothing waiting',
-          'No applicant is currently waiting on an identity check.')));
-      return;
-    }
 
-    var body = rows.map(function (r) {
-      var kind = { HIGH:'bad', MEDIUM:'warn', LOW:'ok' }[r.riskLevel] || '';
-      var findings = (r.findings || []).length
-        ? '<ul class="findings">' + r.findings.map(function (f) {
-            return '<li class="' + esc(String(f.severity).toLowerCase()) + '">' +
-                   esc(f.text) + '</li>';
-          }).join('') + '</ul>'
-        : '<p class="small muted" style="margin:6px 0 0">' +
-          'Nothing inconsistent was found automatically.</p>';
-
-      return '<div class="vrow">' +
-        '<div class="vhead">' +
-          '<div><div class="vname">' + esc(r.studentName) + '</div>' +
-          '<div class="small muted">' + esc(r.enrollmentNo) + ' &middot; ' +
-          esc(r.programme) + ' year ' + esc(r.year) + ' &middot; ' +
-          esc(label('campus', r.campus)) + ' &middot; ' +
-          esc(label('category', r.category)) + '</div></div>' +
-          pill(kind, r.riskLevel === 'LOW' ? 'Low risk' : (r.riskLevel === 'HIGH'
-            ? 'Needs attention' : 'Check carefully')) +
-        '</div>' +
-        '<div class="vmeta"><span>Aadhaar <strong>' + esc(r.aadhaarMasked) + '</strong></span>' +
-        '<span>Declared ' + esc(r.submittedAt) + '</span>' +
-        (r.docFolderUrl ? '<a href="' + esc(r.docFolderUrl) +
-          '" target="_blank" rel="noopener noreferrer">Open documents</a>' : '') +
-        '</div>' +
-        findings +
-        '<div class="btn-row" style="margin-top:11px">' +
-          '<button class="btn sm" onclick="decideIdentity(&quot;' + esc(r.studentId) +
-            '&quot;,true)">Verify</button>' +
-          '<button class="btn ghost sm" onclick="decideIdentity(&quot;' + esc(r.studentId) +
-            '&quot;,false)">Reject</button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-
-    setHtml('idCard', card('Identity verification',
-      '<p class="small muted" style="margin:0 0 14px">' + rows.length + ' waiting. Each ' +
-      'Aadhaar number was checked for a valid checksum and against every other record ' +
-      'before it reached you; only the last four digits are ever stored. Match those ' +
-      'four against the uploaded Aadhaar card, then decide.</p>' + body));
-  }
-
-  function decideIdentity(studentId, approve) {
-    var note = '';
-    if (!approve) {
-      note = window.prompt('Why is this being rejected? The student is shown this text.');
-      if (note === null) return;
-      if (!String(note).trim()) {
-        setHtml('msg', banner('err', 'A rejection needs a reason.'));
-        return;
-      }
-    } else {
-      note = 'Matched against the uploaded documents.';
-    }
-
-    setHtml('idCard', loadingState('Recording the decision'));
-    srv('idCard')
-      .withSuccessHandler(function () { loadIdentity(); })
-      .apiAdminDecideIdentity(studentId, approve, note);
-  }
 
   function sect(title, note) {
     return '<div class="sect"><h2>' + esc(title) + '</h2>' +
@@ -664,7 +441,7 @@
     // thing to be told - one is a job not started, the other a job undone on
     // purpose, and only one of them means somebody is waiting for a result.
     var cleared = !!(d && d.hadRun);
-    return card('', '<div class="empty"><div class="big">&#9881;</div>' +
+    return card('', '<div class="empty"><div class="big">' + icon('spark', 30) + '</div>' +
       '<h3 style="margin:0 0 5px">' + (cleared
         ? 'The allocation has been cleared'
         : 'No allocation has been run yet') + '</h3>' +
@@ -745,7 +522,7 @@
     var hidden = (d.occupancy || []).length - live.length;
 
     if (!live.length) {
-      return card('', emptyState('&#127968;', 'No rooms are on record',
+      return card('', emptyState('building', 'No rooms are on record',
         'The hostel inventory is empty, so there is nothing to be occupied. ' +
         'Seed or import the inventory first.'));
     }
@@ -1076,7 +853,9 @@
                  'Nobody already holding a room is affected.')) return;
     setHtml('vacMsg', banner('info', '<span class="spin"></span> Working through the empty beds'));
     srv('vacMsg').withSuccessHandler(function (r) {
-      load(r.filled
+      // load() carries {kind, text} through the redraw; a bare string arrives
+      // as banner(undefined, undefined) and shows nothing at all.
+      load({ kind: r.filled ? 'good' : 'warn', text: r.filled
         ? r.filled + ' bed' + (r.filled === 1 ? '' : 's') + ' filled from the waiting list. ' +
           (r.vacantAfter
             ? r.vacantAfter + ' still empty - nobody waiting is eligible for ' +
@@ -1085,9 +864,593 @@
         : 'No bed could be filled. ' + (r.vacantBefore
             ? 'The ' + r.vacantBefore + ' empty bed' + (r.vacantBefore === 1 ? '' : 's') +
               ' are in hostels no waiting applicant is eligible for.'
-            : 'There are no empty beds.'));
+            : 'There are no empty beds.') });
     }).apiAdminFillVacancies(50);
   }
+
+  /* ==================================================== verification console
+
+     One applicant, one screen, one decision.
+
+     What was here before was three lists - documents needing a decision, an
+     identity queue, and a scan summary. Each was right on its own and the
+     three together were unusable, because the unit of work in this job is a
+     PERSON, not a document. An officer deciding a document could not see the
+     identity it was meant to be matched against, and an applicant needing both
+     was touched twice from two screens with nothing tying the two decisions
+     together.
+
+     The layout below is the one every review console converges on for the same
+     reason: the evidence has to be beside the declaration it is evidence for,
+     because comparing two things that are never on screen together is the
+     slowest possible way to do this. */
+
+  var V = {
+    filter: 'NEEDS_DECISION',
+    q: '',
+    rows: [],
+    counts: {},
+    appId: null,
+    kase: null,
+    reasons: [],
+    gate: null,
+    seq: 0,
+    reason: '',
+    docTypes: null
+  };
+
+  function loadVerification() {
+    if (!el('vQueue')) return;
+    setHtml('vQueue', '<div style="padding:18px">' + loadingState('Reading the queue') + '</div>');
+    // One call, not two. See apiAdminVerificationQueue: on Google a second call
+    // is a second trip that re-reads every tab the first one just read.
+    loadVQueue(false, true);
+  }
+
+  function loadVQueue(keepCase, withStats) {
+    var mine = ++V.seq;
+    // Say so IMMEDIATELY. A filter that sits there looking unpressed while the
+    // server thinks reads as a button that does not work, and the honest
+    // response to that is to press it again - which is how one slow call
+    // becomes three.
+    paintVQueue({ busy: true });
+    if (!keepCase) setHtml('vCase', card('', loadingState('Loading')));
+    srv('vQueue').withSuccessHandler(function (d) {
+      if (mine !== V.seq) return;
+      V.rows = d.rows || [];
+      V.counts = d.counts || {};
+      if (d.stats) {
+        V.reasons = d.reasons || V.reasons;
+        V.gate = d.gate || V.gate;
+        paintVStats(d.stats);
+      }
+      paintVQueue();
+      // Land on the first case rather than an empty panel. An officer opening
+      // this tab wants to start work, not to choose where to start.
+      if (!keepCase || !V.rows.some(function (r) { return r.appId === V.appId; })) {
+        if (V.rows.length) openCase(V.rows[0].appId);
+        else { V.kase = null; paintVCase(); }
+      }
+    }).apiAdminVerificationQueue({ filter: V.filter, q: V.q, limit: 200,
+                                   withStats: !!withStats });
+  }
+
+  function setVFilter(f) {
+    if (V.filter === f) return;          // already there; do not re-fetch
+    V.filter = f;
+    V.appId = null;
+    loadVQueue();
+  }
+  function vSearch() {
+    V.q = (el('vQ') || {}).value || '';
+    V.appId = null;
+    loadVQueue();
+  }
+
+  /**
+   * What is happening, in a sentence, and three numbers that can be pressed.
+   *
+   * It was five numbers in a row - waiting on you, waiting on the student,
+   * decided, oldest still waiting, read and settled automatically - with
+   * nothing saying what any of them counted or which of them was anybody's
+   * problem. "0d" is meaningless when nothing is waiting; a percentage with no
+   * denominator on screen is a number to be taken on trust.
+   *
+   * So: one plain sentence first, because there is only ever one thing an
+   * officer opening this tab needs to know. Then three counts, each of which is
+   * the button that shows you the applicants it counted - a number you can
+   * press stops being a statistic and becomes a way in. The age of the oldest
+   * case moved into the sentence, where it means something; the automation
+   * figure moved next to the buttons that produce it.
+   */
+  function paintVStats(st) {
+    V.lastStats = st;
+    var byState = st.byState || {};
+    var todo = byState.NEEDS_DECISION || 0;
+    var withStudent = byState.WAITING_ON_STUDENT || 0;
+    var done = byState.DONE || 0;
+    var flagged = V.counts && V.counts.FLAGGED ? V.counts.FLAGGED : 0;
+    var gateOn = V.gate && V.gate.documents;
+
+    // The one sentence. Written for somebody who has just opened the tab and
+    // wants to know whether they can close it again.
+    var lede;
+    if (!todo) {
+      lede = '<strong>Nothing is waiting on you right now.</strong> ' +
+        (withStudent
+          ? withStudent + ' applicant' + (withStudent === 1 ? ' has' : 's have') +
+            ' still to send us something.'
+          : 'Every application has been dealt with.');
+    } else {
+      lede = '<strong>' + todo + ' applicant' + (todo === 1 ? '' : 's') +
+        ' need' + (todo === 1 ? 's' : '') + ' a decision from you.</strong>' +
+        (st.oldestWaitingDays
+          ? ' The one who has waited longest has been waiting ' +
+            st.oldestWaitingDays + ' day' + (st.oldestWaitingDays === 1 ? '' : 's') + '.'
+          : '') +
+        (flagged ? ' ' + flagged + ' of them ' + (flagged === 1 ? 'is' : 'are') +
+                   ' flagged for a closer look.' : '');
+    }
+
+    setHtml('vStats', card('',
+      '<p style="margin:0 0 14px;font-size:14.5px;line-height:1.55">' + lede + '</p>' +
+
+      '<div class="tiles wide" style="margin:0 0 14px">' +
+        countTile(todo, 'Waiting on you',
+          'Everything we asked for has arrived. You decide.',
+          'NEEDS_DECISION', todo ? 'hi' : 'good') +
+        countTile(withStudent, 'Waiting on students',
+          'We are still waiting for a document from them.',
+          'WAITING_ON_STUDENT', '') +
+        countTile(done, 'Finished',
+          'Checked and closed. Nothing more to do.',
+          'DONE', 'good') +
+      '</div>' +
+
+      // The single setting that decides whether any of this work gates
+      // anything. On the screen where the work happens, not three tabs away.
+      '<div class="status ' + (gateOn ? 'good' : 'warn') + '">' +
+        '<div class="sic">' + (gateOn ? '&#10003;' : '!') + '</div><div>' +
+        '<div class="t">' + (gateOn
+          ? 'A student cannot be given a room until you have checked them'
+          : 'Students can be given rooms before you have checked them') + '</div>' +
+        '<div class="s">' + (gateOn
+          ? 'Anyone you have not verified is left out when the allocation runs.'
+          : 'The allocation will give rooms to unchecked applicants and mark those ' +
+            'seats provisional. That is usually right early on, when hardly anybody ' +
+            'has been checked yet, and wrong once you have caught up.') + '</div></div>' +
+        '<span class="grow" style="flex:1"></span>' +
+        '<button class="btn ghost sm" onclick="setVGate(' + (gateOn ? 'false' : 'true') +
+        ')">' + (gateOn ? 'Allow it again' : 'Require checking first') + '</button>' +
+      '</div>' +
+      '<div id="vGateMsg"></div>' +
+
+      // The two actions that keep a person off most of the pile, with the
+      // figure that says how much of it they took - beside them, where it is
+      // about something, rather than alone in a tile as a bare percentage.
+      ((st.unread || st.clearable)
+        ? '<div class="btn-row" style="margin-top:13px">' +
+            (st.unread
+              ? '<button class="btn" onclick="runScans()">Read ' + st.unread +
+                ' new document' + (st.unread === 1 ? '' : 's') + '</button>' : '') +
+            (st.clearable
+              ? '<button class="btn ghost" onclick="autoClear()">Accept the ' +
+                st.clearable + ' that already match</button>' : '') +
+          '</div>'
+        : '') +
+      (st.documents
+        ? '<p class="small muted" style="margin:11px 0 0">The system has read ' +
+          esc(st.read) + ' of the ' + esc(st.documents) + ' documents students have ' +
+          'uploaded, and ' + esc(st.settledByMachinePct) + '% of them matched what the ' +
+          'student declared &mdash; so nobody had to open those by hand.</p>'
+        : '') +
+      '<div id="vBulkMsg"></div>'));
+  }
+
+  /** A number, what it counts, and the button that shows you them. */
+  function countTile(n, label, desc, filter, kind) {
+    return '<button type="button" class="tile ' + (kind || '') +
+      '" aria-current="' + (V.filter === filter) + '" ' +
+      'onclick="setVFilter(&quot;' + filter + '&quot;)">' +
+      '<span class="n">' + esc(n) + '</span>' +
+      '<span class="l">' + esc(label) + '</span>' +
+      '<span class="d">' + esc(desc) + '</span></button>';
+  }
+
+  function setVGate(on) {
+    setHtml('vGateMsg', banner('info', 'Changing the rule\u2026'));
+    srv('vGateMsg').withSuccessHandler(function () {
+      load({ kind: 'good', text: on
+        ? 'Allocation now requires verification. Unverified applicants are held out ' +
+          'of the next run.'
+        : 'Allocation no longer requires verification. Unverified applicants will be ' +
+          'given provisional seats.' });
+    }).apiAdminSetVerificationGate(on);
+  }
+
+  var VFILTERS = [
+    ['NEEDS_DECISION', 'To do'],
+    ['FLAGGED', 'Flagged'],
+    ['WAITING_ON_STUDENT', 'With student'],
+    ['DONE', 'Done'],
+    ['ALL', 'All']
+  ];
+
+  function paintVQueue(opts) {
+    var busy = !!(opts && opts.busy);
+    var tabs = VFILTERS.map(function (f) {
+      var n = V.counts[f[0]] || 0;
+      return '<button type="button" aria-pressed="' + (V.filter === f[0]) +
+        '" onclick="setVFilter(&quot;' + f[0] + '&quot;)">' + esc(f[1]) +
+        (n ? '<span class="n">' + n + '</span>' : '') + '</button>';
+    }).join('');
+
+    var rows = V.rows.map(function (r) {
+      var tags = [];
+      if (r.riskLevel === 'HIGH') tags.push('<span class="tag bad">flagged</span>');
+      else if (r.riskLevel === 'MEDIUM') tags.push('<span class="tag warn">check</span>');
+      if (r.worstVerdict === 'CONFLICT') tags.push('<span class="tag bad">contradicts</span>');
+      else if (r.worstVerdict === 'UNREADABLE') tags.push('<span class="tag warn">unreadable</span>');
+      else if (r.worstVerdict === 'UNSCANNED') tags.push('<span class="tag">not read</span>');
+      if (r.verifyStatus === 'VERIFIED') tags.push('<span class="tag ok">verified</span>');
+      if (r.verifyStatus === 'REJECTED') tags.push('<span class="tag bad">rejected</span>');
+      if (r.state === 'WAITING_ON_STUDENT') tags.push('<span class="tag warn">with student</span>');
+      if (r.waitingDays >= 7) tags.push('<span class="tag warn">' + r.waitingDays + 'd</span>');
+
+      return '<button type="button" aria-current="' + (V.appId === r.appId) +
+        '" onclick="openCase(&quot;' + esc(r.appId) + '&quot;)">' +
+        '<span class="who">' + esc(r.name) + '</span>' +
+        '<span class="meta">' + esc(r.enrollmentNo) + ' &middot; ' + esc(r.programme) +
+        ' year ' + esc(r.year) + '</span>' +
+        (tags.length ? '<span class="tags">' + tags.join('') + '</span>' : '') +
+        '</button>';
+    }).join('');
+
+    setHtml('vQueue',
+      '<div class="vfilters">' + tabs + '</div>' +
+      '<div class="vsearch"><input type="text" id="vQ" value="' + esc(V.q) + '" ' +
+        'placeholder="Find a name or enrolment number" ' +
+        'onkeydown="if(event.key===&quot;Enter&quot;)vSearch()"></div>' +
+      '<div class="vlist" id="vList">' + (busy
+        ? '<p class="small muted" style="padding:18px">' +
+          '<span class="spin"></span> Loading&hellip;</p>'
+        : (rows || '<p class="small muted" style="padding:18px">Nothing in this list.</p>')) +
+      '</div>');
+  }
+
+  /* ------------------------------------------------------------- one case */
+
+  function openCase(appId) {
+    V.appId = appId;
+    V.reason = '';
+    V.docTypes = null;
+    paintVQueue();
+    setHtml('vCase', card('', loadingState('Opening the case')));
+    srv('vCase').withSuccessHandler(function (k) {
+      if (V.appId !== appId) return;      // they moved on while it loaded
+      V.kase = k;
+      paintVCase();
+    }).apiAdminVerificationCase(appId);
+  }
+
+  function paintVCase() {
+    var k = V.kase;
+    if (!k) {
+      setHtml('vCase', card('', emptyState('check', 'Nothing to decide',
+        'No applicant in this list is waiting on you.')));
+      return;
+    }
+
+    setHtml('vCase',
+      '<div class="vcase">' +
+        '<div class="full">' + caseHead(k) + '</div>' +
+        '<div>' + declaredCard(k) + riskCard(k) + '</div>' +
+        '<div>' + compareCard(k) + '</div>' +
+        '<div class="full">' + evidenceCard(k) + '</div>' +
+        '<div class="full">' + decideCard(k) + '</div>' +
+      '</div>');
+  }
+
+  function caseHead(k) {
+    var d = k.declared;
+    var state = { VERIFIED: ['ok', 'Verified'], REJECTED: ['bad', 'Rejected'],
+                  ACTION_REQUIRED: ['warn', 'Waiting on the student'],
+                  PENDING: ['info', 'Not yet decided'] }[k.verifyStatus] ||
+                  ['info', k.verifyStatus];
+
+    return card('', '<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:220px">' +
+        '<h2 style="margin:0 0 3px;font-size:20px;letter-spacing:-.02em">' +
+          esc(d.name) + '</h2>' +
+        '<div class="small muted">' + esc(d.enrollmentNo) + ' &middot; ' + esc(d.programme) +
+        (d.branch ? ' (' + esc(d.branch) + ')' : '') + ' &middot; year ' + esc(d.year) +
+        ' &middot; ' + esc(label('campus', d.campus)) + '</div>' +
+      '</div>' +
+      pill(state[0], state[1]) +
+      '</div>' +
+      '<div class="vmeta" style="margin-top:10px">' +
+        '<span>Applied ' + esc(k.submittedAt) + '</span>' +
+        '<span>' + esc(k.waitingDays) + ' day' + (k.waitingDays === 1 ? '' : 's') +
+          ' in the queue</span>' +
+        '<span>' + esc(k.appId) + '</span>' +
+        '<button class="btn ghost sm" onclick="goTab(&quot;students&quot;);viewStudent(&quot;' +
+          esc(k.appId) + '&quot;)">Open their portal</button>' +
+      '</div>' +
+      (k.verifyNote ? '<p class="small" style="margin:9px 0 0">Last decision: ' +
+        esc(k.verifyNote) + '</p>' : ''));
+  }
+
+  function declaredCard(k) {
+    var d = k.declared;
+    function row(label, value) {
+      return value === '' || value === null || value === undefined ? '' :
+        '<tr><th>' + esc(label) + '</th><td>' + esc(value) + '</td></tr>';
+    }
+    return card('What the applicant declared',
+      '<table class="vfacts">' +
+        row('Name', d.name) +
+        row('Enrolment number', d.enrollmentNo) +
+        row('Date of birth', d.dob) +
+        row('Email', d.email) +
+        row('Mobile', d.phone) +
+        row('Category', label('category', d.category) + (d.isPwD ? ' \u00b7 PwD' : '')) +
+        row('Admission category', label('residence', d.residenceCategory)) +
+        row('Marks it is ranked on', d.meritPercent ? d.meritPercent + '%' : '') +
+        row('Home address', [d.homeAddress, d.homeCity, d.homePincode]
+              .filter(Boolean).join(', ')) +
+        row('Distance from campus', d.distanceKm === null
+              ? 'PIN code not in the reference table' : d.distanceKm + ' km') +
+        row('Guardian', [d.guardianName, d.guardianPhone].filter(Boolean).join(' \u00b7 ')) +
+        row('Aadhaar', k.identity.masked) +
+      '</table>' +
+      (d.selfDeclared
+        ? '<p class="small muted" style="margin:11px 0 0">Every field here was typed by ' +
+          'the applicant. None of it came from a university record.</p>'
+        : ''));
+  }
+
+  function riskCard(k) {
+    var f = k.risk.findings || [];
+    var kind = { HIGH: 'bad', MEDIUM: 'warn', LOW: 'ok' }[k.risk.level] || '';
+    return card('Automatic checks',
+      '<div style="display:flex;gap:9px;align-items:center;margin:0 0 11px">' +
+        pill(kind, k.risk.level === 'LOW' ? 'Nothing blocking'
+          : (k.risk.level === 'HIGH' ? 'Needs attention' : 'Check carefully')) +
+        '<span class="small muted">' + f.length + ' check' + (f.length === 1 ? '' : 's') +
+        ' produced something to say</span>' +
+      '</div>' +
+      (f.length
+        ? '<ul class="findings">' + f.map(function (x) {
+            return '<li class="' + esc(String(x.severity).toLowerCase()) + '">' +
+                   esc(x.text) + '</li>';
+          }).join('') + '</ul>'
+        : '<p class="small muted" style="margin:0">Nothing inconsistent was found ' +
+          'between the declaration, the documents and every other application.</p>'));
+  }
+
+  function compareCard(k) {
+    var c = k.comparisons || [];
+    if (!c.length) {
+      return card('Declared against the document',
+        '<p class="small muted" style="margin:0">Nothing has been read from a document ' +
+        'yet, so there is nothing to compare. ' +
+        (k.ready.awaitingScan ? 'Press "Read the documents" above.' : '') + '</p>');
+    }
+    return card('Declared against the document',
+      '<div class="vcompare">' + c.map(function (x) {
+        var cls = x.ok ? 'yes' : (x.minor ? 'minor' : 'no');
+        return '<div class="vcmp ' + cls + '">' +
+          '<span class="f">' + esc(x.field) + '</span>' +
+          '<span>' + esc(x.declared) + '</span>' +
+          '<span class="mk">' + (x.ok ? '&#10003;' : (x.minor ? '&#8776;' : '&#10007;')) + '</span>' +
+          '<span>' + esc(x.found) + '</span>' +
+          (x.note ? '<span class="note">' + esc(x.note) + '</span>' : '') +
+          '</div>';
+      }).join('') + '</div>' +
+      '<p class="small muted" style="margin:11px 0 0">Read from the document on the left, ' +
+      'typed by the applicant on the right. A tick is the machine agreeing with them; it ' +
+      'is not a decision, which is why you are here.</p>');
+  }
+
+  function evidenceCard(k) {
+    var docs = (k.documents || []).filter(function (d) { return !!d.driveFileId; });
+    var missing = k.missing || [];
+
+    var body = docs.map(function (d) {
+      var v = { CONFLICT: ['bad', 'Contradicts the declaration'],
+                UNREADABLE: ['warn', 'Could not be read'],
+                UNSCANNED: ['', 'Not read yet'],
+                MINOR: ['ok', 'Differs immaterially'],
+                MATCH: ['ok', 'Agrees'] }[d.scanVerdict] || ['', d.scanVerdict];
+      var isPdf = /pdf/i.test(d.mimeType || '');
+
+      return '<div class="vdoc">' +
+        '<div class="vdhead"><span class="nm">' + esc(d.label) + '</span>' +
+          pill(v[0], v[1]) +
+          (d.status !== 'UPLOADED' ? pill(d.status === 'VERIFIED' ? 'ok' : 'bad',
+            label('doc', d.status)) : '') +
+          '<span class="grow"></span>' +
+          '<span class="small muted">' + esc(d.uploadedAt) +
+            (d.sizeKb ? ' &middot; ' + esc(d.sizeKb) + ' KB' : '') + '</span>' +
+          '<a href="' + esc(d.openUrl) + '" target="_blank" rel="noopener noreferrer" ' +
+          'class="small">Open in Drive</a>' +
+        '</div>' +
+        // The document, at a size a person can actually read, on the same
+        // screen as the declaration it is being compared with. A link to
+        // another tab is what made this job slow.
+        (isPdf
+          ? '<iframe class="frame" src="' + esc(d.previewUrl) + '" loading="lazy" ' +
+            'title="' + esc(d.label) + '"></iframe>'
+          : '<img class="shot" loading="lazy" src="' + esc(d.thumbUrl) + '" ' +
+            'alt="' + esc(d.label) + '" ' +
+            'onerror="this.outerHTML=&quot;<div class=\'none\'>The preview could not be ' +
+            'loaded. Use &amp;quot;Open in Drive&amp;quot; above.</div>&quot;">') +
+        (d.note ? '<p class="small muted" style="padding:9px 12px;margin:0">' +
+          esc(d.note) + '</p>' : '') +
+        '</div>';
+    }).join('');
+
+    return card('The evidence',
+      (missing.length
+        ? banner('warn', 'Still to be uploaded: ' +
+            missing.map(function (m) { return m.label; }).join(', ') +
+            '. The case cannot be verified until it arrives.')
+        : '') +
+      (body || '<p class="small muted" style="margin:0">Nothing has been uploaded yet.</p>'));
+  }
+
+  function decideCard(k) {
+    var canVerify = k.ready.canDecide;
+    var reasonOpts = V.reasons.map(function (r) {
+      return '<option value="' + esc(r.code) + '"' +
+        (V.reason === r.code ? ' selected' : '') + '>' + esc(r.label) + '</option>';
+    }).join('');
+
+    var docPicks = (k.documents || []).filter(function (d) { return !!d.driveFileId; })
+      .map(function (d) {
+        return '<label style="display:inline-flex;gap:6px;align-items:center;margin-right:14px">' +
+          '<input type="checkbox" class="vdocpick" value="' + esc(d.docType) + '" ' +
+          'style="width:auto" checked> <span class="small">' + esc(d.label) + '</span></label>';
+      }).join('');
+
+    return '<div class="vdecide" id="vDecide">' +
+      '<div id="vMsg"></div>' +
+      (canVerify ? '' : banner('warn',
+        'Not everything asked for has been uploaded, so this case cannot be verified yet. ' +
+        'You can still send it back or refuse it.')) +
+      '<div class="btn-row" style="margin-bottom:11px">' +
+        '<button class="btn" ' + (canVerify ? '' : 'disabled ') +
+          'onclick="decideCase(&quot;VERIFY&quot;)">Verify</button>' +
+        '<button class="btn ghost" onclick="decideCase(&quot;RESUBMIT&quot;)">' +
+          'Ask for a better copy</button>' +
+        '<button class="btn ghost" onclick="decideCase(&quot;REJECT&quot;)">Reject</button>' +
+        '<button class="btn ghost" onclick="nextCase()">Skip</button>' +
+        '<span class="vkeys"><kbd>A</kbd> verify &middot; <kbd>S</kbd> send back &middot; ' +
+          '<kbd>R</kbd> reject &middot; <kbd>J</kbd>/<kbd>K</kbd> move</span>' +
+      '</div>' +
+      '<div class="fieldrow">' +
+        '<label class="field" style="margin:0">' +
+          '<span class="lab">Reason (for anything but Verify)</span>' +
+          '<select id="vReason" onchange="V.reason=this.value">' +
+            '<option value="">Choose\u2026</option>' + reasonOpts + '</select>' +
+          '<span class="help">The student is shown a sentence written from this, so ' +
+          'they know what to do next.</span></label>' +
+        '<label class="field" style="margin:0"><span class="lab">Note (optional)</span>' +
+          '<input type="text" id="vNote" placeholder="Anything the sentence above does not cover">' +
+        '</label>' +
+      '</div>' +
+      (docPicks
+        ? '<div style="margin-top:9px"><span class="small muted">Applies to: </span>' +
+          docPicks + '</div>'
+        : '') +
+      '</div>';
+  }
+
+  function decideCase(verdict) {
+    if (!V.kase) return;
+    var reason = (el('vReason') || {}).value || '';
+    var note = (el('vNote') || {}).value || '';
+
+    if (verdict !== 'VERIFY' && !reason) {
+      setHtml('vMsg', banner('err', 'Choose a reason first. The student is told what it ' +
+        'says, so "rejected" on its own is not something they can act on.'));
+      return;
+    }
+    if (verdict === 'REJECT' &&
+        !confirm('Reject this application outright?\n\nThe applicant is refused a room. ' +
+                 'Use "Ask for a better copy" if the problem is the photograph rather ' +
+                 'than the person.')) return;
+
+    var picks = [];
+    var boxes = document.querySelectorAll('.vdocpick');
+    for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) picks.push(boxes[i].value);
+
+    var appId = V.kase.appId;
+    setHtml('vMsg', banner('info', '<span class="spin"></span> Recording the decision'));
+
+    srv('vMsg').withSuccessHandler(function (r) {
+      // Straight on to the next one, out of the rows already in hand. Stopping
+      // to admire a confirmation after every case is what turns a queue of two
+      // hundred into an afternoon - and so is a round trip after each one.
+      var note = r.verdict === 'VERIFY' ? 'Verified.' :
+        (r.verdict === 'RESUBMIT' ? 'Sent back to the student.' : 'Rejected.');
+      PENDING_VNOTE = note + (r.notified ? ' They have been emailed.' : '');
+      // The counts moved by exactly one, and which way is known without asking.
+      adjustVCounts(r.verdict);
+      nextCase(appId);
+    }).apiAdminVerificationDecide(appId, verdict,
+      { reason: reason, note: note, docTypes: picks });
+  }
+
+  var PENDING_VNOTE = '';
+
+  /**
+   * Move the counts by one, locally.
+   *
+   * A decision changes exactly two of them and the direction is known from the
+   * verdict, so asking the server to recount a thousand applications after each
+   * one is a round trip spent confirming arithmetic we could do here. The next
+   * real load corrects any drift.
+   */
+  function adjustVCounts(verdict) {
+    var from = V.filter === 'ALL' ? 'NEEDS_DECISION' : V.filter;
+    var to = verdict === 'RESUBMIT' ? 'WAITING_ON_STUDENT' : 'DONE';
+    if (V.counts[from] > 0) V.counts[from]--;
+    V.counts[to] = (V.counts[to] || 0) + 1;
+    if (V.lastStats) {
+      var by = V.lastStats.byState || {};
+      if (by[from] > 0) by[from]--;
+      by[to] = (by[to] || 0) + 1;
+      paintVStats(V.lastStats);
+    }
+  }
+
+  /** Move to the next case in the list, dropping the one just decided. */
+  function nextCase(decidedAppId) {
+    var i = -1;
+    for (var n = 0; n < V.rows.length; n++) if (V.rows[n].appId === V.appId) { i = n; break; }
+    if (decidedAppId) {
+      V.rows = V.rows.filter(function (r) { return r.appId !== decidedAppId; });
+      if (i >= V.rows.length) i = V.rows.length - 1;
+    } else {
+      i = i + 1;
+    }
+
+    paintVQueue();
+    if (i >= 0 && i < V.rows.length) openCase(V.rows[i].appId);
+    else { V.kase = null; V.appId = null; paintVCase(); }
+
+    if (PENDING_VNOTE) {
+      setHtml('vMsg', banner('good', PENDING_VNOTE));
+      PENDING_VNOTE = '';
+    }
+  }
+
+  function prevCase() {
+    for (var n = 0; n < V.rows.length; n++) {
+      if (V.rows[n].appId === V.appId && n > 0) { openCase(V.rows[n - 1].appId); return; }
+    }
+  }
+
+  /**
+   * Keyboard, because a queue is measured in throughput and a hand that has to
+   * find the mouse between every case halves it. Deliberately inert while
+   * something is being typed into - an officer writing a note should not
+   * approve the case by pressing A.
+   */
+  document.addEventListener('keydown', function (e) {
+    if (TAB !== 'verification' || !V.kase) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target && e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+
+    var k = String(e.key || '').toLowerCase();
+    if (k === 'a') { e.preventDefault(); decideCase('VERIFY'); }
+    else if (k === 's') { e.preventDefault(); decideCase('RESUBMIT'); }
+    else if (k === 'r') { e.preventDefault(); decideCase('REJECT'); }
+    else if (k === 'j') { e.preventDefault(); nextCase(); }
+    else if (k === 'k') { e.preventDefault(); prevCase(); }
+  });
 
   /* ========================================================== waiting list */
 

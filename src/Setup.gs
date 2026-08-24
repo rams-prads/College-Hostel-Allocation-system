@@ -586,6 +586,15 @@ function seedPolicy_() {
     ['POL-ELG-PROMO', 'eligibility', 'REQUIRE_PROMOTION', 1,
      'A year-back student is not eligible for re-admission'],
 
+    // Whether verification GATES allocation, or merely informs it. Off to begin
+    // with: early in a session almost nobody has been verified yet, and a run
+    // that refuses everybody teaches the office to distrust the run. The
+    // verification console shows the current setting and switches it, because
+    // the moment it should change - when verification has caught up - is
+    // obvious from that screen and from nowhere else.
+    ['POL-ELG-VERIFY', 'eligibility', 'REQUIRE_DOC_VERIFIED', 0,
+     'Hold unverified applicants out of the allocation. Off = provisional seats.'],
+
     // The priority order for a fresh allotment, exactly as the brochure states
     // it. These are RANKS, not weights: a lower number is considered first and
     // is exhausted before the next is looked at. There is no trade-off between

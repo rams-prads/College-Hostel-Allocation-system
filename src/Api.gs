@@ -111,6 +111,10 @@ function jsonSafe_(value, depth) {
     for (var k in value) {
       if (!Object.prototype.hasOwnProperty.call(value, k)) continue;
       if (typeof value[k] === 'function') continue;
+      // _row is a sheet coordinate. It means nothing in a browser, and a page
+      // that sends it back is asking Db to write a column that does not exist.
+      // Stripping it here stops the round trip at the point it starts.
+      if (k === '_row') continue;
       o[k] = jsonSafe_(value[k], depth + 1);
     }
     return o;
@@ -202,6 +206,12 @@ function apiGetStudentView(asAppId, demoToken) {
     appId: app.appId, status: app.status, campus: app.campus,
     submittedAt: fmtDate_(app.submittedAt), distanceKm: app.distanceKm,
     eligible: app.eligible, docStatus: app.docStatus,
+    // The office's decision and the sentence that goes with it. A student
+    // whose application is held up should not have to work that out from the
+    // colour of a pill beside one of their documents.
+    verifyStatus: app.verifyStatus || '',
+    verifyNote: app.verifyNote || '',
+    verifiedAt: fmtDate_(app.verifiedAt),
     needsAccessible: app.needsAccessible, meritScore: app.meritScore
   };
   // Asked here so the portal and the form give the same answer. A page that
@@ -524,16 +534,17 @@ function editability_(app, student) {
               'changed. Contact the hostel office if something is wrong.' };
   }
 
-  var idStatus = 'REQUIRED';
-  try {
-    if (student) idStatus = Identity.statusFor(student.studentId).status;
-  } catch (e) { /* no Identity tab yet - treat as not verified */ }
+  // One check now, not two. Aadhaar is no longer collected, so "both have
+  // passed" collapsed into "the office has accepted the evidence" - which is
+  // what verifyStatus records, and what closes the door.
+  var settled = app.verifyStatus === 'VERIFIED' ||
+                (!app.verifyStatus && String(app.docStatus) === 'VERIFIED');
 
-  if (idStatus === 'VERIFIED' && String(app.docStatus) === 'VERIFIED') {
+  if (settled) {
     return { editable: false,
-      reason: 'Your identity and your documents have both been verified, so your ' +
-              'application is now fixed as the office checked it. Contact the hostel ' +
-              'office if something still needs to change.' };
+      reason: 'Your documents have been checked and accepted, so your application ' +
+              'is now fixed as the office verified it. Contact the hostel office if ' +
+              'something still needs to change.' };
   }
   return { editable: true, reason: '' };
 }

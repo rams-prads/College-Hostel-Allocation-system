@@ -82,7 +82,7 @@ function paintWander() {
   var st = WANDER.status || {};
 
   if (!st.enabled) {
-    host.innerHTML = card(st.agent || 'Wander', emptyState('💬',
+    host.innerHTML = card(st.agent || 'Wander', emptyState('chat',
       (st.agent || 'Wander') + ' is not available yet',
       st.note || 'The assistant has not been set up on this deployment.'),
       { id: 'wanderCard', sub: 'Hostel assistant' });
@@ -97,7 +97,7 @@ function paintWander() {
             WANDER.turns.map(wanderTurn).join('') + '</div>';
   } else {
     body += '<div class="wander-log" id="wLog">' +
-      emptyState('💬', 'Ask about the hostel rules',
+      emptyState('chat', 'Ask about the hostel rules',
         st.isAdmin
           ? 'Answers come only from the brochures loaded into the rule book, with the passage cited.'
           : 'Answers come from the hostel brochure and your own application, with the rule cited.') +
