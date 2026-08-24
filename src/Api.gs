@@ -1115,12 +1115,29 @@ function apiGetGrievances() {
     var t = typeof g.autoTriage === 'string'
       ? (function () { try { return JSON.parse(g.autoTriage); } catch (e) { return null; } })()
       : g.autoTriage;
+    var answered = g.status === 'AUTO_ANSWERED';
     return {
       ticketId: g.ticketId, category: g.category, status: g.status,
       text: g.text,
-      headline: t ? t.headline : '',
-      body: t ? t.body : '',
-      findings: t ? t.findings : [],
+      // What a person did about it, which outranks whatever triage guessed at
+      // the time. Without this the student reads "it is due to be dealt with by
+      // the 31st" forever, however long ago a warden actually fixed it.
+      resolution: g.resolution || '',
+
+      // Triage text reaches the student ONLY when the system genuinely answered.
+      //
+      // An escalated ticket has not been answered by anyone yet, and filling the
+      // silence with a paragraph about how maintenance works reads as a reply
+      // while saying nothing - it restates the form back at the person who filled
+      // it in. They wrote "my fan is not working"; until a warden says something,
+      // the honest screen is their own words and a status.
+      //
+      // An auto-answered allocation dispute is the opposite case and keeps
+      // everything: the run was genuinely re-audited and there is a real answer,
+      // with the checks that back it.
+      headline: answered && t ? t.headline : '',
+      body: answered && t ? t.body : '',
+      findings: answered && t ? t.findings : [],
       ledgerRef: t ? t.ledgerRef : null,
       createdAt: fmtDate_(g.createdAt),
       slaDueAt: fmtDate_(g.slaDueAt)
