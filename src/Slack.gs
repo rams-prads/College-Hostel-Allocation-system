@@ -47,6 +47,42 @@ var Slack = (function () {
   }
 
   /**
+   * True when a warden may close a ticket from the channel.
+   *
+   * Separate from SLACK_ENABLED on purpose. Posting a notification and accepting
+   * a write back from the internet are different sizes of decision, and somebody
+   * who wants the first should not get the second by not having read far enough.
+   */
+  function actionsEnabled() {
+    try {
+      return String(Db.cfg('SLACK_ACTIONS_ENABLED', 'FALSE')).toUpperCase() === 'TRUE';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * The shared secret that stands in for Slack's signature.
+   *
+   * Slack signs every interaction with an X-Slack-Signature header, and the
+   * honest way to do this is to recompute that HMAC. Apps Script cannot: doPost
+   * hands over postData, parameter and queryString, and NO headers at all. There
+   * is no way to read the signature, so there is no way to check it.
+   *
+   * So the Request URL carries a long random secret in its query string, and
+   * only Slack's app configuration knows it. That is a bearer token rather than
+   * a signature: anyone who learns the URL can resolve tickets. It is stored
+   * where the webhook is stored, travels only over HTTPS to Slack, and can be
+   * rotated by changing one property and one field in the Slack app.
+   *
+   * Worth saying plainly rather than burying: this is the weakest link in the
+   * feature, and it is a platform limit rather than a choice.
+   */
+  function actionKey_() {
+    return PropertiesService.getScriptProperties().getProperty('SLACK_ACTION_KEY') || '';
+  }
+
+  /**
    * One HTTP call, and no retry.
    *
    * Gemini.fetch_ retries a 503 because a busy model is worth waiting for. A
@@ -121,6 +157,55 @@ var Slack = (function () {
   }
 
   /**
+   * The same message, with a button on it.
+   *
+   * text is still sent alongside and still carries everything: it is what Slack
+   * shows in a phone notification and in the channel list, and it is what a
+   * client that cannot render blocks falls back to. The blocks are an addition,
+   * never a replacement - which is also why _format stays the tested surface.
+   *
+   * The button is omitted for an AUTO_ANSWERED ticket. The system already
+   * answered that one and closed it; offering a warden a button that says
+   * "mark done" for work nobody did invites a click that means nothing.
+   */
+  function buildBlocks_(ticket, text, outcome) {
+    var blocks = [{
+      type: 'section',
+      text: { type: 'mrkdwn', text: text }
+    }];
+
+    var status = (outcome || {}).status;
+    if (actionsEnabled() && status && status !== 'AUTO_ANSWERED') {
+      blocks.push({
+        type: 'actions',
+        block_id: 'grievance_actions',
+        elements: [{
+          type: 'button',
+          action_id: 'grievance_done',
+          style: 'primary',
+          text: { type: 'plain_text', text: 'Mark done', emoji: false },
+          value: String((ticket || {}).ticketId || ''),
+          // One tap closes a resident's ticket and writes to the ledger. The
+          // confirm dialog costs a warden half a second and is the only thing
+          // standing between a mis-tap on a phone and a false record.
+          confirm: {
+            title: { type: 'plain_text', text: 'Mark this done?' },
+            text: {
+              type: 'mrkdwn',
+              text: 'The student will be told it is resolved, and your Slack ' +
+                    'name goes on the audit record.'
+            },
+            confirm: { type: 'plain_text', text: 'Mark done' },
+            deny: { type: 'plain_text', text: 'Cancel' }
+          }
+        }]
+      });
+    }
+
+    return blocks;
+  }
+
+  /**
    * Forward one ticket. Returns what happened; never throws, whatever happened.
    *
    * @return {{status: string, error: string}} SENT, SKIPPED or FAILED
@@ -135,8 +220,10 @@ var Slack = (function () {
         // webhookUrl_() throws from inside postToWebhook_, deliberately sharing
         // this catch with the network call: "not configured" and "not reachable"
         // both end as one FAILED row that names which of the two it was.
+        var text = formatGrievanceMessage_(ticket, student, residence, outcome);
         var r = postToWebhook_({
-          text: formatGrievanceMessage_(ticket, student, residence, outcome)
+          text: text,
+          blocks: buildBlocks_(ticket, text, outcome)
         });
         if (r.code >= 200 && r.code < 300) {
           status = 'SENT';
@@ -162,9 +249,100 @@ var Slack = (function () {
     return { status: status, error: error };
   }
 
+  /** A reply that only the warden who clicked can see. */
+  function ephemeral_(text) {
+    return { response_type: 'ephemeral', replace_original: false, text: text };
+  }
+
+  /**
+   * A warden pressed "Mark done".
+   *
+   * Returns the JSON Slack should render; never throws, because a thrown error
+   * here reaches a warden as a bare red "something went wrong" with nothing to
+   * act on, and leaves them unsure whether the ticket closed or not.
+   *
+   * Everything is checked before anything is written: the feature flag, the
+   * shared secret, the workspace, the payload shape, and the ticket itself.
+   *
+   * @param {Object} e the doPost event
+   */
+  function handleInteraction(e) {
+    try {
+      if (!actionsEnabled()) {
+        return ephemeral_('Closing tickets from Slack is switched off. ' +
+                          'Set SLACK_ACTIONS_ENABLED to TRUE in the Config tab.');
+      }
+
+      var key = actionKey_();
+      var given = ((e || {}).parameter || {}).k || '';
+      if (!key || given !== key) {
+        // Deliberately vague to whoever is knocking, precise in the ledger.
+        try {
+          Ledger.append('SLACK_ACTION_REJECTED', { reason: 'bad or missing key' }, 'system');
+        } catch (ignored) { /* never let logging be the thing that throws */ }
+        return ephemeral_('This button is not configured correctly.');
+      }
+
+      var payload = JSON.parse(((e || {}).parameter || {}).payload || '{}');
+
+      // A second workspace posting a well-formed payload at a leaked URL is the
+      // one attack the shared secret alone does not cover.
+      var wantTeam = PropertiesService.getScriptProperties().getProperty('SLACK_TEAM_ID');
+      if (wantTeam && ((payload.team || {}).id || '') !== wantTeam) {
+        return ephemeral_('This button is not configured correctly.');
+      }
+
+      var action = (payload.actions || [])[0] || {};
+      if (action.action_id !== 'grievance_done') return ephemeral_('Nothing to do.');
+
+      var ticketId = String(action.value || '');
+      var who = (payload.user || {}).username || (payload.user || {}).name || 'a warden';
+
+      var t = Db.byId('Grievances', ticketId);
+      if (!t) return ephemeral_('Ticket ' + ticketId + ' is no longer in the system.');
+
+      // Two wardens reading the same channel both tap it. The second tap must not
+      // overwrite the first one's name on the record, and must not tell them the
+      // click failed - it did not, the work is done either way.
+      if (t.status === 'RESOLVED' || t.status === 'CLOSED') {
+        return ephemeral_(ticketId + ' was already closed. ' +
+                          (t.resolution ? '(' + t.resolution + ')' : ''));
+      }
+
+      var note = 'Marked done in Slack by @' + who;
+      Grievance.resolve(ticketId, note, 'slack:' + who);
+
+      // Replace the original message rather than adding to the channel: the
+      // point is that the next warden scrolling past sees it handled and does
+      // not go looking, and that the button cannot be pressed a second time.
+      var kept = (payload.message || {}).blocks || [];
+      var blocks = kept.filter(function (b) { return b.block_id !== 'grievance_actions'; });
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: ':white_check_mark: *Done* — ' + escape_(note) }]
+      });
+
+      return {
+        replace_original: true,
+        text: ((payload.message || {}).text || ticketId) + '\n:white_check_mark: ' + note,
+        blocks: blocks
+      };
+    } catch (err) {
+      try {
+        Ledger.append('SLACK_ACTION_FAILED', { error: String(err && err.message || err) },
+          'system');
+      } catch (ignored) { /* as above */ }
+      return ephemeral_('That did not go through. The ticket is unchanged, and it ' +
+                        'can still be closed from the admin dashboard.');
+    }
+  }
+
   return {
     enabled: enabled,
+    actionsEnabled: actionsEnabled,
     notifyGrievance: notifyGrievance,
-    _format: formatGrievanceMessage_
+    handleInteraction: handleInteraction,
+    _format: formatGrievanceMessage_,
+    _blocks: buildBlocks_
   };
 })();

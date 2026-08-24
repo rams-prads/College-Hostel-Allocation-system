@@ -48,6 +48,34 @@ function doGet(e) {
   }
 }
 
+/**
+ * The only way into this project from outside a browser.
+ *
+ * Slack posts here when a warden presses a button on a grievance. Everything
+ * that decides whether to honour it lives in Slack.handleInteraction - the flag,
+ * the shared secret, the workspace, the ticket - because that is the file whose
+ * whole job is the outside world, and one place to audit is worth more than a
+ * check split across two.
+ *
+ * Slack gives up after three seconds and shows the warden a failure. There is no
+ * async escape in Apps Script - no way to acknowledge now and work after - so
+ * the handler stays deliberately short: one row read, one row written, one
+ * ledger entry. Anything slower belongs in the dashboard.
+ */
+function doPost(e) {
+  var out;
+  try {
+    out = Slack.handleInteraction(e);
+  } catch (err) {
+    // handleInteraction has its own catch; this one exists because a 500 from
+    // here would tell Slack to retry, and a retried resolve is a second name on
+    // the ledger for the same piece of work.
+    out = { response_type: 'ephemeral', text: 'That did not go through.' };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 function route_(e) {
   var page = (e && e.parameter && e.parameter.page) || 'home';
 
