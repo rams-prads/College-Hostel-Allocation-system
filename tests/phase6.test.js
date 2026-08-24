@@ -123,7 +123,13 @@ if (byCode.ROHAN) {
 
 section('Grievances reach the wardens on Slack');
 if (byCode.ARJUN) {
+  // A different fault per scenario, because raise() now collapses the same words
+  // from the same student inside two minutes into one ticket. Reusing one string
+  // here would test the de-duplicator four times and the Slack path once.
+  const wifi    = 'The wifi on my floor has been down since Monday morning.';
+  const fan     = 'The ceiling fan in my room has stopped working entirely.';
   const complaint = 'There has been no hot water in the washroom for three days.';
+  const mess    = 'The mess served cold food again this evening, third time.';
   const lastLog = () => {
     const rows = Db.readAll('AuditLog').filter(e => e.action === 'GRIEVANCE_SLACK_NOTIFIED');
     const e = rows[rows.length - 1];
@@ -132,7 +138,7 @@ if (byCode.ARJUN) {
   };
 
   UrlFetchApp._reset();
-  Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  Grievance.raise(byCode.ARJUN.appId, wifi, 'student');
   check('nothing leaves the machine while SLACK_ENABLED is FALSE',
     global.__fetches.length === 0, global.__fetches.length + ' calls');
   check('the skipped send is still on the record', lastLog().status === 'SKIPPED');
@@ -141,7 +147,7 @@ if (byCode.ARJUN) {
   // half-finished setup there is, and the one that must not lose a ticket.
   Db.setCfg('SLACK_ENABLED', 'TRUE');
   UrlFetchApp._reset();
-  const noUrl = Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  const noUrl = Grievance.raise(byCode.ARJUN.appId, fan, 'student');
   check('a ticket is raised anyway with no webhook configured', !!noUrl.ticketId);
   const missing = lastLog();
   check('the ledger names the property that is missing',
@@ -170,12 +176,36 @@ if (byCode.ARJUN) {
 
   UrlFetchApp._reset();
   global.__fetchQueue = [global.__fetchResponse(500, 'channel_not_found')];
-  const survived = Grievance.raise(byCode.ARJUN.appId, complaint, 'student');
+  const survived = Grievance.raise(byCode.ARJUN.appId, mess, 'student');
   check('a Slack outage does not stop a student reporting a fault',
     !!Db.byId('Grievances', survived.ticketId));
   const failed = lastLog();
   check('the failure is recorded with its cause',
     failed.status === 'FAILED' && failed.error.indexOf('500') > 0, failed.error);
+
+  // An impatient student taps "Report it" three times. The wardens' channel must
+  // show one complaint, not three, and the student must still be told their
+  // problem is logged rather than shown an error for something they did not do
+  // wrong. This is the case that actually happened in testing.
+  Db.setCfg('SLACK_ENABLED', 'TRUE');
+  UrlFetchApp._reset();
+  global.__fetchQueue = [global.__fetchResponse(200, 'ok'), global.__fetchResponse(200, 'ok'),
+                         global.__fetchResponse(200, 'ok')];
+  const impatient = 'The tap in the corner bathroom will not shut off at all.';
+  const first  = Grievance.raise(byCode.ARJUN.appId, impatient, 'student');
+  const second = Grievance.raise(byCode.ARJUN.appId, impatient, 'student');
+  const third  = Grievance.raise(byCode.ARJUN.appId, impatient, 'student');
+
+  check('three taps wake the wardens once', global.__fetches.length === 1,
+    global.__fetches.length + ' calls');
+  check('three taps make one ticket, not three',
+    second.ticketId === first.ticketId && third.ticketId === first.ticketId,
+    [first.ticketId, second.ticketId, third.ticketId].join(' '));
+  check('the student is still told their problem is logged', !!second.status);
+  check('a different fault from the same student still gets through',
+    Grievance.raise(byCode.ARJUN.appId,
+      'The window latch in my room is broken and will not close.',
+      'student').ticketId !== first.ticketId);
 
   Db.setCfg('SLACK_ENABLED', 'FALSE');
   UrlFetchApp._reset();

@@ -34,6 +34,15 @@
 
 var Grievance = (function () {
 
+  // How long the same words from the same student count as one complaint.
+  //
+  // Two minutes is chosen against the human behaviour, not the network: someone
+  // who taps "Report it" and sees nothing happen taps it again within seconds,
+  // and may reload and retype the same sentence a minute later. Someone with a
+  // genuinely different problem takes longer than that to write it down, and in
+  // any case writes different words - which this check requires.
+  var DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
+
   var KEYWORDS = [
     ['DOCUMENT', ['document', 'certificate', 'upload', 'verifi', 'scan', 'proof', 'admission letter', 'id card']],
     ['FEE',      ['fee', 'payment', 'refund', 'money', 'charge', 'paid', 'receipt']],
@@ -71,6 +80,27 @@ var Grievance = (function () {
     }
     var app = Db.byId('Applications', appId);
     if (!app) throw new Error('No such application.');
+
+    // Two taps on "Report it" are one complaint, not two.
+    //
+    // The portal disables the button now, but that only covers the tidy case: a
+    // slow network, a reload mid-submit, or the same student on a second device
+    // still lands the same words twice. Every duplicate that gets through wakes
+    // every warden in the channel, which is how a useful notification becomes
+    // one people learn to ignore.
+    //
+    // Handing back the existing ticket rather than refusing is deliberate. The
+    // student did nothing wrong and does not care which of their taps counted -
+    // they care that the problem is logged, and it is.
+    var body = String(text).trim();
+    var dupe = Db.rowsWhere('Grievances', 'appId', appId).filter(function (g) {
+      return String(g.text) === body &&
+             (new Date() - new Date(g.createdAt)) < DUPLICATE_WINDOW_MS;
+    })[0];
+    if (dupe) {
+      return Object.assign({ ticketId: dupe.ticketId, category: dupe.category },
+                           dupe.autoTriage || {});
+    }
 
     // A non-numeric or blank setting produced NaN here, and NaN days later
     // becomes an Invalid Date - which is written to the sheet as a value nothing
