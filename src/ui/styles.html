@@ -298,6 +298,24 @@
   .tile.good .n{color:var(--ok)}
   .tile.bad .n{color:var(--bad)}
 
+  /* A count that is also the way to see what it is counting.
+     Five numbers with nothing to click and nothing explaining them is a
+     scoreboard, and a scoreboard is not a tool - somebody reading "288" has to
+     work out for themselves what 288 of what, and whether it is their problem. */
+  .tiles.wide{grid-template-columns:repeat(auto-fit,minmax(196px,1fr))}
+  button.tile{
+    appearance:none;font:inherit;text-align:left;width:100%;cursor:pointer;
+    display:block;
+  }
+  button.tile:hover{border-color:var(--border-strong);background:var(--surface-2)}
+  button.tile[aria-current="true"]{
+    border-color:var(--amber);background:var(--amber-soft);
+  }
+  .tile .l{font-weight:650;color:var(--text-2);font-size:12.5px}
+  .tile .d{
+    font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.45;font-weight:400;
+  }
+
   /* =============================================================== table */
   table.grid{width:100%;border-collapse:collapse;font-size:13.5px}
   table.grid th{

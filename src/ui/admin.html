@@ -933,52 +933,113 @@
     loadVQueue();
   }
 
+  /**
+   * What is happening, in a sentence, and three numbers that can be pressed.
+   *
+   * It was five numbers in a row - waiting on you, waiting on the student,
+   * decided, oldest still waiting, read and settled automatically - with
+   * nothing saying what any of them counted or which of them was anybody's
+   * problem. "0d" is meaningless when nothing is waiting; a percentage with no
+   * denominator on screen is a number to be taken on trust.
+   *
+   * So: one plain sentence first, because there is only ever one thing an
+   * officer opening this tab needs to know. Then three counts, each of which is
+   * the button that shows you the applicants it counted - a number you can
+   * press stops being a statistic and becomes a way in. The age of the oldest
+   * case moved into the sentence, where it means something; the automation
+   * figure moved next to the buttons that produce it.
+   */
   function paintVStats(st) {
     var byState = st.byState || {};
+    var todo = byState.NEEDS_DECISION || 0;
+    var withStudent = byState.WAITING_ON_STUDENT || 0;
+    var done = byState.DONE || 0;
+    var flagged = V.counts && V.counts.FLAGGED ? V.counts.FLAGGED : 0;
     var gateOn = V.gate && V.gate.documents;
 
-    setHtml('vStats', card('', '<div class="tiles" style="margin:0 0 13px">' +
-      tile(byState.NEEDS_DECISION || 0, 'Waiting on you',
-           (byState.NEEDS_DECISION || 0) ? 'hi' : 'good') +
-      tile(byState.WAITING_ON_STUDENT || 0, 'Waiting on the student', '') +
-      tile(byState.DONE || 0, 'Decided', 'good') +
-      tile(st.oldestWaitingDays + 'd', 'Oldest still waiting',
-           st.oldestWaitingDays > 7 ? 'bad' : '') +
-      tile(st.settledByMachinePct + '%', 'Read and settled automatically', 'good') +
+    // The one sentence. Written for somebody who has just opened the tab and
+    // wants to know whether they can close it again.
+    var lede;
+    if (!todo) {
+      lede = '<strong>Nothing is waiting on you right now.</strong> ' +
+        (withStudent
+          ? withStudent + ' applicant' + (withStudent === 1 ? ' has' : 's have') +
+            ' still to send us something.'
+          : 'Every application has been dealt with.');
+    } else {
+      lede = '<strong>' + todo + ' applicant' + (todo === 1 ? '' : 's') +
+        ' need' + (todo === 1 ? 's' : '') + ' a decision from you.</strong>' +
+        (st.oldestWaitingDays
+          ? ' The one who has waited longest has been waiting ' +
+            st.oldestWaitingDays + ' day' + (st.oldestWaitingDays === 1 ? '' : 's') + '.'
+          : '') +
+        (flagged ? ' ' + flagged + ' of them ' + (flagged === 1 ? 'is' : 'are') +
+                   ' flagged for a closer look.' : '');
+    }
+
+    setHtml('vStats', card('',
+      '<p style="margin:0 0 14px;font-size:14.5px;line-height:1.55">' + lede + '</p>' +
+
+      '<div class="tiles wide" style="margin:0 0 14px">' +
+        countTile(todo, 'Waiting on you',
+          'Everything we asked for has arrived. You decide.',
+          'NEEDS_DECISION', todo ? 'hi' : 'good') +
+        countTile(withStudent, 'Waiting on students',
+          'We are still waiting for a document from them.',
+          'WAITING_ON_STUDENT', '') +
+        countTile(done, 'Finished',
+          'Checked and closed. Nothing more to do.',
+          'DONE', 'good') +
       '</div>' +
+
       // The single setting that decides whether any of this work gates
       // anything. On the screen where the work happens, not three tabs away.
       '<div class="status ' + (gateOn ? 'good' : 'warn') + '">' +
         '<div class="sic">' + (gateOn ? '&#10003;' : '!') + '</div><div>' +
         '<div class="t">' + (gateOn
-          ? 'A room cannot be allotted until verification passes'
-          : 'Verification does not currently gate allocation') + '</div>' +
+          ? 'A student cannot be given a room until you have checked them'
+          : 'Students can be given rooms before you have checked them') + '</div>' +
         '<div class="s">' + (gateOn
-          ? 'Applicants who have not been verified are held out of the allocation.'
-          : 'The allocation will run over unverified applicants and mark their seats ' +
-            'provisional. That is the right setting early in a session and the wrong ' +
-            'one once verification has caught up.') + '</div></div>' +
+          ? 'Anyone you have not verified is left out when the allocation runs.'
+          : 'The allocation will give rooms to unchecked applicants and mark those ' +
+            'seats provisional. That is usually right early on, when hardly anybody ' +
+            'has been checked yet, and wrong once you have caught up.') + '</div></div>' +
         '<span class="grow" style="flex:1"></span>' +
         '<button class="btn ghost sm" onclick="setVGate(' + (gateOn ? 'false' : 'true') +
-        ')">' + (gateOn ? 'Stop requiring it' : 'Require it') + '</button>' +
+        ')">' + (gateOn ? 'Allow it again' : 'Require checking first') + '</button>' +
       '</div>' +
       '<div id="vGateMsg"></div>' +
-      // The two actions that keep a person off most of the pile, beside the
-      // numbers that say how much of it they took. Offered only when there is
-      // something for them to do.
+
+      // The two actions that keep a person off most of the pile, with the
+      // figure that says how much of it they took - beside them, where it is
+      // about something, rather than alone in a tile as a bare percentage.
       ((st.unread || st.clearable)
         ? '<div class="btn-row" style="margin-top:13px">' +
             (st.unread
               ? '<button class="btn" onclick="runScans()">Read ' + st.unread +
-                ' unread document' + (st.unread === 1 ? '' : 's') + '</button>' : '') +
+                ' new document' + (st.unread === 1 ? '' : 's') + '</button>' : '') +
             (st.clearable
-              ? '<button class="btn ghost" onclick="autoClear()">Clear the ' +
-                st.clearable + ' the reading settled</button>' : '') +
-            '<span class="small muted">Reading is automatic; clearing is not, and ' +
-            'anything the applicant is flagged on is never cleared this way.</span>' +
+              ? '<button class="btn ghost" onclick="autoClear()">Accept the ' +
+                st.clearable + ' that already match</button>' : '') +
           '</div>'
         : '') +
+      (st.documents
+        ? '<p class="small muted" style="margin:11px 0 0">The system has read ' +
+          esc(st.read) + ' of the ' + esc(st.documents) + ' documents students have ' +
+          'uploaded, and ' + esc(st.settledByMachinePct) + '% of them matched what the ' +
+          'student declared &mdash; so nobody had to open those by hand.</p>'
+        : '') +
       '<div id="vBulkMsg"></div>'));
+  }
+
+  /** A number, what it counts, and the button that shows you them. */
+  function countTile(n, label, desc, filter, kind) {
+    return '<button type="button" class="tile ' + (kind || '') +
+      '" aria-current="' + (V.filter === filter) + '" ' +
+      'onclick="setVFilter(&quot;' + filter + '&quot;)">' +
+      '<span class="n">' + esc(n) + '</span>' +
+      '<span class="l">' + esc(label) + '</span>' +
+      '<span class="d">' + esc(desc) + '</span></button>';
   }
 
   function setVGate(on) {

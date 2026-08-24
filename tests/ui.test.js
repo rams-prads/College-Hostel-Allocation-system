@@ -614,14 +614,45 @@ const vApp = Db.readAll('Applications').find(a => a.status !== 'DRAFT');
 
 r = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
 
-check('it says how much is waiting on a person', r.screen.indexOf('Waiting on you') > 0);
-check('and how old the oldest of it is', r.screen.indexOf('Oldest still waiting') > 0,
-  'a queue with no age on it is a queue nobody can be held to');
-check('and how much the machine took off the pile',
-  r.screen.indexOf('Read and settled automatically') > 0);
+check('it opens with a sentence, not a scoreboard', (() => {
+  // Five bare numbers made somebody who had just opened the tab work out for
+  // themselves what each counted and which of them was their problem.
+  return /Nothing is waiting on you right now|needs? a decision from you/.test(r.screen);
+})(), 'there is only ever one thing an officer opening this tab needs to know');
 
-check('it says plainly whether verification gates allocation at all', (() => {
-  return /cannot be allotted until verification passes|does not currently gate allocation/
+check('it says how much is waiting on a person', r.screen.indexOf('Waiting on you') > 0);
+check('and each number says what it counts', (() => {
+  return r.screen.indexOf('Everything we asked for has arrived') > 0 &&
+         r.screen.indexOf('We are still waiting for a document') > 0;
+})(), 'a count with no explanation is a statistic, not a tool');
+
+check('and each number is the way to see what it counted', (() => {
+  return /class="tile[^"]*"[^>]*onclick="setVFilter/.test(r.screen);
+})(), 'a number you can press stops being a scoreboard');
+
+check('the age of the oldest case is stated where it means something', (() => {
+  // In the sentence, not in a tile of its own: "0d" beside nothing waiting is
+  // a number about nothing. Put back afterwards - a test that leaves the
+  // fixture aged breaks the sections after it for reasons of its own making.
+  const was = Db.byId('Applications', vApp.appId).submittedAt;
+  Db.update('Applications', vApp.appId,
+    { submittedAt: new Date(Date.now() - 9 * 86400000) });
+  Db.invalidate('Applications');
+
+  const busy = renderPage('admin.html', 'admin@ipu.ac.in', 'goTab("verification");');
+
+  Db.update('Applications', vApp.appId, { submittedAt: was });
+  Db.invalidate('Applications');
+  return /has been waiting \d+ days?/.test(busy.screen);
+})(), 'a queue with no age on it is a queue nobody can be held to');
+
+check('and the automation figure is given a denominator', (() => {
+  return /documents students have uploaded/.test(r.screen) &&
+         /matched what the student declared/.test(r.screen);
+})(), 'a percentage with nothing to divide by is a number taken on trust');
+
+check('it says plainly whether checking gates allocation at all', (() => {
+  return /cannot be given a room until you have checked them|given rooms before you have checked them/
     .test(r.screen);
 })(), 'the single setting that decides whether any of this work means anything, on the ' +
       'screen where the work happens rather than three tabs away');
